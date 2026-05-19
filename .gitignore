@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Upload files
+uploads/
+LexiBridge-AI-uploads/
+LexiBridge-AI-data/
+
+# Flask instance folder
+instance/
+
+# VS Code local settings
+.vscode/
+
+# Logs
+*.log
+
+# System files
+.DS_Store
+Thumbs.db

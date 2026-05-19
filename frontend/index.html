@@ -1,0 +1,3170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智桥术语云 LexiBridge AI</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #122033;
+      --muted: #667085;
+      --line: #e6eaf0;
+      --primary: #4169e1;
+      --primary-dark: #274bb7;
+      --soft-blue: #eef3ff;
+      --green: #22a06b;
+      --green-bg: #e9f8f0;
+      --yellow: #b7791f;
+      --yellow-bg: #fff6d6;
+      --red: #c0392b;
+      --red-bg: #fff0ee;
+      --shadow: 0 16px 40px rgba(16, 24, 40, 0.08);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .app-shell {
+      min-height: 100vh;
+    }
+
+    .topbar {
+      height: 72px;
+      background: rgba(255,255,255,0.92);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 34px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 900;
+      font-size: 22px;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #4169e1, #78a6ff);
+      color: white;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      box-shadow: 0 12px 24px rgba(65,105,225,0.28);
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+      font-weight: 600;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge {
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: var(--soft-blue);
+      color: var(--primary-dark);
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .layout {
+      display: flex;
+      min-height: calc(100vh - 72px);
+    }
+
+    .sidebar {
+      width: 260px;
+      padding: 24px;
+      background: #ffffff;
+      border-right: 1px solid var(--line);
+    }
+
+    .nav-title {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      margin: 8px 0 14px;
+    }
+
+    .nav-btn {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      border-radius: 16px;
+      padding: 14px 16px;
+      text-align: left;
+      margin-bottom: 8px;
+      cursor: pointer;
+      font-weight: 800;
+      color: #31415b;
+    }
+
+    .nav-btn:hover {
+      background: #f2f5fb;
+    }
+
+    .nav-btn.active {
+      background: var(--soft-blue);
+      color: var(--primary-dark);
+    }
+
+    .main {
+      flex: 1;
+      padding: 34px;
+      overflow: auto;
+    }
+
+    .hero {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    .login-page {
+      min-height: calc(100vh - 72px);
+      display: grid;
+      place-items: center;
+      padding: 34px;
+    }
+
+    .login-card {
+      width: min(980px, 100%);
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 32px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .login-left {
+      padding: 54px;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(65,105,225,0.14), transparent 34%),
+        linear-gradient(135deg, #ffffff, #eef3ff);
+    }
+
+    .login-left h1 {
+      margin: 0 0 16px;
+      font-size: 42px;
+      line-height: 1.12;
+    }
+
+    .login-left p {
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.8;
+      margin: 0;
+    }
+
+    .feature-list {
+      margin-top: 26px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .feature {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.78);
+      border-radius: 16px;
+      font-weight: 800;
+    }
+
+    .login-right {
+      padding: 46px;
+    }
+
+    .role-grid {
+      display: grid;
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .role-card {
+      border: 2px solid var(--line);
+      background: white;
+      border-radius: 20px;
+      padding: 22px;
+      cursor: pointer;
+      transition: 0.18s ease;
+    }
+
+    .role-card:hover {
+      border-color: #b7c6ff;
+      transform: translateY(-2px);
+    }
+
+    .role-card.active {
+      border-color: var(--primary);
+      background: var(--soft-blue);
+    }
+
+    .role-card h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    .role-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    .page-head h1 {
+      margin: 0 0 8px;
+      font-size: 34px;
+    }
+
+    .page-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .stat .num {
+      font-size: 34px;
+      font-weight: 900;
+      color: var(--primary);
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 8px;
+      color: #344054;
+      font-weight: 800;
+    }
+
+    .input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 13px 14px;
+      background: white;
+      outline: none;
+    }
+
+    .input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #9cb3ff;
+      box-shadow: 0 0 0 4px rgba(65,105,225,0.10);
+    }
+
+    .upload-box {
+      border: 2px dashed #bdc8e8;
+      border-radius: 22px;
+      background: #f8faff;
+      padding: 28px;
+      text-align: center;
+      margin: 14px 0;
+    }
+
+    .upload-box strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 18px;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 15px;
+      padding: 13px 18px;
+      cursor: pointer;
+      font-weight: 900;
+      background: #eef1f6;
+      color: #122033;
+      transition: 0.16s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      filter: brightness(0.98);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 12px 24px rgba(65,105,225,0.22);
+    }
+
+    .btn-danger {
+      background: var(--red-bg);
+      color: var(--red);
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.7;
+      background: #f8fafc;
+      padding: 18px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      max-height: 320px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: white;
+    }
+
+    table {
+      width: 100%;
+      min-width: 980px;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f8fafc;
+      color: #344054;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    td {
+      font-size: 14px;
+    }
+
+    .term {
+      font-weight: 900;
+      color: #101828;
+    }
+
+    .cn-term, .meaning {
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .pending {
+      background: var(--yellow-bg);
+      color: var(--yellow);
+    }
+
+    .approved {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .action-mini {
+      border: 0;
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 900;
+      margin: 2px 4px 2px 0;
+      background: #eef1f6;
+    }
+
+    .action-mini.good {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .action-mini.danger {
+      background: var(--red-bg);
+      color: var(--red);
+    }
+
+    .small-input {
+      width: 190px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .explain-input {
+      width: 360px;
+      min-height: 42px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      resize: vertical;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 180px 200px 160px 1fr 110px 160px;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .term-card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+
+    .term-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      margin-bottom: 14px;
+    }
+
+    .term-card h3 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      letter-spacing: 0.01em;
+    }
+
+    .term-card p {
+      margin: 12px 0;
+      line-height: 1.8;
+    }
+    .term-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.term-meta {
+  display: inline-block;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.term-section {
+  margin-top: 18px;
+}
+
+.term-section-title {
+  margin-bottom: 8px;
+  color: #344054;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.term-explanation {
+  padding: 14px 16px;
+  background: #fbfcff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  line-height: 1.8;
+}
+.study-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.study-btn {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: #344054;
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.study-btn:hover {
+  background: #f8fafc;
+}
+.progress-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 20px;
+}
+
+.progress-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 20px rgba(16, 24, 40, 0.05);
+}
+
+.progress-card .progress-num {
+  font-size: 24px;
+  font-weight: 900;
+  color: var(--primary);
+  margin-bottom: 4px;
+}
+
+.progress-card .progress-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.study-btn.active {
+  background: var(--soft-blue);
+  color: var(--primary-dark);
+  border-color: #b7c6ff;
+}
+.feedback-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 20px;
+}
+
+.feedback-modal-mask.show {
+  display: flex;
+}
+
+.feedback-modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: 22px;
+  padding: 24px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.feedback-modal h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.feedback-modal .modal-term {
+  margin-bottom: 16px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.feedback-modal textarea,
+.feedback-modal select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 15px;
+  outline: none;
+  margin-top: 8px;
+}
+
+.feedback-modal textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.feedback-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.feedback-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.feedback-modal::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.feedback-modal::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 999px;
+}
+
+    .context {
+      margin-top: 12px;
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-left: 4px solid var(--primary);
+      border-radius: 12px;
+      color: #475467;
+      line-height: 1.7;
+    }
+    .context-toggle {
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-weight: 900;
+  cursor: pointer;
+  padding: 0;
+}
+
+.context-toggle:hover {
+  text-decoration: underline;
+}
+
+    .toast {
+      position: fixed;
+      right: 28px;
+      bottom: 28px;
+      padding: 14px 18px;
+      border-radius: 16px;
+      background: #111827;
+      color: white;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.20);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: 0.2s ease;
+      z-index: 100;
+      max-width: 460px;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .section-title {
+      margin: 26px 0 12px;
+      font-size: 22px;
+    }
+
+    @media (max-width: 900px) {
+      .login-card {
+        grid-template-columns: 1fr;
+      }
+
+      .layout {
+        display: block;
+      }
+
+      .sidebar {
+        width: 100%;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .grid-2, .grid-3, .form-row, .toolbar {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      .topbar,
+      .sidebar,
+      .btn,
+      .toolbar,
+      .toast,
+      .student-actions {
+        display: none !important;
+      }
+
+      body {
+        background: white;
+      }
+
+      .main {
+        padding: 0;
+      }
+
+      .term-card {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">L</div>
+        <div>
+          <div>智桥术语云</div>
+          <div class="brand-sub">LexiBridge AI Terminology Standardization Platform</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="roleBadge" class="badge hidden">未登录</span>
+        <button id="logoutBtn" class="btn hidden" onclick="logout()">退出</button>
+      </div>
+    </header>
+
+    <section id="loginPage" class="login-page">
+      <div class="login-card">
+        <div class="login-left">
+          <h1>面向中外合作办学的 AI 专业词汇标准化平台</h1>
+          <p>
+            该原型采用“系统候选抽取 + 教师审核确认 + 学生端发布”的流程，
+            用于解决英文课程资料中专业术语翻译不统一、不准确、难以沉淀的问题。
+          </p>
+          <div class="feature-list">
+            <div class="feature">上传 PDF / DOCX / PPTX 并解析文本</div>
+            <div class="feature">自动抽取候选英文术语，不伪造专业译名</div>
+            <div class="feature">教师审核后发布给学生端查看</div>
+          </div>
+        </div>
+
+        <div class="login-right">
+          <h2>选择端口</h2>
+          <p class="muted">当前版本为 MVP 原型，角色切换为前端模拟，后续可接入真实登录系统。</p>
+
+          <div class="role-grid">
+            <div id="teacherRole" class="role-card active" onclick="selectRole('teacher')">
+              <h3>教师端</h3>
+              <p>上传课程资料、审核候选术语、删除错误术语。</p>
+            </div>
+            <div id="studentRole" class="role-card" onclick="selectRole('student')">
+              <h3>学生端</h3>
+              <p>查看教师审核通过的课程词汇表。</p>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="width:100%;" onclick="login()">进入系统</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="systemPage" class="layout hidden">
+      <aside class="sidebar">
+        <div class="nav-title">功能导航</div>
+        <button class="nav-btn teacher-only active" onclick="openPage('overview')">数据概览</button>
+        <button class="nav-btn teacher-only" onclick="openPage('upload')">教师上传与审核</button>
+        <button class="nav-btn teacher-only" onclick="openPage('knowledge')">课程知识库</button>
+        <button class="nav-btn teacher-only" onclick="openPage('feedback')">学生反馈</button>
+        <button class="nav-btn student-only" onclick="openPage('glossary')">课程词汇表</button>
+      </aside>
+
+      <main class="main">
+        <div class="hero">
+          <section id="overviewPage" class="page active teacher-only">
+            <div class="page-head">
+              <div>
+                <h1>教师端控制台</h1>
+                <p>当前版本聚焦 MVP 闭环：上传、解析、候选抽取、审核、发布。</p>
+              </div>
+              <button class="btn" onclick="checkBackend()">测试后端连接</button>
+            </div>
+
+            <div class="grid grid-3">
+              <div class="card stat">
+                <div>
+                  <div class="label">待审核候选术语</div>
+                  <div id="pendingCount" class="num">--</div>
+                </div>
+                <span class="status pending">Pending</span>
+              </div>
+              <div class="card stat">
+                <div>
+                  <div class="label">已审核发布术语</div>
+                  <div id="approvedCount" class="num">--</div>
+                </div>
+                <span class="status approved">Approved</span>
+              </div>
+              <div class="card stat">
+                <div>
+                  <div class="label">当前后端状态</div>
+                  <div id="backendStatus" class="num" style="font-size:24px;">未检测</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top:18px;">
+              <h2>当前系统定位</h2>
+              <p class="muted" style="line-height:1.9;">
+                当前版本不是完整 AI 翻译系统，而是教师审核型术语标准化平台原型。
+                它不会伪造中文专业译名；系统只做候选术语抽取，最终中文译名和专业解释由教师审核确认。
+                后续可在后端预留接口中接入 AI API 和 RAG 知识库。
+              </p>
+            </div>
+          </section>
+
+          <section id="uploadPage" class="page teacher-only">
+            <div class="page-head">
+              <div>
+                <h1>教师上传与术语审核</h1>
+                <p>上传课程资料后，系统会解析文本并抽取候选英文术语。</p>
+              </div>
+              <div class="btn-row">
+                <button class="btn" onclick="loadPendingTermsFromDB()">从数据库读取候选术语</button>
+                <button class="btn btn-primary" onclick="batchApproveSelectedTerms()">批量审核选中</button>
+                <button class="btn btn-danger" onclick="clearPendingTerms()">清空当前章节待审核</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="form-row">
+                <div class="field">
+                  <label>课程</label>
+                  <select id="courseInput">
+                    <option>Data Structures and Algorithms</option>
+                    <option>Electronic System Fundamentals</option>
+                    <option>Basic Physics I</option>
+                    <option>Advanced Mathematics</option>
+                    <option>Introduction to Computing</option>
+                    <option>Telecommunications Engineering</option>
+                    <option>Management</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>章节</label>
+                  <input id="chapterInput" class="input" value="" placeholder="例如：Chapter 1.3 - Kinematics" />
+                </div>
+              </div>
+
+              <div class="upload-box">
+                <strong>上传课程资料</strong>
+                <p class="muted">支持 PDF、DOCX、PPTX。当前版本仅抽取候选术语，不自动生成正式译名。</p>
+                <input id="fileInput" type="file" accept=".pdf,.docx,.pptx" />
+              </div>
+
+              <div class="btn-row">
+                <button class="btn btn-primary" onclick="uploadAndExtract()">开始 AI 术语抽取</button>
+                <button class="btn" onclick="loadPendingTermsFromDB()">从数据库读取候选术语</button>
+              </div>
+            </div>
+
+            <h2 class="section-title">文件解析预览</h2>
+            <pre id="textPreview">暂无解析内容</pre>
+
+            <h2 class="section-title">候选术语审核表</h2>
+            <p class="muted">请教师删除明显错误候选词，并为有效术语填写中文译名和专业解释后确认。</p>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>
+                     <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                      <input 
+                       type="checkbox" 
+                       id="selectAllTerms" 
+                       onclick="toggleAllTermChecks(this.checked)" 
+                      />
+                      全选
+                    </label>
+                   </th>
+                    <th>英文候选术语</th>
+                    <th>中文译名</th>
+                    <th>专业解释</th>
+                    <th>置信度</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="extractedTermsTable">
+                  <tr>
+                    <td colspan="7">暂无候选术语</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section id="knowledgePage" class="page teacher-only">
+  <div class="page-head">
+    <div>
+      <h1>课程知识库管理</h1>
+      <p>上传中文教材、中文课件或中文参考资料，为后续 AI 标准术语翻译提供依据。</p>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn" onclick="loadKnowledgeDocuments()">刷新知识库列表</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="form-row">
+      <div class="field">
+        <label>课程</label>
+        <select id="knowledgeCourseInput">
+          <option>Data Structures and Algorithms</option>
+          <option>Electronic System Fundamentals</option>
+          <option>Basic Physics I</option>
+          <option>Advanced Mathematics</option>
+          <option>Introduction to Computing</option>
+          <option>Telecommunications Engineering</option>
+          <option>Management</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>资料标题</label>
+        <input 
+          id="knowledgeTitleInput" 
+          class="input" 
+          placeholder="例如：高等数学中文教材 第七章 级数"
+        />
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label>资料语言</label>
+        <select id="knowledgeLanguageInput">
+          <option value="zh">中文资料</option>
+          <option value="en">英文资料</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>资料类型</label>
+        <select id="knowledgeSourceTypeInput">
+          <option>中文教材或中文课件</option>
+          <option>教师上传资料</option>
+          <option>课程讲义</option>
+          <option>术语标准资料</option>
+          <option>其他参考资料</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="upload-box">
+      <strong>上传知识库资料</strong>
+      <p class="muted">支持 PDF、DOCX、PPTX。建议优先上传中文教材、中文课件或教师认可的中文资料。</p>
+      <input id="knowledgeFileInput" type="file" accept=".pdf,.docx,.pptx" />
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="uploadKnowledgeDocument()">上传到课程知识库</button>
+    </div>
+  </div>
+
+  <h2 class="section-title">知识库检索测试</h2>
+
+<div class="card" style="margin-bottom:18px;">
+  <div class="form-row">
+    <div class="field">
+      <label>检索课程</label>
+      <select id="knowledgeSearchCourse">
+        <option value="">全部课程</option>
+        <option>Data Structures and Algorithms</option>
+        <option>Electronic System Fundamentals</option>
+        <option>Basic Physics I</option>
+        <option>Advanced Mathematics</option>
+        <option>Introduction to Computing</option>
+        <option>Telecommunications Engineering</option>
+        <option>Management</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>检索关键词</label>
+      <input 
+        id="knowledgeSearchInput" 
+        class="input" 
+        placeholder="例如：收敛 / 比值审敛法 / Ratio Test / Convergence"
+      />
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="searchKnowledgeChunks()">检索知识库</button>
+  </div>
+</div>
+
+<div id="knowledgeSearchResults">
+  <div class="card">
+    <p class="muted">暂无检索结果。请输入关键词后进行检索。</p>
+  </div>
+</div>
+
+  <h2 class="section-title">知识库文档列表</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>文档 ID</th>
+          <th>标题</th>
+          <th>课程</th>
+          <th>文件类型</th>
+          <th>语言</th>
+          <th>资料类型</th>
+          <th>文本长度</th>
+          <th>知识片段数</th>
+          <th>上传时间</th>
+        </tr>
+      </thead>
+
+      <tbody id="knowledgeDocumentsTable">
+        <tr>
+          <td colspan="9">暂无知识库文档</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="section-title">解析预览</h2>
+  <pre id="knowledgePreview">暂无知识库解析预览</pre>
+</section>
+
+          <section id="feedbackPage" class="page teacher-only">
+           <div class="page-head">
+            <div>
+              <h1>学生反馈管理</h1>
+              <p>查看学生对已审核术语提出的反馈问题，帮助教师持续修正术语库。</p>
+            </div>
+
+          <div class="btn-row">
+      <select id="feedbackStatusFilter" class="input" style="width:180px;" onchange="loadFeedbackFromDB()">
+        <option value="">全部反馈</option>
+        <option value="open">待处理</option>
+        <option value="resolved">已处理</option>
+      </select>
+
+      <button class="btn" onclick="loadFeedbackFromDB()">刷新反馈</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <p class="muted" style="line-height:1.8; margin:0;">
+      当前页面用于查看学生提交的术语问题反馈。现阶段只支持查看反馈；
+      后续将增加“标记已处理”“跳转修改术语”“反馈关闭”等功能。
+    </p>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>反馈 ID</th>
+          <th>术语</th>
+          <th>中文译名</th>
+          <th>课程 / 章节</th>
+          <th>反馈类型</th>
+          <th>反馈说明</th>
+          <th>状态</th>
+          <th>提交时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+
+      <tbody id="feedbackTableBody">
+        <tr>
+          <td colspan="9">暂无学生反馈</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+          <section id="glossaryPage" class="page student-only">
+            <div class="page-head">
+              <div>
+                <h1>学生端课程词汇表</h1>
+                <p>只显示教师审核通过的专业术语。</p>
+              </div>
+              <div class="btn-row student-actions">
+                <button class="btn btn-primary" onclick="window.print()">导出 / 打印 PDF</button>
+                <button class="btn" onclick="loadApprovedGlossaryFromDB()">从数据库读取已审核词汇表</button>
+              </div>
+            </div>
+
+            <div class="toolbar student-actions">
+  <select id="glossaryCourseFilter" onchange="updateStudentChapterOptions(); renderApprovedGlossary(currentGlossaryTerms)">
+    <option value="">全部课程</option>
+  </select>
+
+  <select id="glossaryChapterFilter" onchange="renderApprovedGlossary(currentGlossaryTerms)">
+    <option value="">全部章节</option>
+  </select>
+  <select id="studyStateFilter" onchange="renderApprovedGlossary(currentGlossaryTerms)">
+  <option value="">全部状态</option>
+  <option value="favorite">只看收藏</option>
+  <option value="unmastered">只看未掌握</option>
+  <option value="mastered">只看已掌握</option>
+</select>
+
+  <input 
+    id="glossarySearch" 
+    class="input" 
+    placeholder="输入至少 2 个字符搜索，例如 velocity / 速度"
+    oninput="renderApprovedGlossary(currentGlossaryTerms)" 
+  />
+
+  <button class="btn" onclick="loadApprovedGlossaryFromDB()">刷新</button>
+
+  <button class="btn secondary" onclick="exportCurrentGlossary()">导出当前词汇表</button>
+</div>
+
+<div class="btn-row student-actions" style="margin: -4px 0 18px;">
+  <button class="btn secondary" onclick="exportGlossaryByState('favorite')">
+    导出收藏术语
+  </button>
+
+  <button class="btn secondary" onclick="exportGlossaryByState('unmastered')">
+    导出未掌握术语
+  </button>
+
+  <button class="btn secondary" onclick="exportGlossaryByState('mastered')">
+    导出已掌握术语
+  </button>
+</div>
+   
+<div id="searchHint" class="muted student-actions" style="margin: -6px 0 18px; font-size: 14px; display: none;">
+  搜索词至少输入 2 个字符后生效。单个字母不会触发筛选，避免出现大量无关结果。
+</div>
+<div id="glossaryResultInfo" class="muted student-actions" style="margin: -6px 0 18px; font-size: 14px;">
+  当前显示 0 条术语
+</div>
+<div id="studentProgressStats" class="progress-grid student-actions">
+  <div class="progress-card">
+    <div id="statTotalTerms" class="progress-num">0</div>
+    <div class="progress-label">当前范围术语</div>
+  </div>
+
+  <div class="progress-card">
+    <div id="statFavoriteTerms" class="progress-num">0</div>
+    <div class="progress-label">已收藏</div>
+  </div>
+
+  <div class="progress-card">
+    <div id="statMasteredTerms" class="progress-num">0</div>
+    <div class="progress-label">已掌握</div>
+  </div>
+
+  <div class="progress-card">
+    <div id="statUnmasteredTerms" class="progress-num">0</div>
+    <div class="progress-label">未掌握</div>
+  </div>
+
+  <div class="progress-card">
+    <div id="statUnmarkedTerms" class="progress-num">0</div>
+    <div class="progress-label">未标记</div>
+  </div>
+</div>
+
+            <div id="glossaryCards">
+              <div class="card">
+                <p>暂无已审核术语。请先在教师端审核术语。</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <div id="toast" class="toast">提示</div>
+
+  <div id="feedbackModalMask" class="feedback-modal-mask">
+  <div class="feedback-modal">
+    <h3>反馈术语问题</h3>
+
+    <div id="feedbackTermInfo" class="modal-term">
+      当前术语：-
+    </div>
+
+    <label>
+      反馈类型
+      <select id="feedbackType">
+        <option value="中文译名可能不准确">中文译名可能不准确</option>
+        <option value="专业解释不清楚">专业解释不清楚</option>
+        <option value="原文上下文不匹配">原文上下文不匹配</option>
+        <option value="术语不应出现在本章">术语不应出现在本章</option>
+        <option value="其他问题">其他问题</option>
+      </select>
+    </label>
+
+    <label style="display:block; margin-top: 14px;">
+      反馈说明
+      <textarea 
+        id="feedbackContent" 
+        placeholder="请说明你认为哪里有问题，例如：这个译名和课堂 PPT 中的中文表达不一致。"
+      ></textarea>
+    </label>
+
+    <div class="feedback-modal-actions">
+      <button class="btn secondary" onclick="closeFeedbackModal()">取消</button>
+      <button class="btn" onclick="submitTermFeedback()">提交反馈</button>
+    </div>
+  </div>
+</div>
+
+<div id="termEditModalMask" class="feedback-modal-mask">
+  <div class="feedback-modal">
+    <h3>根据学生反馈修改术语</h3>
+
+    <div id="termEditInfo" class="modal-term">
+      当前术语：-
+    </div>
+
+    <label>
+      中文译名
+      <input 
+        id="termEditChinese" 
+        class="input" 
+        placeholder="请输入修正后的中文译名"
+        style="margin-top:8px;"
+      />
+    </label>
+
+    <label style="display:block; margin-top: 14px;">
+      专业解释
+      <textarea 
+        id="termEditExplanation" 
+        placeholder="请输入修正后的专业解释"
+      ></textarea>
+    </label>
+
+    <label style="display:flex; align-items:center; gap:8px; margin-top:14px; color:var(--muted); font-weight:800;">
+      <input id="termEditResolveFeedback" type="checkbox" checked />
+      保存后同时将该反馈标记为已处理
+    </label>
+
+    <div class="feedback-modal-actions">
+      <button class="btn secondary" onclick="closeTermEditModal()">取消</button>
+      <button class="btn" onclick="submitTermEdit()">保存修改</button>
+    </div>
+  </div>
+</div>
+
+<div id="knowledgeEvidenceModalMask" class="feedback-modal-mask">
+  <div class="feedback-modal" style="width:min(860px, 100%);">
+    <h3>知识库依据检索</h3>
+
+    <div id="knowledgeEvidenceTermInfo" class="modal-term">
+      当前术语：-
+    </div>
+
+    <div class="btn-row" style="margin-bottom:14px;">
+      <input 
+        id="knowledgeEvidenceKeyword" 
+        class="input" 
+        placeholder="可手动输入中文或英文关键词，例如 收敛 / Ratio Test"
+        style="flex:1;"
+      />
+      <button class="btn btn-primary" onclick="searchKnowledgeEvidenceManually()">重新检索</button>
+    </div>
+
+    <div id="knowledgeEvidenceResults" style="max-height: 58vh; overflow-y: auto; padding-right: 6px;">
+      <div class="card">
+        <p class="muted">暂无知识库检索结果。</p>
+      </div>
+    </div>
+
+    <div class="feedback-modal-actions">
+      <button class="btn secondary" onclick="closeKnowledgeEvidenceModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:5000";
+
+    let currentRole = "teacher";
+    let currentGlossaryTerms = [];
+    let currentRenderedGlossaryTerms = [];
+    
+    function updateStudentCourseOptions(terms) {
+  const select = document.getElementById("glossaryCourseFilter");
+
+  if (!select) return;
+
+  const currentCourse = select.value;
+
+  const courses = Array.from(
+    new Set(
+      (terms || [])
+        .map(term => term.course)
+        .filter(course => course && course.trim() !== "")
+    )
+  ).sort();
+
+  select.innerHTML = `
+    <option value="">全部课程</option>
+  ` + courses.map(course => {
+    return `<option value="${escapeAttr(course)}">${escapeHtml(course)}</option>`;
+  }).join("");
+
+  if (courses.includes(currentCourse)) {
+    select.value = currentCourse;
+  } else {
+    select.value = "";
+  }
+}
+
+     function updateStudentChapterOptions() {
+  const chapterSelect = document.getElementById("glossaryChapterFilter");
+  const courseSelect = document.getElementById("glossaryCourseFilter");
+
+  if (!chapterSelect) return;
+
+  const selectedCourse = courseSelect ? courseSelect.value : "";
+  const currentChapter = chapterSelect.value;
+
+  let terms = currentGlossaryTerms || [];
+
+  if (selectedCourse) {
+    terms = terms.filter(term => term.course === selectedCourse);
+  }
+
+  const chapters = Array.from(
+    new Set(
+      terms
+        .map(term => term.chapter)
+        .filter(chapter => chapter && chapter.trim() !== "")
+    )
+  ).sort();
+
+  chapterSelect.innerHTML = `
+    <option value="">全部章节</option>
+  ` + chapters.map(chapter => {
+    return `<option value="${escapeAttr(chapter)}">${escapeHtml(chapter)}</option>`;
+  }).join("");
+
+  if (chapters.includes(currentChapter)) {
+    chapterSelect.value = currentChapter;
+  } else {
+    chapterSelect.value = "";
+  }
+}
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replaceAll("\n", " ");
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2400);
+    }
+
+    function selectRole(role) {
+      currentRole = role;
+      document.getElementById("teacherRole").classList.toggle("active", role === "teacher");
+      document.getElementById("studentRole").classList.toggle("active", role === "student");
+    }
+
+    function login() {
+      document.getElementById("loginPage").classList.add("hidden");
+      document.getElementById("systemPage").classList.remove("hidden");
+      document.getElementById("logoutBtn").classList.remove("hidden");
+      document.getElementById("roleBadge").classList.remove("hidden");
+      document.getElementById("roleBadge").textContent = currentRole === "teacher" ? "教师端" : "学生端";
+
+      document.querySelectorAll(".teacher-only").forEach(el => {
+        el.classList.toggle("hidden", currentRole !== "teacher");
+      });
+
+      document.querySelectorAll(".student-only").forEach(el => {
+        el.classList.toggle("hidden", currentRole !== "student");
+      });
+
+      if (currentRole === "teacher") {
+        openPage("overview");
+        refreshDashboard();
+      } else {
+        openPage("glossary");
+        loadApprovedGlossaryFromDB();
+      }
+
+      showToast("已进入" + (currentRole === "teacher" ? "教师端" : "学生端"));
+    }
+
+    function logout() {
+      document.getElementById("systemPage").classList.add("hidden");
+      document.getElementById("loginPage").classList.remove("hidden");
+      document.getElementById("logoutBtn").classList.add("hidden");
+      document.getElementById("roleBadge").classList.add("hidden");
+      showToast("已退出");
+    }
+
+    function openPage(page) {
+      document.querySelectorAll(".page").forEach(el => el.classList.remove("active"));
+      document.querySelectorAll(".nav-btn").forEach(el => el.classList.remove("active"));
+
+      const pageMap = {
+  overview: "overviewPage",
+  upload: "uploadPage",
+  knowledge: "knowledgePage",
+  feedback: "feedbackPage",
+  glossary: "glossaryPage"
+};
+
+      const target = document.getElementById(pageMap[page]);
+      if (target) target.classList.add("active");
+
+      document.querySelectorAll(".nav-btn").forEach(btn => {
+        if (btn.textContent.includes("概览") && page === "overview") btn.classList.add("active");
+        if (btn.textContent.includes("上传") && page === "upload") btn.classList.add("active");
+        if (btn.textContent.includes("知识库") && page === "knowledge") btn.classList.add("active");
+        if (btn.textContent.includes("反馈") && page === "feedback") btn.classList.add("active");
+        if (btn.textContent.includes("词汇表") && page === "glossary") btn.classList.add("active");
+      });
+
+      if (page === "glossary") {
+        loadApprovedGlossaryFromDB();
+      }
+      if (page === "knowledge") {
+        loadKnowledgeDocuments();
+      }
+      if (page === "feedback") {
+        loadFeedbackFromDB();
+      }
+    }
+
+    async function checkBackend() {
+      try {
+        const res = await fetch(`${API_BASE}/api/test`);
+        const data = await res.json();
+
+        if (data.status === "success") {
+          document.getElementById("backendStatus").textContent = "正常";
+          showToast(data.message || "后端连接正常");
+        } else {
+          document.getElementById("backendStatus").textContent = "异常";
+          showToast("后端连接异常");
+        }
+      } catch (error) {
+        document.getElementById("backendStatus").textContent = "未连接";
+        showToast("无法连接后端，请确认 Flask 正在运行");
+      }
+    }
+
+    async function refreshDashboard() {
+      try {
+        const pendingRes = await fetch(`${API_BASE}/api/terms/pending`);
+        const pendingData = await pendingRes.json();
+        document.getElementById("pendingCount").textContent = pendingData.count ?? "--";
+
+        const approvedRes = await fetch(`${API_BASE}/api/glossary`);
+        const approvedData = await approvedRes.json();
+        document.getElementById("approvedCount").textContent = approvedData.count ?? "--";
+
+        await checkBackend();
+      } catch (error) {
+        document.getElementById("pendingCount").textContent = "--";
+        document.getElementById("approvedCount").textContent = "--";
+      }
+    }
+
+    async function uploadAndExtract() {
+      const fileInput = document.getElementById("fileInput");
+
+      if (!fileInput.files || fileInput.files.length === 0) {
+        showToast("请先选择一个 PDF / DOCX / PPTX 文件");
+        return;
+      }
+
+      const course = document.getElementById("courseInput").value;
+      const chapter = document.getElementById("chapterInput").value;
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+      formData.append("course", course);
+      formData.append("chapter", chapter);
+
+      showToast("正在上传并解析，请稍等...");
+
+      try {
+        const res = await fetch(`${API_BASE}/api/upload`, {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.message || "上传失败");
+          console.error(data);
+          return;
+        }
+
+        document.getElementById("textPreview").textContent = data.preview || "没有解析到预览内容";
+        renderExtractedTerms(data.terms || []);
+        showToast(data.message || "上传完成");
+        await refreshDashboard();
+
+      } catch (error) {
+        showToast("上传失败，请检查后端是否正在运行");
+        console.error(error);
+      }
+    }
+
+    async function loadPendingTermsFromDB() {
+      try {
+        const res = await fetch(`${API_BASE}/api/terms/pending`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.message || "读取数据库候选术语失败");
+          return;
+        }
+
+        renderExtractedTerms(data.terms || []);
+        showToast("已从数据库读取 " + data.count + " 个候选术语");
+        await refreshDashboard();
+
+      } catch (error) {
+        showToast("读取数据库失败，请检查后端是否正在运行");
+        console.error(error);
+      }
+    }
+
+    async function approveTermFromFrontend(termId) {
+      const cnEl = document.getElementById(`cn_${termId}`);
+      const explainEl = document.getElementById(`explain_${termId}`);
+
+      const chineseTerm = cnEl ? cnEl.value.trim() : "";
+      const explanation = explainEl ? explainEl.value.trim() : "";
+
+      if (!chineseTerm) {
+        showToast("中文译名不能为空");
+        return;
+      }
+
+      if (!explanation) {
+        showToast("解释不能为空");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/terms/${termId}/approve`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            chinese_term: chineseTerm,
+            explanation: explanation
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.message || "审核失败");
+          return;
+        }
+
+        showToast("术语已审核通过");
+        await loadPendingTermsFromDB();
+
+      } catch (error) {
+        showToast("审核失败，请检查后端是否正在运行");
+        console.error(error);
+      }
+    }
+
+    function toggleAllTermChecks(checked) {
+  const boxes = Array.from(document.querySelectorAll(".term-check"));
+
+  boxes.forEach(box => {
+    box.checked = checked;
+  });
+}
+
+function syncSelectAllCheckbox() {
+  const selectAll = document.getElementById("selectAllTerms");
+  const boxes = Array.from(document.querySelectorAll(".term-check"));
+
+  if (!selectAll || boxes.length === 0) return;
+
+  const checkedBoxes = boxes.filter(box => box.checked);
+
+  selectAll.checked = checkedBoxes.length === boxes.length;
+  selectAll.indeterminate =
+    checkedBoxes.length > 0 && checkedBoxes.length < boxes.length;
+}
+
+    async function batchApproveSelectedTerms() {
+  const checkedBoxes = Array.from(document.querySelectorAll(".term-check:checked"));
+
+  if (checkedBoxes.length === 0) {
+    showToast("请先勾选需要批量审核的术语");
+    return;
+  }
+
+  const terms = [];
+
+  for (const box of checkedBoxes) {
+    const id = box.value;
+    const cnEl = document.getElementById(`cn_${id}`);
+    const explainEl = document.getElementById(`explain_${id}`);
+
+    const chineseTerm = cnEl ? cnEl.value.trim() : "";
+    const explanation = explainEl ? explainEl.value.trim() : "";
+
+    terms.push({
+      id: Number(id),
+      chinese_term: chineseTerm,
+      explanation: explanation
+    });
+  }
+
+  const invalidTerms = terms.filter(item => {
+    return !item.chinese_term ||
+           item.chinese_term === "待教师审核" ||
+           !item.explanation ||
+           item.explanation.startsWith("待教师审核");
+  });
+
+  if (invalidTerms.length > 0) {
+    showToast(`有 ${invalidTerms.length} 条术语还没有填写有效中文译名或解释，不能批量审核`);
+    return;
+  }
+
+  const confirmed = confirm(`确定批量审核通过 ${terms.length} 条术语吗？`);
+
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/terms/batch-approve`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ terms })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      showToast(data.message || "批量审核失败");
+      console.error(data);
+      return;
+    }
+
+    showToast(data.message || "批量审核完成");
+    await loadPendingTermsFromDB();
+
+  } catch (error) {
+    showToast("批量审核失败，请检查后端是否正在运行");
+    console.error(error);
+  }
+}
+    async function deleteTermFromFrontend(termId) {
+      const confirmed = confirm("确定要删除这条术语吗？删除后不可恢复。");
+
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/terms/${termId}/delete`, {
+          method: "DELETE"
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.message || "删除失败");
+          return;
+        }
+
+        showToast("术语已删除");
+        await loadPendingTermsFromDB();
+
+      } catch (error) {
+        showToast("删除失败，请检查后端是否正在运行");
+        console.error(error);
+      }
+    }
+
+    async function clearPendingTerms() {
+      const course = document.getElementById("courseInput").value;
+      const chapter = document.getElementById("chapterInput").value;
+
+      const confirmed = confirm(`确定清空「${course} / ${chapter}」下的待审核术语吗？`);
+      if (!confirmed) return;
+
+      const url = `${API_BASE}/api/terms/clear-pending?course=${encodeURIComponent(course)}&chapter=${encodeURIComponent(chapter)}`;
+
+      try {
+        const res = await fetch(url, { method: "DELETE" });
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.message || "清空失败");
+          return;
+        }
+
+        renderExtractedTerms([]);
+        showToast(data.message || "已清空");
+        await refreshDashboard();
+
+      } catch (error) {
+        showToast("清空失败，请检查后端是否正在运行");
+      }
+    }
+
+   function renderExtractedTerms(terms) {
+  const tbody = document.getElementById("extractedTermsTable");
+
+  if (!tbody) return;
+
+  const table = tbody.closest("table");
+
+  if (table) {
+    const thead = table.querySelector("thead");
+
+    if (thead) {
+      thead.innerHTML = `
+        <tr>
+          <th>
+           <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input 
+             type="checkbox" 
+             id="selectAllTerms" 
+             onclick="toggleAllTermChecks(this.checked)" 
+            />
+            全选
+          </label>
+         </th>
+          <th>英文候选术语</th>
+          <th>中文译名</th>
+          <th>专业解释</th>
+          <th>置信度</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      `;
+    }
+  }
+
+  if (!terms || terms.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7">没有抽取到候选术语</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = terms.map(term => {
+    const id = term.id;
+
+    return `
+      <tr>
+        <td>
+          <input 
+           type="checkbox" 
+           class="term-check" 
+           value="${id}" 
+           onchange="syncSelectAllCheckbox()"
+          />
+        </td>
+
+        <td>
+          <span class="term">${escapeHtml(term.english_term)}</span>
+          <div class="muted" style="margin-top:6px;">
+            ${escapeHtml(term.course)} / ${escapeHtml(term.chapter)}
+          </div>
+        </td>
+
+        <td>
+          <input
+            id="cn_${id}"
+            class="small-input"
+            value="${escapeAttr(term.chinese_term || "")}"
+            placeholder="输入中文译名"
+          />
+        </td>
+
+        <td>
+          <textarea
+            id="explain_${id}"
+            class="explain-input"
+            placeholder="输入专业解释"
+          >${escapeHtml(term.explanation || "")}</textarea>
+
+          <div class="muted" style="margin-top:8px; max-width:420px;">
+            上下文：${escapeHtml(term.context || "暂无上下文")}
+          </div>
+        </td>
+
+        <td>${escapeHtml(term.confidence)}%</td>
+
+        <td>
+          <span class="status pending">待审核</span>
+        </td>
+
+        <td>
+          <button 
+  class="action-mini good" 
+  onclick="approveTermFromFrontend(${id})"
+>
+  确认
+</button>
+
+<button 
+  class="action-mini" 
+  onclick="openKnowledgeEvidenceModal(${id})"
+>
+  查知识库
+</button>
+
+<button 
+  class="action-mini danger" 
+  onclick="deleteTermFromFrontend(${id})"
+>
+  删除
+</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+let currentEvidenceTerm = null;
+
+async function openKnowledgeEvidenceModal(termId) {
+  const term =
+    (currentGlossaryTerms || []).find(item => Number(item.id) === Number(termId)) ||
+    (Array.from(document.querySelectorAll(".term-check")) && null);
+
+  let pendingTerm = null;
+
+  const cnEl = document.getElementById(`cn_${termId}`);
+  const explainEl = document.getElementById(`explain_${termId}`);
+
+  const row = cnEl ? cnEl.closest("tr") : null;
+
+  if (row) {
+    const englishEl = row.querySelector(".term");
+    pendingTerm = {
+      id: termId,
+      english_term: englishEl ? englishEl.textContent.trim() : "",
+      course: document.getElementById("courseInput")?.value || "",
+      chapter: document.getElementById("chapterInput")?.value || ""
+    };
+  }
+
+  currentEvidenceTerm = term || pendingTerm;
+
+  if (!currentEvidenceTerm || !currentEvidenceTerm.english_term) {
+    showToast("没有找到当前术语，无法检索知识库。");
+    return;
+  }
+
+  const mask = document.getElementById("knowledgeEvidenceModalMask");
+  const info = document.getElementById("knowledgeEvidenceTermInfo");
+  const input = document.getElementById("knowledgeEvidenceKeyword");
+
+  if (info) {
+    info.innerHTML = `
+      当前术语：<strong>${escapeHtml(currentEvidenceTerm.english_term || "")}</strong>
+      <br>
+      课程：${escapeHtml(currentEvidenceTerm.course || "未指定课程")}
+      <br>
+      章节：${escapeHtml(currentEvidenceTerm.chapter || "未指定章节")}
+    `;
+  }
+
+  if (input) {
+    input.value = currentEvidenceTerm.english_term || "";
+  }
+
+  if (mask) {
+    mask.classList.add("show");
+  }
+
+  await searchKnowledgeEvidence(currentEvidenceTerm.english_term);
+}
+
+function closeKnowledgeEvidenceModal() {
+  const mask = document.getElementById("knowledgeEvidenceModalMask");
+
+  if (mask) {
+    mask.classList.remove("show");
+  }
+
+  currentEvidenceTerm = null;
+}
+
+async function searchKnowledgeEvidenceManually() {
+  const keyword = (document.getElementById("knowledgeEvidenceKeyword")?.value || "").trim();
+
+  if (!keyword) {
+    showToast("请输入检索关键词。");
+    return;
+  }
+
+  await searchKnowledgeEvidence(keyword);
+}
+
+async function searchKnowledgeEvidence(keyword) {
+  const box = document.getElementById("knowledgeEvidenceResults");
+
+  if (!box) return;
+
+  const course = currentEvidenceTerm?.course || "";
+  let url = `${API_BASE}/api/knowledge/search?q=${encodeURIComponent(keyword)}&limit=8`;
+
+  if (course) {
+    url += `&course=${encodeURIComponent(course)}`;
+  }
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "知识库检索失败。");
+      return;
+    }
+
+    renderKnowledgeEvidenceResults(data.results || [], keyword);
+    showToast(`检索到 ${data.count || 0} 条知识库依据。`);
+  } catch (error) {
+    console.error(error);
+    showToast("知识库检索失败，请确认后端是否正在运行。");
+  }
+}
+
+function renderKnowledgeEvidenceResults(results, keyword) {
+  const box = document.getElementById("knowledgeEvidenceResults");
+
+  if (!box) return;
+
+  if (!results || results.length === 0) {
+    box.innerHTML = `
+      <div class="card">
+        <p class="muted">
+          没有找到与「${escapeHtml(keyword)}」相关的知识库片段。
+          如果英文术语搜不到，可以尝试输入可能的中文关键词。
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  box.innerHTML = results.map(item => {
+    const chunk = item.chunk || {};
+
+    return `
+      <div class="card" style="margin-bottom:14px;">
+        <div class="term-card-top">
+          <div>
+            <h3 style="margin:0 0 8px;">${escapeHtml(chunk.title || "未命名资料")}</h3>
+            <div class="muted">
+              课程：${escapeHtml(chunk.course || "未指定课程")} ｜ 
+              Chunk ID：${escapeHtml(chunk.id || "")} ｜ 
+              片段序号：${escapeHtml(chunk.chunk_index || "")}
+            </div>
+          </div>
+
+          <span class="status approved">相关度 ${escapeHtml(item.score || 0)}</span>
+        </div>
+
+        <div class="context" style="margin-top:14px;">
+          ${escapeHtml(chunk.content || "无内容")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function searchKnowledgeChunks() {
+  const course = document.getElementById("knowledgeSearchCourse")?.value || "";
+  const keyword = (document.getElementById("knowledgeSearchInput")?.value || "").trim();
+  const box = document.getElementById("knowledgeSearchResults");
+
+  if (!box) return;
+
+  if (!keyword) {
+    showToast("请输入知识库检索关键词。");
+    return;
+  }
+
+  let url = `${API_BASE}/api/knowledge/search?q=${encodeURIComponent(keyword)}&limit=8`;
+
+  if (course) {
+    url += `&course=${encodeURIComponent(course)}`;
+  }
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "知识库检索失败。");
+      return;
+    }
+
+    renderKnowledgeSearchResults(data.results || [], keyword);
+    showToast(`检索到 ${data.count || 0} 条相关知识片段。`);
+
+  } catch (error) {
+    console.error(error);
+    showToast("知识库检索失败，请确认后端是否正在运行。");
+  }
+}
+
+
+function renderKnowledgeSearchResults(results, keyword) {
+  const box = document.getElementById("knowledgeSearchResults");
+
+  if (!box) return;
+
+  if (!results || results.length === 0) {
+    box.innerHTML = `
+      <div class="card">
+        <p class="muted">没有找到与「${escapeHtml(keyword)}」相关的知识片段。</p>
+      </div>
+    `;
+    return;
+  }
+
+  box.innerHTML = results.map(item => {
+    const chunk = item.chunk || {};
+
+    return `
+      <div class="card" style="margin-bottom:14px;">
+        <div class="term-card-top">
+          <div>
+            <h3 style="margin:0 0 8px;">${escapeHtml(chunk.title || "未命名资料")}</h3>
+            <div class="muted">
+              课程：${escapeHtml(chunk.course || "未指定课程")} ｜ 
+              Chunk ID：${escapeHtml(chunk.id || "")} ｜ 
+              片段序号：${escapeHtml(chunk.chunk_index || "")}
+            </div>
+          </div>
+
+          <span class="status approved">相关度 ${escapeHtml(item.score || 0)}</span>
+        </div>
+
+        <div class="context" style="margin-top:14px;">
+          ${escapeHtml(chunk.content || "无内容")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function uploadKnowledgeDocument() {
+  const fileInput = document.getElementById("knowledgeFileInput");
+  const course = document.getElementById("knowledgeCourseInput")?.value || "";
+  const title = document.getElementById("knowledgeTitleInput")?.value.trim() || "";
+  const language = document.getElementById("knowledgeLanguageInput")?.value || "zh";
+  const sourceType = document.getElementById("knowledgeSourceTypeInput")?.value || "教师上传资料";
+
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    showToast("请先选择一个知识库文件。");
+    return;
+  }
+
+  if (!course) {
+    showToast("课程不能为空。");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  formData.append("course", course);
+  formData.append("title", title);
+  formData.append("language", language);
+  formData.append("source_type", sourceType);
+
+  showToast("正在上传并解析知识库资料，请稍等...");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/knowledge/upload`, {
+      method: "POST",
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "知识库资料上传失败。");
+      console.error(data);
+      return;
+    }
+
+    document.getElementById("knowledgePreview").textContent = data.preview || "暂无解析预览";
+
+    showToast(data.message || "知识库资料上传成功。");
+
+    await loadKnowledgeDocuments();
+
+  } catch (error) {
+    console.error(error);
+    showToast("知识库资料上传失败，请确认后端是否正在运行。");
+  }
+}
+
+
+async function loadKnowledgeDocuments() {
+  const tbody = document.getElementById("knowledgeDocumentsTable");
+
+  if (!tbody) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/knowledge/documents`);
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "读取知识库文档失败。");
+      return;
+    }
+
+    renderKnowledgeDocuments(data.documents || []);
+    showToast(`已读取 ${data.count || 0} 个知识库文档。`);
+
+  } catch (error) {
+    console.error(error);
+    showToast("读取知识库文档失败，请确认后端是否正在运行。");
+  }
+}
+
+
+function renderKnowledgeDocuments(documents) {
+  const tbody = document.getElementById("knowledgeDocumentsTable");
+
+  if (!tbody) return;
+
+  if (!documents || documents.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9">暂无知识库文档</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = documents.map(doc => {
+    return `
+      <tr>
+        <td>${escapeHtml(doc.id)}</td>
+
+        <td>
+          <span class="term">${escapeHtml(doc.title || "未命名资料")}</span>
+          <div class="muted" style="margin-top:6px;">
+            ${escapeHtml(doc.filename || "")}
+          </div>
+        </td>
+
+        <td>${escapeHtml(doc.course || "未指定课程")}</td>
+
+        <td>${escapeHtml(doc.file_type || "-")}</td>
+
+        <td>${escapeHtml(doc.language || "-")}</td>
+
+        <td>${escapeHtml(doc.source_type || "-")}</td>
+
+        <td>${escapeHtml(doc.text_length || 0)}</td>
+
+        <td>${escapeHtml(doc.chunk_count || 0)}</td>
+
+        <td>${escapeHtml(doc.created_at || "-")}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function loadFeedbackFromDB() {
+  const tbody = document.getElementById("feedbackTableBody");
+  const statusFilter = document.getElementById("feedbackStatusFilter");
+  const selectedStatus = statusFilter ? statusFilter.value : "";
+
+  if (!tbody) return;
+
+  let url = `${API_BASE}/api/feedback`;
+
+  if (selectedStatus) {
+    url += `?status=${encodeURIComponent(selectedStatus)}`;
+  }
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "读取学生反馈失败。");
+      return;
+    }
+
+    renderFeedbackList(data.feedbacks || []);
+    showToast(`已读取 ${data.count || 0} 条学生反馈。`);
+  } catch (error) {
+    console.error(error);
+    showToast("读取学生反馈失败，请确认后端是否正在运行。");
+  }
+}
+
+async function openTermEditModalFromFeedback(termId, feedbackId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/terms/${termId}`);
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "读取术语详情失败。");
+      return;
+    }
+
+    const term = data.term;
+
+    currentEditingTerm = term;
+    currentEditingFeedbackId = feedbackId;
+
+    const mask = document.getElementById("termEditModalMask");
+    const info = document.getElementById("termEditInfo");
+    const chineseInput = document.getElementById("termEditChinese");
+    const explanationInput = document.getElementById("termEditExplanation");
+    const resolveCheckbox = document.getElementById("termEditResolveFeedback");
+
+    if (info) {
+      info.innerHTML = `
+        当前术语：<strong>${escapeHtml(term.english_term || "")}</strong>
+        <br>
+        课程章节：${escapeHtml(term.course || "未指定课程")} / ${escapeHtml(term.chapter || "未指定章节")}
+        <br>
+        状态：${escapeHtml(term.status || "-")}
+      `;
+    }
+
+    if (chineseInput) {
+      chineseInput.value = term.chinese_term || "";
+    }
+
+    if (explanationInput) {
+      explanationInput.value = term.explanation || "";
+    }
+
+    if (resolveCheckbox) {
+      resolveCheckbox.checked = true;
+    }
+
+    if (mask) {
+      mask.classList.add("show");
+    }
+  } catch (error) {
+    console.error(error);
+    showToast("读取术语详情失败，请确认后端是否正在运行。");
+  }
+}
+
+function closeTermEditModal() {
+  const mask = document.getElementById("termEditModalMask");
+
+  if (mask) {
+    mask.classList.remove("show");
+  }
+
+  currentEditingTerm = null;
+  currentEditingFeedbackId = null;
+}
+
+async function submitTermEdit() {
+  if (!currentEditingTerm) {
+    showToast("没有正在编辑的术语。");
+    return;
+  }
+
+  const chineseTerm = (document.getElementById("termEditChinese")?.value || "").trim();
+  const explanation = (document.getElementById("termEditExplanation")?.value || "").trim();
+  const shouldResolve = document.getElementById("termEditResolveFeedback")?.checked;
+
+  if (!chineseTerm) {
+    showToast("中文译名不能为空。");
+    return;
+  }
+
+  if (!explanation) {
+    showToast("专业解释不能为空。");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/terms/${currentEditingTerm.id}/update`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        chinese_term: chineseTerm,
+        explanation: explanation
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "术语修改失败。");
+      return;
+    }
+
+    if (shouldResolve && currentEditingFeedbackId) {
+      await fetch(`${API_BASE}/api/feedback/${currentEditingFeedbackId}/resolve`, {
+        method: "POST"
+      });
+    }
+
+    closeTermEditModal();
+    showToast("术语已修改。");
+
+    await loadFeedbackFromDB();
+
+    if (typeof loadApprovedGlossaryFromDB === "function") {
+      await loadApprovedGlossaryFromDB();
+    }
+  } catch (error) {
+    console.error(error);
+    showToast("术语修改失败，请确认后端是否正在运行。");
+  }
+}
+
+async function resolveFeedback(feedbackId) {
+  if (!confirm("确认将这条反馈标记为已处理吗？")) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/feedback/${feedbackId}/resolve`, {
+      method: "POST"
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.status !== "success") {
+      showToast(data.message || "标记反馈失败。");
+      return;
+    }
+
+    showToast("反馈已标记为已处理。");
+    loadFeedbackFromDB();
+  } catch (error) {
+    console.error(error);
+    showToast("标记反馈失败，请确认后端是否正在运行。");
+  }
+}
+
+function renderFeedbackList(feedbacks){
+  const tbody = document.getElementById("feedbackTableBody");
+
+  if (!tbody) return;
+
+  if (!feedbacks || feedbacks.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9">暂无学生反馈</td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = feedbacks.map(item => {
+    const statusText = item.status === "resolved" ? "已处理" : "待处理";
+    const statusClass = item.status === "resolved" ? "approved" : "pending";
+
+    return `
+      <tr>
+        <td>${escapeHtml(item.id)}</td>
+
+        <td>
+          <span class="term">${escapeHtml(item.english_term || "未知术语")}</span>
+          <div class="muted" style="margin-top:6px;">Term ID：${escapeHtml(item.term_id)}</div>
+        </td>
+
+        <td>${escapeHtml(item.chinese_term || "暂无中文译名")}</td>
+
+        <td>
+          ${escapeHtml(item.course || "未指定课程")}
+          <div class="muted" style="margin-top:6px;">${escapeHtml(item.chapter || "未指定章节")}</div>
+        </td>
+
+        <td>${escapeHtml(item.feedback_type || "其他问题")}</td>
+
+        <td style="max-width:360px; line-height:1.7;">
+          ${escapeHtml(item.feedback_content || "无反馈说明")}
+        </td>
+
+        <td>
+          <span class="status ${statusClass}">${statusText}</span>
+        </td>
+
+        <td>${escapeHtml(item.created_at || "-")}</td>
+
+        <td>
+         <div class="btn-row" style="gap:8px; flex-wrap:wrap;">
+          <button 
+           class="btn" 
+           onclick="openTermEditModalFromFeedback(${item.term_id}, ${item.id})"
+          >
+           修改术语
+          </button>
+
+         ${
+          item.status === "resolved"
+            ? `<button class="btn secondary" disabled>已处理</button>`
+            : `<button class="btn secondary" onclick="resolveFeedback(${item.id})">标记已处理</button>`
+          }
+        </div>
+      </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+    async function loadApprovedGlossaryFromDB() {
+      try {
+        const res = await fetch(`${API_BASE}/api/glossary`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.message || "读取已审核词汇表失败");
+          return;
+        }
+
+       currentGlossaryTerms = data.terms || [];
+        updateStudentCourseOptions(currentGlossaryTerms);
+        updateStudentChapterOptions();
+        renderApprovedGlossary(currentGlossaryTerms);
+        showToast("已读取 " + data.count + " 条已审核术语");
+        await refreshDashboard();
+
+      } catch (error) {
+        showToast("读取词汇表失败，请检查后端是否正在运行");
+        console.error(error);
+      }
+    }
+
+    function updateChapterFilter(terms) {
+      const select = document.getElementById("glossaryChapterFilter");
+      if (!select) return;
+
+      const current = select.value;
+      const chapters = Array.from(new Set((terms || []).map(term => term.chapter).filter(Boolean)));
+
+      select.innerHTML = `<option value="">全部章节</option>` + chapters.map(chapter => {
+        return `<option value="${escapeAttr(chapter)}">${escapeHtml(chapter)}</option>`;
+      }).join("");
+
+      if (chapters.includes(current)) {
+        select.value = current;
+      }
+    }
+
+    let currentFeedbackTerm = null;
+    let currentEditingTerm = null;
+    let currentEditingFeedbackId = null;
+
+function openFeedbackModal(termId) {
+  const term = (currentGlossaryTerms || []).find(item => Number(item.id) === Number(termId));
+
+  if (!term) {
+    showToast("没有找到对应术语，无法提交反馈。");
+    return;
+  }
+
+  currentFeedbackTerm = term;
+
+  const mask = document.getElementById("feedbackModalMask");
+  const info = document.getElementById("feedbackTermInfo");
+  const content = document.getElementById("feedbackContent");
+  const type = document.getElementById("feedbackType");
+
+  if (info) {
+    info.innerHTML = `
+      当前术语：<strong>${escapeHtml(term.english_term || "")}</strong>
+      <br>
+      中文译名：${escapeHtml(term.chinese_term || "暂无中文译名")}
+      <br>
+      课程章节：${escapeHtml(term.course || "未指定课程")} / ${escapeHtml(term.chapter || "未指定章节")}
+    `;
+  }
+
+  if (content) {
+    content.value = "";
+  }
+
+  if (type) {
+    type.value = "中文译名可能不准确";
+  }
+
+  if (mask) {
+    mask.classList.add("show");
+  }
+}
+
+function closeFeedbackModal() {
+  const mask = document.getElementById("feedbackModalMask");
+
+  if (mask) {
+    mask.classList.remove("show");
+  }
+
+  currentFeedbackTerm = null;
+}
+
+async function submitTermFeedback() {
+  if (!currentFeedbackTerm) {
+    showToast("没有选中的术语。");
+    return;
+  }
+
+  const feedbackType = document.getElementById("feedbackType")?.value || "其他问题";
+  const feedbackContent = (document.getElementById("feedbackContent")?.value || "").trim();
+
+  if (!feedbackContent) {
+    showToast("请填写反馈说明。");
+    return;
+  }
+
+  try {
+    const response = await fetch("http://127.0.0.1:5000/api/feedback", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        term_id: currentFeedbackTerm.id,
+        feedback_type: feedbackType,
+        feedback_content: feedbackContent
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.status !== "success") {
+      showToast(data.message || "反馈提交失败。");
+      return;
+    }
+
+    closeFeedbackModal();
+    showToast("反馈已提交，教师稍后可以查看。");
+  } catch (error) {
+    console.error(error);
+    showToast("反馈提交失败，请确认后端是否正在运行。");
+  }
+}
+
+    function getTermStateKey(termId) {
+  return `lexibridge_term_state_${termId}`;
+}
+
+function getTermStudyState(termId) {
+  const defaultState = {
+  favorite: false,
+  mastery: ""
+};
+
+  try {
+    const raw = localStorage.getItem(getTermStateKey(termId));
+
+    if (!raw) {
+      return defaultState;
+    }
+
+    return {
+      ...defaultState,
+      ...JSON.parse(raw)
+    };
+  } catch (error) {
+    return defaultState;
+  }
+}
+
+function saveTermStudyState(termId, state) {
+  localStorage.setItem(
+    getTermStateKey(termId),
+    JSON.stringify(state)
+  );
+}
+
+function toggleFavoriteTerm(termId) {
+  const state = getTermStudyState(termId);
+
+  state.favorite = !state.favorite;
+
+  saveTermStudyState(termId, state);
+
+  renderApprovedGlossary(currentGlossaryTerms);
+}
+function setTermMastery(termId, mastery) {
+  const state = getTermStudyState(termId);
+
+  if (state.mastery === mastery) {
+    state.mastery = "";
+  } else {
+    state.mastery = mastery;
+  }
+
+  saveTermStudyState(termId, state);
+
+  renderApprovedGlossary(currentGlossaryTerms);
+}
+    function updateStudentProgressStats(terms) {
+  const totalEl = document.getElementById("statTotalTerms");
+  const favoriteEl = document.getElementById("statFavoriteTerms");
+  const masteredEl = document.getElementById("statMasteredTerms");
+  const unmasteredEl = document.getElementById("statUnmasteredTerms");
+  const unmarkedEl = document.getElementById("statUnmarkedTerms");
+
+  if (!totalEl || !favoriteEl || !masteredEl || !unmasteredEl || !unmarkedEl) return;
+
+  const list = terms || [];
+
+  let favoriteCount = 0;
+  let masteredCount = 0;
+  let unmasteredCount = 0;
+  let unmarkedCount = 0;
+
+  list.forEach(term => {
+    const state = getTermStudyState(term.id);
+
+    if (state.favorite) {
+      favoriteCount += 1;
+    }
+
+    if (state.mastery === "mastered") {
+      masteredCount += 1;
+    } else if (state.mastery === "unmastered") {
+      unmasteredCount += 1;
+    } else {
+      unmarkedCount += 1;
+    }
+  });
+
+  totalEl.textContent = list.length;
+  favoriteEl.textContent = favoriteCount;
+  masteredEl.textContent = masteredCount;
+  unmasteredEl.textContent = unmasteredCount;
+  unmarkedEl.textContent = unmarkedCount;
+}
+    function getShortContext(context, maxLength = 160) {
+  const text = String(context || "暂无上下文");
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return text.slice(0, maxLength) + "……";
+}
+
+function toggleContext(termId) {
+  const shortEl = document.getElementById(`context_short_${termId}`);
+  const fullEl = document.getElementById(`context_full_${termId}`);
+  const btn = document.getElementById(`context_btn_${termId}`);
+
+  if (!shortEl || !fullEl || !btn) return;
+
+  const isFullHidden = fullEl.classList.contains("hidden");
+
+  if (isFullHidden) {
+    shortEl.classList.add("hidden");
+    fullEl.classList.remove("hidden");
+    btn.textContent = "收起上下文";
+  } else {
+    fullEl.classList.add("hidden");
+    shortEl.classList.remove("hidden");
+    btn.textContent = "展开上下文";
+  }
+}
+
+function exportGlossaryByState(stateValue) {
+  const stateFilter = document.getElementById("studyStateFilter");
+
+  if (!stateFilter) {
+    showToast("没有找到学习状态筛选器。");
+    return;
+  }
+
+  stateFilter.value = stateValue;
+  renderApprovedGlossary(currentGlossaryTerms);
+
+  const stateTextMap = {
+    favorite: "收藏术语",
+    mastered: "已掌握术语",
+    unmastered: "未掌握术语"
+  };
+
+  if (!currentRenderedGlossaryTerms || currentRenderedGlossaryTerms.length === 0) {
+    showToast(`当前没有可导出的${stateTextMap[stateValue] || "术语"}。`);
+    return;
+  }
+
+  exportCurrentGlossary();
+}
+
+function exportCurrentGlossary() {
+  const terms = currentRenderedGlossaryTerms || [];
+
+  if (!terms || terms.length === 0) {
+    showToast("当前没有可导出的术语。");
+    return;
+  }
+
+  const selectedCourse = document.getElementById("glossaryCourseFilter")?.value || "全部课程";
+  const selectedChapter = document.getElementById("glossaryChapterFilter")?.value || "全部章节";
+  const selectedStudyState = document.getElementById("studyStateFilter")?.value || "";
+  const rawSearch = (document.getElementById("glossarySearch")?.value || "").trim();
+
+  const stateTextMap = {
+    favorite: "只看收藏",
+    mastered: "只看已掌握",
+    unmastered: "只看未掌握"
+  };
+
+  const studyStateText = selectedStudyState
+    ? stateTextMap[selectedStudyState] || selectedStudyState
+    : "全部状态";
+
+  const searchText = rawSearch.length >= 2 ? rawSearch : "无有效关键词";
+  const timeText = new Date().toLocaleString();
+
+  const printWindow = window.open("", "_blank");
+
+  if (!printWindow) {
+    showToast("浏览器阻止了导出窗口，请允许弹出窗口后重试。");
+    return;
+  }
+
+  const printDoc = printWindow.document;
+
+  printDoc.title = "LexiBridge 当前词汇表导出";
+
+  printDoc.head.innerHTML = "";
+  printDoc.body.innerHTML = "";
+
+  const style = printDoc.createElement("style");
+  style.textContent = `
+    body {
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      padding: 32px;
+      color: #111827;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+    }
+
+    .meta {
+      color: #475467;
+      line-height: 1.8;
+      margin-bottom: 22px;
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      border: 1px solid #d0d5dd;
+      padding: 10px;
+      vertical-align: top;
+      text-align: left;
+      line-height: 1.6;
+    }
+
+    th {
+      background: #f2f4f7;
+      font-weight: 800;
+    }
+
+    .footer {
+      margin-top: 24px;
+      color: #667085;
+      font-size: 12px;
+    }
+
+    @media print {
+      body {
+        padding: 18px;
+      }
+    }
+  `;
+
+  printDoc.head.appendChild(style);
+
+  const title = printDoc.createElement("h1");
+  title.textContent = "LexiBridge AI 当前词汇表";
+  printDoc.body.appendChild(title);
+
+  const meta = printDoc.createElement("div");
+  meta.className = "meta";
+
+  const metaItems = [
+    `导出时间：${timeText}`,
+    `课程范围：${selectedCourse || "全部课程"}`,
+    `章节范围：${selectedChapter || "全部章节"}`,
+    `学习状态：${studyStateText}`,
+    `搜索关键词：${searchText}`,
+    `术语数量：${terms.length} 条`
+  ];
+
+  metaItems.forEach(text => {
+    const div = printDoc.createElement("div");
+    div.textContent = text;
+    meta.appendChild(div);
+  });
+
+  printDoc.body.appendChild(meta);
+
+  const table = printDoc.createElement("table");
+  const thead = printDoc.createElement("thead");
+  const headerRow = printDoc.createElement("tr");
+
+  const headers = ["序号", "英文术语", "中文译名", "专业解释", "课程", "章节"];
+
+  headers.forEach(headerText => {
+    const th = printDoc.createElement("th");
+    th.textContent = headerText;
+    headerRow.appendChild(th);
+  });
+
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = printDoc.createElement("tbody");
+
+  terms.forEach((term, index) => {
+    const row = printDoc.createElement("tr");
+
+    const cells = [
+      String(index + 1),
+      term.english_term || "",
+      term.chinese_term || "",
+      term.explanation || "",
+      term.course || "",
+      term.chapter || ""
+    ];
+
+    cells.forEach(cellText => {
+      const td = printDoc.createElement("td");
+      td.textContent = cellText;
+      row.appendChild(td);
+    });
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  printDoc.body.appendChild(table);
+
+  const footer = printDoc.createElement("div");
+  footer.className = "footer";
+  footer.textContent = "本词汇表由智桥术语云 LexiBridge AI 根据当前学生端筛选结果生成。";
+  printDoc.body.appendChild(footer);
+
+  printWindow.focus();
+
+  setTimeout(() => {
+    printWindow.print();
+  }, 300);
+}
+
+function renderApprovedGlossary(terms) {
+  const box = document.getElementById("glossaryCards");
+
+  const rawSearch = (document.getElementById("glossarySearch")?.value || "").trim();
+  const search = rawSearch.toLowerCase();
+
+  const selectedCourse = document.getElementById("glossaryCourseFilter")?.value || "";
+  const selectedChapter = document.getElementById("glossaryChapterFilter")?.value || "";
+  const selectedStudyState = document.getElementById("studyStateFilter")?.value || "";
+
+  const searchHint = document.getElementById("searchHint");
+  const resultInfo = document.getElementById("glossaryResultInfo");
+
+  if (searchHint) {
+    searchHint.style.display = rawSearch.length > 0 && rawSearch.length < 2 ? "block" : "none";
+  }
+
+  if (!box) return;
+
+  let filtered = terms || [];
+
+  if (selectedCourse) {
+    filtered = filtered.filter(term => term.course === selectedCourse);
+  }
+
+  if (selectedChapter) {
+    filtered = filtered.filter(term => term.chapter === selectedChapter);
+  }
+  
+  updateStudentProgressStats(filtered);
+
+  if (selectedStudyState) {
+  filtered = filtered.filter(term => {
+    const state = getTermStudyState(term.id);
+
+    if (selectedStudyState === "favorite") {
+      return state.favorite === true;
+    }
+
+    if (selectedStudyState === "mastered") {
+      return state.mastery === "mastered";
+    }
+
+    if (selectedStudyState === "unmastered") {
+      return state.mastery === "unmastered";
+    }
+
+    return true;
+  });
+}
+
+  if (search && search.length >= 2) {
+    filtered = filtered.filter(term => {
+      return String(term.english_term || "").toLowerCase().includes(search)
+        || String(term.chinese_term || "").toLowerCase().includes(search)
+        || String(term.explanation || "").toLowerCase().includes(search);
+    });
+  }
+
+  currentRenderedGlossaryTerms = filtered;
+
+  if (resultInfo) {
+    const scopeParts = [];
+
+    if (selectedCourse) {
+      scopeParts.push(selectedCourse);
+    }
+
+    if (selectedChapter) {
+      scopeParts.push(selectedChapter);
+    }
+    if (selectedStudyState) {
+  const stateTextMap = {
+    favorite: "只看收藏",
+    mastered: "只看已掌握",
+    unmastered: "只看未掌握"
+  };
+
+  scopeParts.push(stateTextMap[selectedStudyState] || selectedStudyState);
+}
+
+    if (search && search.length >= 2) {
+      scopeParts.push(`关键词：${rawSearch}`);
+    }
+
+    const scopeText = scopeParts.length > 0
+      ? `｜筛选范围：${scopeParts.join(" / ")}`
+      : "｜筛选范围：全部课程与章节";
+
+    const shortSearchText = rawSearch.length > 0 && rawSearch.length < 2
+      ? "｜当前关键词少于 2 个字符，暂未按关键词筛选"
+      : "";
+
+    resultInfo.textContent = `当前显示 ${filtered.length} 条术语 ${scopeText}${shortSearchText}`;
+  }
+
+  if (!filtered || filtered.length === 0) {
+    box.innerHTML = `
+      <div class="card">
+        <p>暂无匹配术语。请调整课程、章节或搜索关键词。</p>
+      </div>
+    `;
+    return;
+  }
+
+box.innerHTML = filtered.map(term => {
+  const state = getTermStudyState(term.id);
+  const favoriteText = state.favorite ? "已收藏" : "收藏";
+  const favoriteClass = state.favorite ? "study-btn active" : "study-btn";
+  const masteredClass = state.mastery === "mastered" ? "study-btn active" : "study-btn";
+  const unmasteredClass = state.mastery === "unmastered" ? "study-btn active" : "study-btn";
+
+  return `
+    <article class="term-card">
+      <div class="term-card-top">
+        <div>
+          <h3>${escapeHtml(term.english_term)}</h3>
+          <div class="meaning">${escapeHtml(term.chinese_term)}</div>
+
+          <div class="term-meta-row">
+            <span class="term-meta">课程：${escapeHtml(term.course || "未指定课程")}</span>
+            <span class="term-meta">章节：${escapeHtml(term.chapter || "未指定章节")}</span>
+          </div>
+        </div>
+
+        <span class="status approved">教师已审核</span>
+      </div>
+
+    <div class="study-actions">
+      <button 
+       class="${favoriteClass}" 
+       onclick="toggleFavoriteTerm(${term.id})"
+      >
+    ${favoriteText}
+       </button>
+
+       <button 
+        class="${masteredClass}" 
+        onclick="setTermMastery(${term.id}, 'mastered')"
+      >
+      已掌握
+      </button>
+
+      <button 
+       class="${unmasteredClass}" 
+       onclick="setTermMastery(${term.id}, 'unmastered')"
+     >
+      未掌握
+     </button>
+
+     <button 
+      class="study-btn" 
+      onclick="openFeedbackModal(${term.id})"
+     >
+    反馈问题
+     </button>
+   </div>
+
+      <div class="term-section">
+        <div class="term-section-title">专业解释</div>
+        <div class="term-explanation">
+          ${escapeHtml(term.explanation || "暂无解释")}
+        </div>
+      </div>
+
+      <div class="term-section">
+        <div class="term-section-title">原文上下文</div>
+
+        <div id="context_short_${term.id}" class="context">
+          ${escapeHtml(getShortContext(term.context))}
+        </div>
+
+        <div id="context_full_${term.id}" class="context hidden">
+          ${escapeHtml(term.context || "暂无上下文")}
+        </div>
+
+        ${
+          String(term.context || "").length > 160
+            ? `<button id="context_btn_${term.id}" class="context-toggle" onclick="toggleContext(${term.id})">展开上下文</button>`
+            : ""
+        }
+      </div>
+    </article>
+  `;
+}).join("");
+}
+  </script>
+</body>
+</html>
