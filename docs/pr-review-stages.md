@@ -78,11 +78,9 @@ Tests:
 - conflict routing
 - provider, schema, and local-rule blockers
 
-## Active / Next Stacked PRs
-
 ### PR-6: TerminologyCard persistence baseline
 
-Branch: `pr6-terminology-card-persistence`
+PR: #3, merged into `Dev`
 
 Scope:
 
@@ -100,6 +98,32 @@ Tests:
 - migration creates the table, key columns, and important indexes
 - ORM persistence stores evidence snapshots and audit fields
 - course-scope duplicate normalized English terms are rejected
+
+## Active / Next Stacked PRs
+
+### PR-7: TerminologyCard builder service
+
+Branch: `pr7-terminology-card-builder`
+
+Scope:
+
+- add a pure builder that maps extraction/retrieval/alignment outputs to a
+  `TerminologyCard` payload
+- reuse the confidence formula, risk penalty mapping, and auto-approval gate
+- normalize 0-100 and 0-1 score inputs at the service boundary
+- validate required course/personal identity fields before building payloads
+- persist risk flags into `quality_flags_json` and gate details into
+  `score_breakdown_json`
+- do not write to the database or wire upload/alignment APIs yet
+
+Tests:
+
+- strong live evidence produces an auto-approved payload
+- missing evidence becomes `needs_more_evidence` with risk penalty
+- mock/local provider stays in QC
+- domain mismatch stays in QC and conflict risk goes to `conflict_detected`
+- invalid course/personal identity inputs are rejected
+- payload can be persisted by the `TerminologyCard` ORM model
 
 ## Review Rules
 
