@@ -54,11 +54,9 @@ Tests:
 - mock/local/rule-based provider auto-approval block
 - missing evidence, invalid term, conflict, and risk flag blockers
 
-## Active / Next Stacked PRs
-
 ### PR-5: Terminology state machine and auto-approval gate
 
-Branch: `pr5-terminology-state-machine`
+PR: #2, merged into `Dev`
 
 Scope:
 
@@ -79,6 +77,29 @@ Tests:
 - missing evidence routing
 - conflict routing
 - provider, schema, and local-rule blockers
+
+## Active / Next Stacked PRs
+
+### PR-6: TerminologyCard persistence baseline
+
+Branch: `pr6-terminology-card-persistence`
+
+Scope:
+
+- add the v1.0 `TerminologyCard` SQLAlchemy model
+- add Alembic migration for `terminology_card`
+- persist evidence snapshots, confidence, alignment/status, risk/audit fields,
+  feedback count, and approval metadata
+- add documented course/personal duplicate-prevention unique constraints
+- add query indexes for status, alignment status, terms, scope/owner/course,
+  evidence chunk ids, and feedback count
+- do not yet wire card creation into APIs or the alignment runner
+
+Tests:
+
+- migration creates the table, key columns, and important indexes
+- ORM persistence stores evidence snapshots and audit fields
+- course-scope duplicate normalized English terms are rejected
 
 ## Review Rules
 

@@ -47,6 +47,7 @@ def test_database_migrations_upgrade_empty_sqlite(tmp_path):
         "feedback",
         "knowledge_document",
         "knowledge_chunk",
+        "terminology_card",
     }.issubset(tables)
 
     document_columns = {
@@ -70,3 +71,42 @@ def test_database_migrations_upgrade_empty_sqlite(tmp_path):
         "layout_confidence",
         "quality_flags_json",
     }.issubset(chunk_columns)
+
+    card_columns = {
+        row[1]
+        for row in connection.execute("pragma table_info(terminology_card)")
+    }
+    card_indexes = {
+        row[1]
+        for row in connection.execute("pragma index_list(terminology_card)")
+    }
+
+    assert {
+        "scope_type",
+        "course_id",
+        "owner_user_id",
+        "source_document_id",
+        "english_term",
+        "normalized_english_term",
+        "final_chinese_term",
+        "english_evidence_snapshot",
+        "chinese_evidence_snapshot",
+        "english_evidence_score",
+        "chinese_evidence_score",
+        "alignment_status",
+        "confidence_score",
+        "status",
+        "score_breakdown_json",
+        "quality_flags_json",
+        "risk_note",
+        "feedback_count",
+        "approved_by",
+        "approved_at",
+        "created_at",
+        "updated_at",
+    }.issubset(card_columns)
+    assert {
+        "ix_terminology_card_status",
+        "ix_terminology_card_alignment_status",
+        "ix_terminology_card_normalized_english_term",
+    }.issubset(card_indexes)
