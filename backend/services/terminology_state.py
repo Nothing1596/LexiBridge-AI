@@ -97,7 +97,7 @@ def _add_threshold_reason(reasons, reason, score, threshold):
 def _non_auto_status_for_reasons(reasons):
     reason_set = set(reasons)
 
-    if reason_set & {"domain_mismatch", "multi_translation_conflict"}:
+    if "multi_translation_conflict" in reason_set:
         return TERMINOLOGY_STATUS_CONFLICT_DETECTED
 
     if reason_set & {"no_en_evidence", "no_zh_evidence"}:

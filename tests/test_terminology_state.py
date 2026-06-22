@@ -122,6 +122,14 @@ def test_auto_approval_gate_routes_conflicts_to_conflict_detected():
     assert result["reasons"] == ["multi_translation_conflict"]
 
 
+def test_auto_approval_gate_routes_domain_mismatch_to_quality_control():
+    result = _gate(risk_flags=["domain_mismatch"])
+
+    assert result["allowed"] is False
+    assert result["recommended_status"] == TERMINOLOGY_STATUS_PENDING_QUALITY_CONTROL
+    assert result["reasons"] == ["domain_mismatch"]
+
+
 def test_auto_approval_gate_blocks_untrusted_or_non_live_provider():
     result = _gate(provider="rule_based", provider_is_live=False)
 
