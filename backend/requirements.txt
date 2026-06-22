@@ -1,8 +1,18 @@
-flask
-flask-cors
-flask-sqlalchemy
-pymupdf
-python-docx
-python-pptx
-reportlab
-pytest
+# Major-version pins for reproducible CI. Ranges include the versions you
+# currently run; bump the upper bound deliberately when adopting a new major.
+
+# Web framework + extensions
+flask>=3,<4
+flask-cors>=4,<7
+flask-sqlalchemy>=3,<4
+
+# Document parsing
+pymupdf>=1.24,<2
+python-docx>=1,<2
+python-pptx>=1,<2
+
+# PDF export
+reportlab>=4,<5
+
+# Testing
+pytest>=8,<9
