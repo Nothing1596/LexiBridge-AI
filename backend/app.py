@@ -11,7 +11,7 @@ import os
 import re
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     from .services.layout import (
@@ -54,6 +54,10 @@ CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MAX_UPLOAD_SIZE_MB = 50
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 def positive_int_env(name, default):
@@ -187,6 +191,126 @@ class KnowledgeChunk(db.Model):
     layout_confidence = db.Column(db.Float, nullable=True)
     quality_flags_json = db.Column(db.Text, default="[]")
     created_at = db.Column(db.String(40), default="")
+
+
+class TerminologyCard(db.Model):
+    """
+    v1.0 terminology card persistence model.
+
+    The legacy Term table remains the local MVP glossary surface. This table is
+    the evidence-backed card schema used by the alignment/QC pipeline.
+    """
+    __tablename__ = "terminology_card"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "course_id",
+            "normalized_english_term",
+            "scope_type",
+            name="uq_terminology_card_course_term_scope",
+        ),
+        db.UniqueConstraint(
+            "owner_user_id",
+            "normalized_english_term",
+            "source_document_id",
+            name="uq_terminology_card_personal_term_source",
+        ),
+        db.Index("ix_terminology_card_scope_type", "scope_type"),
+        db.Index("ix_terminology_card_course_id", "course_id"),
+        db.Index("ix_terminology_card_owner_user_id", "owner_user_id"),
+        db.Index(
+            "ix_terminology_card_normalized_english_term",
+            "normalized_english_term",
+        ),
+        db.Index("ix_terminology_card_final_chinese_term", "final_chinese_term"),
+        db.Index(
+            "ix_terminology_card_normalized_chinese_term",
+            "normalized_chinese_term",
+        ),
+        db.Index(
+            "ix_terminology_card_english_evidence_chunk_id",
+            "english_evidence_chunk_id",
+        ),
+        db.Index(
+            "ix_terminology_card_chinese_evidence_chunk_id",
+            "chinese_evidence_chunk_id",
+        ),
+        db.Index("ix_terminology_card_alignment_status", "alignment_status"),
+        db.Index("ix_terminology_card_status", "status"),
+        db.Index("ix_terminology_card_feedback_count", "feedback_count"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    scope_type = db.Column(
+        db.String(32),
+        nullable=False,
+        default="course",
+        server_default="course",
+    )
+    course_id = db.Column(db.Integer, nullable=True)
+    owner_user_id = db.Column(db.Integer, nullable=True)
+    source_document_id = db.Column(db.Integer, nullable=True)
+
+    english_term = db.Column(db.String(255), nullable=False)
+    normalized_english_term = db.Column(db.String(255), nullable=False)
+    final_chinese_term = db.Column(db.String(255), nullable=True)
+    normalized_chinese_term = db.Column(db.String(255), nullable=True)
+    courseware_sentence = db.Column(db.Text, nullable=True)
+
+    english_evidence_chunk_id = db.Column(db.Integer, nullable=True)
+    chinese_evidence_chunk_id = db.Column(db.Integer, nullable=True)
+    english_evidence_snapshot = db.Column(db.Text, nullable=True)
+    chinese_evidence_snapshot = db.Column(db.Text, nullable=True)
+    english_evidence_score = db.Column(db.Float, default=0)
+    chinese_evidence_score = db.Column(db.Float, default=0)
+
+    alignment_status = db.Column(
+        db.String(64),
+        nullable=False,
+        default="unverified_translation",
+        server_default="unverified_translation",
+    )
+    confidence_score = db.Column(
+        db.Float,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    status = db.Column(
+        db.String(64),
+        nullable=False,
+        default="pending_quality_control",
+        server_default="pending_quality_control",
+    )
+
+    ai_provider = db.Column(db.String(64), nullable=True)
+    ai_model = db.Column(db.String(128), nullable=True)
+    prompt_version = db.Column(db.String(64), nullable=True)
+    score_breakdown_json = db.Column(db.Text, default="{}", server_default="{}")
+    quality_flags_json = db.Column(db.Text, default="[]", server_default="[]")
+    risk_note = db.Column(db.Text, nullable=True)
+
+    feedback_count = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    approved_by = db.Column(db.Integer, nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utc_now,
+        server_default=db.func.current_timestamp(),
+    )
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=db.func.current_timestamp(),
+    )
 
 
 # ============================================================
