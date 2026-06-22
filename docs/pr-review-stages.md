@@ -39,7 +39,10 @@ Branch: `pr4-confidence-scoring`
 Scope:
 
 - implement the documented `confidence_score` formula as a pure service
-- keep all score inputs and outputs on the 0-1 contract
+- keep formula inputs normalized to 0-1
+- return `confidence_score` on the 0-100 persistence/API contract and
+  `normalized_confidence_score` for audit
+- add a documented risk-flag to penalty-points mapping helper
 - implement documented hard blockers for auto approval
 - do not yet choose a final auto-approval threshold or wire the state machine
 
@@ -48,8 +51,10 @@ Tests:
 - formula weights
 - score clamping
 - 0-100 to 0-1 normalization for current term confidence values
+- 0-100 risk penalty point normalization
+- risk-flag penalty mapping
 - mock/local/rule-based provider auto-approval block
-- missing evidence and risk flag blockers
+- missing evidence, invalid term, conflict, and risk flag blockers
 
 ## Review Rules
 
