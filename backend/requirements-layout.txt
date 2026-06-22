@@ -1,0 +1,4 @@
+# Optional local layout model provider.
+# Install only when running with LAYOUT_PROVIDER=doclayout_yolo_onnx.
+-r requirements.txt
+onnxruntime

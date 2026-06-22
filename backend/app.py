@@ -1,12 +1,33 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text as sql_text
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+import json
 import os
 import re
 import uuid
+import zipfile
 from datetime import datetime
+
+try:
+    from .services.layout import (
+        SKIPPED_TEXT_LAYOUT_TYPES,
+        extract_pdf_text_with_layout,
+        extract_pdf_text_with_layout_result,
+    )
+    from .services.retrieval import score_knowledge_evidence
+    from .services.term_extraction import extract_terms_from_text as extract_terms_from_text_service
+except ImportError:
+    from services.layout import (
+        SKIPPED_TEXT_LAYOUT_TYPES,
+        extract_pdf_text_with_layout,
+        extract_pdf_text_with_layout_result,
+    )
+    from services.retrieval import score_knowledge_evidence
+    from services.term_extraction import extract_terms_from_text as extract_terms_from_text_service
 
 
 # ============================================================
@@ -31,21 +52,45 @@ CORS(app)
 # ============================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_MAX_UPLOAD_SIZE_MB = 50
+
+
+def positive_int_env(name, default):
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+    return value if value > 0 else default
 
 # 上传目录放在用户目录，避免 Windows 中误把 uploads 建成文件后报错
-UPLOAD_FOLDER = os.path.join(os.path.expanduser("~"), "LexiBridge-AI-uploads")
+DEFAULT_UPLOAD_FOLDER = os.path.join(os.path.expanduser("~"), "LexiBridge-AI-uploads")
+UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "").strip() or DEFAULT_UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+MAX_UPLOAD_SIZE_MB = positive_int_env("MAX_UPLOAD_SIZE_MB", DEFAULT_MAX_UPLOAD_SIZE_MB)
 
-DATABASE_FOLDER = os.path.join(os.path.expanduser("~"), "LexiBridge-AI-data")
-os.makedirs(DATABASE_FOLDER, exist_ok=True)
+DEFAULT_DATABASE_FOLDER = os.path.join(os.path.expanduser("~"), "LexiBridge-AI-data")
+DATABASE_FOLDER = os.environ.get("DATABASE_FOLDER", "").strip() or DEFAULT_DATABASE_FOLDER
 
 DATABASE_PATH = os.path.join(DATABASE_FOLDER, "lexibridge.db")
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + DATABASE_PATH
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+if not DATABASE_URL:
+    os.makedirs(DATABASE_FOLDER, exist_ok=True)
+    DATABASE_URL = "sqlite:///" + DATABASE_PATH
+
+app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 db = SQLAlchemy(app)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "pptx"}
+OOXML_REQUIRED_MEMBERS = {
+    "docx": "word/document.xml",
+    "pptx": "ppt/presentation.xml",
+}
 
 
 # ============================================================
@@ -109,6 +154,9 @@ class KnowledgeDocument(db.Model):
 
     text_length = db.Column(db.Integer, default=0)
     chunk_count = db.Column(db.Integer, default=0)
+    layout_provider = db.Column(db.String(80), default="")
+    layout_status = db.Column(db.String(40), default="not_run")
+    layout_warnings_json = db.Column(db.Text, default="[]")
 
     created_at = db.Column(db.String(40), default="")
 
@@ -129,6 +177,13 @@ class KnowledgeChunk(db.Model):
     content = db.Column(db.Text, nullable=False, default="")
 
     source_page = db.Column(db.String(80), default="")
+    page_number = db.Column(db.Integer, nullable=True)
+    bbox_json = db.Column(db.Text, default="{}")
+    layout_type = db.Column(db.String(64), default="")
+    reading_order = db.Column(db.Integer, nullable=True)
+    layout_provider = db.Column(db.String(80), default="")
+    layout_confidence = db.Column(db.Float, nullable=True)
+    quality_flags_json = db.Column(db.Text, default="[]")
     created_at = db.Column(db.String(40), default="")
 
 
@@ -138,6 +193,56 @@ class KnowledgeChunk(db.Model):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def file_extension(filename):
+    if "." not in filename:
+        return ""
+
+    return filename.rsplit(".", 1)[1].lower()
+
+
+def is_allowed_upload_content(file_storage):
+    ext = file_extension(file_storage.filename)
+    stream = file_storage.stream
+    position = stream.tell()
+
+    try:
+        stream.seek(0)
+
+        if ext == "pdf":
+            return stream.read(5) == b"%PDF-"
+
+        required_member = OOXML_REQUIRED_MEMBERS.get(ext)
+
+        if not required_member:
+            return False
+
+        try:
+            with zipfile.ZipFile(stream) as archive:
+                members = set(archive.namelist())
+        except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError):
+            return False
+
+        return "[Content_Types].xml" in members and required_member in members
+    finally:
+        stream.seek(position)
+
+
+def unsupported_file_response(message="文件格式不支持，目前只支持 PDF、DOCX、PPTX。"):
+    return jsonify({
+        "status": "error",
+        "error_code": "UNSUPPORTED_FILE_TYPE",
+        "message": message
+    }), 400
+
+
+def invalid_file_content_response():
+    return jsonify({
+        "status": "error",
+        "error_code": "INVALID_FILE_CONTENT",
+        "message": "文件内容与扩展名不匹配，无法安全解析。"
+    }), 400
 
 
 def clean_text(text):
@@ -159,6 +264,11 @@ def extract_text_from_pdf(path):
     PDF 文本解析。
     依赖 PyMuPDF：pip install pymupdf
     """
+    layout_text = extract_pdf_text_with_layout(path)
+
+    if layout_text:
+        return clean_text(layout_text)
+
     try:
         import fitz
     except ImportError as exc:
@@ -242,6 +352,35 @@ def extract_text(path):
 
     raise ValueError("不支持的文件格式")
 
+
+def extract_text_with_layout(path):
+    ext = path.rsplit(".", 1)[1].lower()
+
+    if ext != "pdf":
+        return extract_text(path), None
+
+    layout_text, layout_result = extract_pdf_text_with_layout_result(path)
+
+    if layout_text:
+        return clean_text(layout_text), layout_result
+
+    if layout_result and layout_result.needs_ocr_engine:
+        return "", layout_result
+
+    try:
+        import fitz
+    except ImportError as exc:
+        raise ImportError("缺少 PyMuPDF，请运行：pip install pymupdf") from exc
+
+    parts = []
+    with fitz.open(path) as doc:
+        for index, page in enumerate(doc, start=1):
+            page_text = page.get_text("text") or ""
+            if page_text.strip():
+                parts.append(f"[Page {index}]\n{page_text}")
+
+    return clean_text("\n\n".join(parts)), layout_result
+
 def split_text_into_chunks(text, max_chars=700, overlap=80):
     """
     将知识库文本切分为较小片段。
@@ -295,176 +434,81 @@ def split_text_into_chunks(text, max_chars=700, overlap=80):
 
     return cleaned_chunks
 
+
+def build_knowledge_chunk_payloads(text, layout_result=None):
+    if not layout_result:
+        return [{"content": chunk} for chunk in split_text_into_chunks(text)]
+
+    payloads = []
+    reading_order = 1
+
+    for block in sorted(layout_result.blocks, key=lambda item: (item.page_number, item.reading_order)):
+        content = clean_text(block.text)
+
+        if not content or block.layout_type in SKIPPED_TEXT_LAYOUT_TYPES:
+            continue
+
+        for chunk_text in split_layout_block_text(content):
+            payloads.append({
+                "content": chunk_text,
+                "source_page": f"Page {block.page_number}",
+                "page_number": block.page_number,
+                "bbox_json": _json_dumps(block.bbox.to_dict()),
+                "layout_type": block.layout_type,
+                "reading_order": reading_order,
+                "layout_provider": block.provider,
+                "layout_confidence": block.confidence,
+            })
+            reading_order += 1
+
+    if payloads:
+        return payloads
+
+    if layout_result.needs_ocr_engine:
+        return []
+
+    return [{"content": chunk} for chunk in split_text_into_chunks(text)]
+
+
+def split_layout_block_text(text):
+    chunks = split_text_into_chunks(text)
+
+    if chunks:
+        return chunks
+
+    text = clean_text(text)
+
+    if len(text) >= 3:
+        return [text]
+
+    return []
+
+
+def layout_status_for_result(layout_result):
+    if not layout_result:
+        return "not_applicable"
+
+    if layout_result.needs_ocr_engine:
+        return "needs_ocr"
+
+    if layout_result.blocks:
+        return "parsed"
+
+    return "no_blocks"
+
+
+def _json_dumps(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
 def score_knowledge_chunk(content, query):
     """
-    简单关键词检索评分。
-    当前是 v0.1 检索版本：
-    1. 精确包含 query，加高分
-    2. query 中的英文词、数字、中文词片段命中，加分
-    3. 后续可替换为 embedding / 向量检索
+    保留旧函数名，具体评分逻辑由 services.retrieval 负责。
     """
-    if not content or not query:
-        return 0
-
-    content_lower = content.lower()
-    query_lower = query.lower().strip()
-
-    score = 0
-
-    if query_lower in content_lower:
-        score += 100
-
-    tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]{2,}", query_lower)
-
-    for token in tokens:
-        if token and token in content_lower:
-            score += 20
-
-    # 对中文短词做额外滑窗匹配，例如“收敛级数”
-    chinese_chars = re.findall(r"[\u4e00-\u9fff]+", query_lower)
-
-    for phrase in chinese_chars:
-        if len(phrase) >= 2:
-            for i in range(len(phrase) - 1):
-                sub = phrase[i:i + 2]
-                if sub in content_lower:
-                    score += 6
-
-    return score
+    return score_knowledge_evidence(content, query)["score"]
 
 # ============================================================
 # 候选术语抽取
 # ============================================================
-
-def extract_context(text, term, window=140):
-    """
-    提取术语在原文中的上下文，方便教师审核。
-    """
-    lower_text = text.lower()
-    lower_term = term.lower()
-    index = lower_text.find(lower_term)
-
-    if index == -1:
-        return ""
-
-    start = max(0, index - window)
-    end = min(len(text), index + len(term) + window)
-
-    context = text[start:end]
-    context = re.sub(r"\s+", " ", context)
-    return context.strip()
-
-
-def is_probably_noise(term):
-    """
-    通用噪声过滤。
-    注意：这里不写死数学、物理、通信、计算机等具体学科关键词。
-    只过滤明显不是术语的句子碎片、页面信息、学校信息、普通功能词。
-    """
-    lower = term.lower().strip()
-    words = lower.split()
-
-    if not lower:
-        return True
-
-    blacklist_exact = {
-        "page", "slide", "chapter", "section", "example", "problem", "solution",
-        "find", "suppose", "therefore", "then", "where", "when", "what",
-        "beijing university", "posts and telecommunications",
-        "international school", "jianhua yuan"
-    }
-
-    if lower in blacklist_exact:
-        return True
-
-    bad_starts = {
-        "the", "this", "that", "these", "those",
-        "a", "an", "and", "or", "but",
-        "if", "when", "where", "why", "how", "what", "which",
-        "we", "you", "they", "he", "she", "it",
-        "suppose", "choose", "find", "show", "prove", "let",
-        "in", "on", "at", "for", "with", "by", "from", "to", "of",
-        "as", "is", "are", "was", "were"
-    }
-
-    bad_ends = {
-        "the", "a", "an", "and", "or", "but",
-        "is", "are", "was", "were", "be", "been",
-        "in", "on", "at", "for", "with", "by", "from", "to", "of",
-        "this", "that", "these", "those", "each"
-    }
-
-    if words and words[0] in bad_starts:
-        return True
-
-    if words and words[-1] in bad_ends:
-        return True
-
-    sentence_verbs = {
-        "can", "will", "would", "could", "should", "may", "might",
-        "must", "have", "has", "had", "do", "does", "did"
-    }
-
-    if any(word in sentence_verbs for word in words):
-        return True
-
-    # 全小写且过长，通常是句子碎片
-    if len(words) >= 3 and term.islower():
-        return True
-
-    # 数字比例过高通常不是术语
-    letters = sum(ch.isalpha() for ch in term)
-    digits = sum(ch.isdigit() for ch in term)
-    if digits > letters:
-        return True
-
-    return False
-
-
-def score_candidate(term, count, context):
-    """
-    给候选术语打分。
-    这是启发式评分，不代表真正的 AI 判断。
-    """
-    words = term.split()
-    score = 45
-
-    if count >= 2:
-        score += min(25, 8 + count * 3)
-
-    if len(words) >= 2:
-        score += 12
-
-    if len(words) >= 3:
-        score += 4
-
-    if term.isupper() and len(term) >= 3:
-        score += 10
-
-    if all(word[:1].isupper() for word in words if word):
-        score += 8
-
-    if "-" in term:
-        score += 5
-
-    # 领域无关的学术词形特征：不是学科关键词，只是术语形态线索
-    morphology_suffixes = (
-        "tion", "sion", "ment", "ness", "ity", "ics",
-        "ism", "ance", "ence", "ing", "al", "ive", "ous"
-    )
-    if any(word.lower().endswith(morphology_suffixes) for word in words):
-        score += 6
-
-    definition_clues = (
-        "is called", "is defined as", "means", "refers to",
-        "denoted by", "known as", "consists of"
-    )
-    lower_context = context.lower()
-    if any(clue in lower_context for clue in definition_clues):
-        score += 5
-
-    return max(0, min(score, 95))
-
 
 def extract_terms_from_text(text):
     """
@@ -475,85 +519,7 @@ def extract_terms_from_text(text):
     4. 只根据词组形态、出现频率、大小写、上下文等通用特征筛选候选术语；
     5. 最终术语是否成立，由教师审核或后续 AI API / RAG 决定。
     """
-    if not text or not text.strip():
-        return []
-
-    # 1 到 5 个英文 token 构成的短语
-    phrase_pattern = re.compile(
-        r"\b[A-Za-z][A-Za-z0-9]*(?:[-/][A-Za-z0-9]+)*(?:\s+[A-Za-z][A-Za-z0-9]*(?:[-/][A-Za-z0-9]+)*){0,4}\b"
-    )
-
-    raw_counts = {}
-    display_form = {}
-    contexts = {}
-
-    for match in phrase_pattern.findall(text):
-        term = " ".join(match.split()).strip()
-
-        if len(term) < 4 or len(term) > 80:
-            continue
-
-        words = term.split()
-        if len(words) > 5:
-            continue
-
-        if is_probably_noise(term):
-            continue
-
-        # 单词候选更容易误抽，所以提高门槛：
-        # 允许：大写缩写、首字母大写、重复出现的学术词形。
-        key = term.lower()
-
-        raw_counts[key] = raw_counts.get(key, 0) + 1
-
-        if key not in display_form:
-            display_form[key] = term
-
-        if key not in contexts:
-            contexts[key] = extract_context(text, term)
-
-    scored = []
-
-    for key, count in raw_counts.items():
-        term = display_form[key]
-        words = term.split()
-        context = contexts.get(key, "")
-
-        # 单词候选：如果全小写且只出现一次，通常不可靠
-        if len(words) == 1 and term.islower() and count < 2:
-            continue
-
-        score = score_candidate(term, count, context)
-
-        if score < 55:
-            continue
-
-        scored.append((score, count, term, context))
-
-    # 高分优先；同分时出现次数多者优先；再按长度排序
-    scored.sort(key=lambda item: (item[0], item[1], len(item[2])), reverse=True)
-
-    candidates = []
-    seen = set()
-
-    for score, count, term, context in scored:
-        key = term.lower()
-
-        if key in seen:
-            continue
-
-        seen.add(key)
-
-        candidates.append({
-            "english_term": term,
-            "chinese_term": "待教师审核",
-            "explanation": "待教师审核：系统仅完成候选术语抽取，尚未生成正式专业译名。",
-            "context": context,
-            "confidence": score,
-            "status": "pending"
-        })
-
-    return candidates
+    return extract_terms_from_text_service(text)
 
 
 # ============================================================
@@ -611,6 +577,9 @@ def serialize_knowledge_document(doc):
         "source_type": doc.source_type,
         "text_length": doc.text_length,
         "chunk_count": doc.chunk_count,
+        "layout_provider": doc.layout_provider,
+        "layout_status": doc.layout_status,
+        "layout_warnings": _safe_json_loads(doc.layout_warnings_json, []),
         "created_at": doc.created_at
     }
 
@@ -624,8 +593,67 @@ def serialize_knowledge_chunk(chunk):
         "chunk_index": chunk.chunk_index,
         "content": chunk.content,
         "source_page": chunk.source_page,
+        "page_number": chunk.page_number,
+        "bbox": _safe_json_loads(chunk.bbox_json, {}),
+        "layout_type": chunk.layout_type,
+        "reading_order": chunk.reading_order,
+        "layout_provider": chunk.layout_provider,
+        "layout_confidence": chunk.layout_confidence,
+        "quality_flags": _safe_json_loads(chunk.quality_flags_json, []),
         "created_at": chunk.created_at
     }
+
+
+def _safe_json_loads(value, default):
+    try:
+        return json.loads(value or "")
+    except (TypeError, ValueError):
+        return default
+
+
+LAYOUT_SCHEMA_ADDITIONS = {
+    "knowledge_document": {
+        "layout_provider": "VARCHAR(80) DEFAULT ''",
+        "layout_status": "VARCHAR(40) DEFAULT 'not_run'",
+        "layout_warnings_json": "TEXT DEFAULT '[]'",
+    },
+    "knowledge_chunk": {
+        "page_number": "INTEGER",
+        "bbox_json": "TEXT DEFAULT '{}'",
+        "layout_type": "VARCHAR(64) DEFAULT ''",
+        "reading_order": "INTEGER",
+        "layout_provider": "VARCHAR(80) DEFAULT ''",
+        "layout_confidence": "FLOAT",
+        "quality_flags_json": "TEXT DEFAULT '[]'",
+    },
+}
+
+
+def ensure_layout_schema():
+    """
+    Lightweight SQLite compatibility helper until Alembic lands.
+
+    New test databases get the columns from SQLAlchemy create_all(); this helper
+    only protects existing local SQLite databases from missing layout columns.
+    """
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    with db.engine.begin() as connection:
+        for table_name, columns in LAYOUT_SCHEMA_ADDITIONS.items():
+            existing_columns = {
+                row[1]
+                for row in connection.execute(sql_text(f"PRAGMA table_info({table_name})"))
+            }
+
+            if not existing_columns:
+                continue
+
+            for column_name, definition in columns.items():
+                if column_name not in existing_columns:
+                    connection.execute(
+                        sql_text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+                    )
 
 
 # ============================================================
@@ -647,6 +675,16 @@ def test():
         "project": "智桥术语云 LexiBridge AI",
         "message": "前端和后端连接测试成功。"
     })
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_file_too_large(_exc):
+    return jsonify({
+        "status": "error",
+        "error_code": "FILE_TOO_LARGE",
+        "message": f"文件过大，最大允许 {MAX_UPLOAD_SIZE_MB} MB。"
+    }), 413
+
 
 @app.route("/api/knowledge/documents", methods=["GET"])
 def get_knowledge_documents():
@@ -694,10 +732,10 @@ def upload_knowledge_document():
         }), 400
 
     if not allowed_file(file.filename):
-        return jsonify({
-            "status": "error",
-            "message": "文件格式不支持，目前只支持 PDF、DOCX、PPTX。"
-        }), 400
+        return unsupported_file_response()
+
+    if not is_allowed_upload_content(file):
+        return invalid_file_content_response()
 
     course = request.form.get("course", "").strip()
     title = request.form.get("title", "").strip()
@@ -724,7 +762,7 @@ def upload_knowledge_document():
     file.save(save_path)
 
     try:
-        extracted_text = extract_text(save_path)
+        extracted_text, layout_result = extract_text_with_layout(save_path)
     except Exception as exc:
         return jsonify({
             "status": "error",
@@ -732,9 +770,9 @@ def upload_knowledge_document():
             "error": str(exc)
         }), 500
 
-    chunks = split_text_into_chunks(extracted_text)
+    chunk_payloads = build_knowledge_chunk_payloads(extracted_text, layout_result)
 
-    if len(chunks) == 0:
+    if len(chunk_payloads) == 0:
         return jsonify({
             "status": "error",
             "message": "文件解析成功，但没有得到有效知识片段。请确认文件不是扫描版图片 PDF。"
@@ -751,7 +789,10 @@ def upload_knowledge_document():
         language=language or "zh",
         source_type=source_type or "教师上传资料",
         text_length=len(extracted_text),
-        chunk_count=len(chunks),
+        chunk_count=len(chunk_payloads),
+        layout_provider=layout_result.provider if layout_result else "",
+        layout_status=layout_status_for_result(layout_result),
+        layout_warnings_json=_json_dumps(layout_result.warnings if layout_result else []),
         created_at=now_text
     )
 
@@ -760,14 +801,21 @@ def upload_knowledge_document():
 
     chunk_records = []
 
-    for index, chunk_text in enumerate(chunks, start=1):
+    for index, chunk_payload in enumerate(chunk_payloads, start=1):
         chunk = KnowledgeChunk(
             document_id=document.id,
             course=course,
             title=title,
             chunk_index=index,
-            content=chunk_text,
-            source_page="",
+            content=chunk_payload["content"],
+            source_page=chunk_payload.get("source_page", ""),
+            page_number=chunk_payload.get("page_number"),
+            bbox_json=chunk_payload.get("bbox_json", "{}"),
+            layout_type=chunk_payload.get("layout_type", ""),
+            reading_order=chunk_payload.get("reading_order"),
+            layout_provider=chunk_payload.get("layout_provider", ""),
+            layout_confidence=chunk_payload.get("layout_confidence"),
+            quality_flags_json=chunk_payload.get("quality_flags_json", "[]"),
             created_at=now_text
         )
 
@@ -797,7 +845,7 @@ def search_knowledge_chunks():
     - course: 课程，可选
     - limit: 返回数量，默认 8
     """
-    q = request.args.get("q", "").strip()
+    q = (request.args.get("q", "") or request.args.get("query", "")).strip()
     course = request.args.get("course", "").strip()
     limit_raw = request.args.get("limit", "8").strip()
 
@@ -824,12 +872,13 @@ def search_knowledge_chunks():
     scored_results = []
 
     for chunk in chunks:
-        score = score_knowledge_chunk(chunk.content, q)
+        evidence = score_knowledge_evidence(chunk.content, q)
+        score = evidence["score"]
 
         if score > 0:
-            scored_results.append((score, chunk))
+            scored_results.append((score, chunk, evidence))
 
-    scored_results.sort(key=lambda item: item[0], reverse=True)
+    scored_results.sort(key=lambda item: (-item[0], item[1].id or 0))
 
     top_results = scored_results[:limit]
 
@@ -841,9 +890,12 @@ def search_knowledge_chunks():
         "results": [
             {
                 "score": score,
+                "evidence_score": evidence["evidence_score"],
+                "matched_terms": evidence["matched_terms"],
+                "score_breakdown": evidence["score_breakdown"],
                 "chunk": serialize_knowledge_chunk(chunk)
             }
-            for score, chunk in top_results
+            for score, chunk, evidence in top_results
         ]
     })
 
@@ -873,10 +925,10 @@ def upload_file():
         }), 400
 
     if not allowed_file(file.filename):
-        return jsonify({
-            "status": "error",
-            "message": "文件格式不支持，目前只支持 PDF、DOCX、PPTX。"
-        }), 400
+        return unsupported_file_response()
+
+    if not is_allowed_upload_content(file):
+        return invalid_file_content_response()
 
     course = request.form.get("course", "Data Structures and Algorithms").strip()
     chapter = request.form.get("chapter", "Chapter 4 - Hashing").strip()
@@ -1381,5 +1433,6 @@ def clear_pending_terms():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        ensure_layout_schema()
 
     app.run(debug=True, port=5000, use_reloader=False)
