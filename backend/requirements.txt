@@ -4,6 +4,7 @@
 # Web framework + extensions
 flask>=3,<4
 flask-cors>=4,<7
+flask-migrate>=4,<5
 flask-sqlalchemy>=3,<4
 
 # Document parsing

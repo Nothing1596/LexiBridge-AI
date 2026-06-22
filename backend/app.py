@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text as sql_text
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -85,6 +86,7 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db, render_as_batch=True, compare_type=True)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "pptx"}
 OOXML_REQUIRED_MEMBERS = {
