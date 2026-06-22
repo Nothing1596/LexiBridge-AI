@@ -30,11 +30,9 @@ Scope:
 - migration smoke test for empty SQLite databases
 - developer migration notes
 
-## Active / Next Stacked PRs
-
 ### PR-4: Confidence scoring baseline
 
-Branch: `pr4-confidence-scoring`
+PR: #1, merged into `Dev`
 
 Scope:
 
@@ -55,6 +53,32 @@ Tests:
 - risk-flag penalty mapping
 - mock/local/rule-based provider auto-approval block
 - missing evidence, invalid term, conflict, and risk flag blockers
+
+## Active / Next Stacked PRs
+
+### PR-5: Terminology state machine and auto-approval gate
+
+Branch: `pr5-terminology-state-machine`
+
+Scope:
+
+- encode the documented TerminologyCard status set and allowed transitions
+- implement the documented auto-approval gate as a pure service
+- enforce confidence >= 85 and term/en/zh evidence component thresholds >= 0.80
+- require live provider, schema validation, and local rule validation inputs
+- route non-auto outcomes to `needs_more_evidence`,
+  `pending_quality_control`, or `conflict_detected`
+- do not yet add database columns, migrations, or API wiring
+
+Tests:
+
+- all documented allowed transitions
+- forbidden transitions such as `rejected -> auto_approved`
+- full auto-approval pass case
+- low confidence and weak evidence blockers
+- missing evidence routing
+- conflict routing
+- provider, schema, and local-rule blockers
 
 ## Review Rules
 
