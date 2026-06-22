@@ -65,3 +65,30 @@ def test_terminology_card_course_scope_unique_constraint(app_module):
             app_module.db.session.commit()
 
         app_module.db.session.rollback()
+
+
+def test_terminology_card_personal_scope_unique_constraint(app_module):
+    with app_module.app.app_context():
+        first = app_module.TerminologyCard(
+            scope_type="personal",
+            owner_user_id=7,
+            source_document_id=42,
+            english_term="Binary Search",
+            normalized_english_term="binary search",
+        )
+        duplicate = app_module.TerminologyCard(
+            scope_type="personal",
+            owner_user_id=7,
+            source_document_id=42,
+            english_term="Binary search",
+            normalized_english_term="binary search",
+        )
+
+        app_module.db.session.add(first)
+        app_module.db.session.commit()
+        app_module.db.session.add(duplicate)
+
+        with pytest.raises(IntegrityError):
+            app_module.db.session.commit()
+
+        app_module.db.session.rollback()

@@ -11,7 +11,7 @@ import os
 import re
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     from .services.layout import (
@@ -54,6 +54,10 @@ CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MAX_UPLOAD_SIZE_MB = 50
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 def positive_int_env(name, default):
@@ -208,7 +212,6 @@ class TerminologyCard(db.Model):
             "owner_user_id",
             "normalized_english_term",
             "source_document_id",
-            "scope_type",
             name="uq_terminology_card_personal_term_source",
         ),
         db.Index("ix_terminology_card_scope_type", "scope_type"),
@@ -238,7 +241,12 @@ class TerminologyCard(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    scope_type = db.Column(db.String(32), nullable=False, default="course")
+    scope_type = db.Column(
+        db.String(32),
+        nullable=False,
+        default="course",
+        server_default="course",
+    )
     course_id = db.Column(db.Integer, nullable=True)
     owner_user_id = db.Column(db.Integer, nullable=True)
     source_document_id = db.Column(db.Integer, nullable=True)
@@ -260,30 +268,48 @@ class TerminologyCard(db.Model):
         db.String(64),
         nullable=False,
         default="unverified_translation",
+        server_default="unverified_translation",
     )
-    confidence_score = db.Column(db.Float, nullable=False, default=0)
+    confidence_score = db.Column(
+        db.Float,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     status = db.Column(
         db.String(64),
         nullable=False,
         default="pending_quality_control",
+        server_default="pending_quality_control",
     )
 
     ai_provider = db.Column(db.String(64), nullable=True)
     ai_model = db.Column(db.String(128), nullable=True)
     prompt_version = db.Column(db.String(64), nullable=True)
-    score_breakdown_json = db.Column(db.Text, default="{}")
-    quality_flags_json = db.Column(db.Text, default="[]")
+    score_breakdown_json = db.Column(db.Text, default="{}", server_default="{}")
+    quality_flags_json = db.Column(db.Text, default="[]", server_default="[]")
     risk_note = db.Column(db.Text, nullable=True)
 
-    feedback_count = db.Column(db.Integer, nullable=False, default=0)
+    feedback_count = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     approved_by = db.Column(db.Integer, nullable=True)
     approved_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=utc_now,
+        server_default=db.func.current_timestamp(),
+    )
     updated_at = db.Column(
         db.DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=db.func.current_timestamp(),
     )
 
 

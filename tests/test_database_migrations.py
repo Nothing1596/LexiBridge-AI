@@ -110,3 +110,28 @@ def test_database_migrations_upgrade_empty_sqlite(tmp_path):
         "ix_terminology_card_alignment_status",
         "ix_terminology_card_normalized_english_term",
     }.issubset(card_indexes)
+
+    connection.execute(
+        """
+        insert into terminology_card (english_term, normalized_english_term)
+        values (?, ?)
+        """,
+        ("Fourier Transform", "fourier transform"),
+    )
+    row = connection.execute(
+        """
+        select scope_type, alignment_status, confidence_score, status,
+               feedback_count, created_at, updated_at
+        from terminology_card
+        where normalized_english_term = ?
+        """,
+        ("fourier transform",),
+    ).fetchone()
+
+    assert row[0] == "course"
+    assert row[1] == "unverified_translation"
+    assert row[2] == 0.0
+    assert row[3] == "pending_quality_control"
+    assert row[4] == 0
+    assert row[5]
+    assert row[6]
