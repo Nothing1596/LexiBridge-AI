@@ -2,22 +2,19 @@
 
 ## 1. Current Project Status
 
-The project has completed the v0.1 local MVP.
+The project is currently a local prototype of the LexiBridge AI bilingual course knowledge alignment platform.
 
 Current completed features:
 
 - Teacher uploads course materials
-- System extracts candidate terms
-- Teacher reviews and approves terms
-- Student views approved glossary
+- System parses documents, extracts candidate terms, retrieves bilingual evidence, and generates terminology cards
+- Teacher handles Quality Control exceptions instead of reviewing every term
+- Student views course terminology cards and personal workspace cards
 - Student submits feedback
-- Teacher resolves feedback
-- Teacher edits terms according to feedback
-- Student exports glossary
-- Teacher uploads course knowledge documents
-- Backend creates KnowledgeDocument and KnowledgeChunk records
-- Teacher searches knowledge chunks
-- Teacher checks knowledge evidence during term review
+- Teacher resolves feedback-driven Quality Control items
+- Student uses subscription quota for personal document parsing and AI alignment
+- Admin manages users, courses, knowledge sources, plans, usage, billing, logs, and ingestion jobs
+- Backend creates Document, DocumentChunk, KnowledgeSource, KnowledgeBaseVersion, KnowledgeChunk, and TerminologyCard records
 
 ## 2. Current Structure
 
@@ -39,7 +36,7 @@ LexiBridge-AI/
 
 The current app.py contains database models, file parsing, term extraction, feedback APIs, knowledge-base APIs, and Flask routes.
 
-It can run now, but it will become hard to maintain when login, AI API, and cloud deployment are added.
+It can run now, but it should be modularized gradually before adding production RAG infrastructure, real SMTP, real payment, or cloud deployment.
 
 ### 3.2 frontend/index.html is too concentrated
 
@@ -78,7 +75,7 @@ LexiBridge-AI/
   - project-structure-plan.md
   - api.md
   - database.md
-  - deployment.md
+  - local-demo.md
   - roadmap.md
 - scripts/
   - init_db.py
@@ -99,7 +96,7 @@ LexiBridge-AI/
 2. Extract CSS into css/main.css
 3. Extract common API functions into js/api.js
 4. Split JavaScript by module
-5. Consider React or Vue only when the project becomes larger
+5. Keep the current single-page frontend for this local demo; revisit a framework only after the project scope changes
 
 ## 7. Current Restrictions
 
@@ -108,14 +105,13 @@ At this stage, do not:
 - Move app.py
 - Move index.html
 - Split the main JavaScript
-- Change database structure
-- Change API routes
+- Add real cloud deployment
 - Delete existing files
 - Introduce a frontend framework
 
 ## 8. Summary
 
-The current project is stable as a v0.1 local MVP.
+The current project is scoped as a local, demonstrable evidence-alignment prototype.
 
 The engineering principle is:
 

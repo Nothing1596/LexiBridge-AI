@@ -5,3 +5,5 @@ pymupdf
 python-docx
 python-pptx
 reportlab
+pytest
+PyYAML
