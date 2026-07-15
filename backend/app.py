@@ -127,6 +127,7 @@ from services import concept_card_feedback as concept_card_feedback_service
 from routes.concept_card_feedback import ConceptCardFeedbackModels, register_concept_card_feedback_routes
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
 from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
+from routes.provider_policy import ProviderPolicyModels, register_provider_policy_routes
 from routes.shared import RouteCoreDependencies
 from routes.student_concept_cards import StudentConceptCardModels, register_student_concept_card_routes
 from routes.teacher_learning_analytics import TeacherLearningAnalyticsModels, register_teacher_learning_analytics_routes
@@ -12033,34 +12034,14 @@ def record_alignment_provider_usage(provider_name, run=None, input_data=None, ou
     return record
 
 
-@app.route("/api/alignment/providers/<path:provider_name>/policy", methods=["POST"])
-def update_alignment_provider_policy_api(provider_name):
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    data = request.get_json(silent=True) or {}
-    policy, created = provider_governance_service.create_or_update_provider_policy(
-        db.session,
-        AlignmentProviderPolicy,
-        provider_name,
-        data,
-        actor=user,
-        now_fn=current_time_text,
-        commit=True,
-    )
-    event_type = "provider_policy_created" if created else "provider_policy_updated"
-    record_provider_governance_audit(
-        event_type,
-        provider_name=provider_name,
-        policy=policy,
-        input_data=data,
-        audit_context=audit_context,
-    )
-    return api_success_with_audit_context(
-        {"policy": provider_governance_service.serialize_provider_policy(policy), "created": created},
-        audit_context=audit_context,
-    )
+register_provider_policy_routes(
+    app,
+    core=route_core,
+    models=ProviderPolicyModels(
+        AlignmentProviderPolicy=AlignmentProviderPolicy,
+    ),
+    record_provider_governance_audit=record_provider_governance_audit,
+)
 
 
 @app.route("/api/alignment/providers/<path:provider_name>/preflight", methods=["POST"])

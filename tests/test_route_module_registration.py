@@ -14,6 +14,7 @@ STUDENT_MODULE_PATH = ROOT / "backend" / "routes" / "student_concept_cards.py"
 CONCEPT_REVIEW_MODULE_PATH = ROOT / "backend" / "routes" / "concept_card_review.py"
 CONCEPT_FEEDBACK_MODULE_PATH = ROOT / "backend" / "routes" / "concept_card_feedback.py"
 PROVIDER_GOVERNANCE_MODULE_PATH = ROOT / "backend" / "routes" / "provider_governance.py"
+PROVIDER_POLICY_MODULE_PATH = ROOT / "backend" / "routes" / "provider_policy.py"
 
 
 def load_route_module(module_path, module_name):
@@ -118,6 +119,16 @@ def provider_governance_dummy_dependencies(module):
     }
 
 
+def provider_policy_dummy_dependencies(module):
+    return {
+        "core": dummy_core_dependencies(),
+        "models": module.ProviderPolicyModels(
+            AlignmentProviderPolicy=object,
+        ),
+        "record_provider_governance_audit": lambda *args, **kwargs: None,
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -170,6 +181,11 @@ def test_route_modules_import_without_backend_app_dependency():
         PROVIDER_GOVERNANCE_MODULE_PATH,
         "register_provider_governance_routes",
         "provider_governance_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        PROVIDER_POLICY_MODULE_PATH,
+        "register_provider_policy_routes",
+        "provider_policy_routes",
     )
 
 
@@ -310,6 +326,23 @@ def test_provider_governance_register_function_registers_expected_routes_and_is_
     }
     assert {path: data for path, data in first.items() if path in expected} == expected
     module.register_provider_governance_routes(app, **provider_governance_dummy_dependencies(module))
+    second = target_route_summary(app, "/api/alignment/providers")
+    assert {path: data for path, data in second.items() if path in expected} == expected
+
+
+def test_provider_policy_register_function_registers_expected_routes_and_is_idempotent():
+    module = load_route_module(PROVIDER_POLICY_MODULE_PATH, "provider_policy_routes")
+    app = Flask("provider-policy-route-registration-test")
+    module.register_provider_policy_routes(app, **provider_policy_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/alignment/providers")
+    expected = {
+        "/api/alignment/providers/<path:provider_name>/policy": {
+            "endpoint": "update_alignment_provider_policy_api",
+            "methods": {"POST"},
+        },
+    }
+    assert {path: data for path, data in first.items() if path in expected} == expected
+    module.register_provider_policy_routes(app, **provider_policy_dummy_dependencies(module))
     second = target_route_summary(app, "/api/alignment/providers")
     assert {path: data for path, data in second.items() if path in expected} == expected
 

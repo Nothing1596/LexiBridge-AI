@@ -145,3 +145,33 @@ Post-extraction route snapshot:
 The provider governance route module keeps provider services domain-specific and outside `RouteCoreDependencies`. Its GET handlers are local read paths: they query registry/policy/usage/preflight history and do not run transport, create verification runs, write provider usage, mutate policy, enable external providers, or call external networks.
 
 Next provider slices should be decided from the remaining route list. Reasonable candidates are provider policy mutation or preflight execution, but real provider transport and external calls must remain disabled unless a later task explicitly changes that boundary with tests.
+
+## Task 9C.4B Update
+
+Task 9C.4B extracts only provider policy mutation into `backend/routes/provider_policy.py`. It does not extract provider preflight execution, alignment verification execution, replay behavior, provider usage recording, credential management, environment mutation, or transport code.
+
+Migrated route:
+
+- `POST /api/alignment/providers/<provider_name>/policy`
+
+Provider routes still in `backend/app.py` after 9C.4B:
+
+- `POST /api/alignment/providers/<provider_name>/preflight`
+- `POST /api/alignment/verify`
+- `GET /api/admin/alignment-runs`
+- `GET /api/admin/ai/providers`
+- other legacy AI provider registry/health endpoints outside the alignment-provider governance group
+
+Post-extraction route snapshot:
+
+- `backend/app.py` line count: 16,366
+- Direct `@app.route` handlers remaining in `backend/app.py`: 141
+- Extracted route modules: 6
+- Extracted routes: 21
+- `RouteCoreDependencies` fields: 9
+- `register_provider_policy_routes(app, *, core, models, record_provider_governance_audit)` register parameter count: 4
+- `ProviderPolicyModels` fields: 1
+
+The provider policy route module keeps provider policy persistence in `services/provider_governance.py` and keeps the existing provider governance audit adapter explicit. Its POST handler writes only provider policy data and does not run transport, create verification runs, write provider usage, execute preflight, manage credentials, enable real external providers, or call external networks.
+
+The next provider slice should be selected from the remaining route list. Provider preflight execution is the next reasonable candidate, but it should remain separate from alignment verification execution because those paths have different state and audit semantics.
