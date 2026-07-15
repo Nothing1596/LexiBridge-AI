@@ -125,6 +125,7 @@ from services import provider_preflight as provider_preflight_service
 from services import student_course_access as student_course_access_service
 from services import student_learning_progress as student_learning_progress_service
 from services import concept_card_feedback as concept_card_feedback_service
+from routes.alignment_verification import register_alignment_verification_routes
 from routes.concept_card_feedback import ConceptCardFeedbackModels, register_concept_card_feedback_routes
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
 from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
@@ -12076,70 +12077,11 @@ def build_alignment_verification_execution_dependencies():
     )
 
 
-def build_alignment_verification_execution_context(audit_context):
-    normalized = audit_context_service.normalize_audit_context(audit_context)
-    return alignment_verification_execution_service.AlignmentVerificationExecutionContext(
-        request_id=normalized.get("request_id", ""),
-        actor_id=normalized.get("actor_id"),
-        actor_role=normalized.get("actor_role", ""),
-        actor_name=normalized.get("actor_name", ""),
-        source=normalized.get("source", "api"),
-        ip_hash=normalized.get("ip_hash", ""),
-        user_agent_summary=normalized.get("user_agent_summary", ""),
-        route="/api/alignment/verify",
-        occurred_at=current_time_text(),
-    )
-
-
-def build_alignment_verification_actor(user):
-    return alignment_verification_execution_service.AlignmentVerificationActor(
-        user_id=getattr(user, "id", None),
-        email=str(getattr(user, "email", "") or ""),
-        role=str(getattr(user, "role", "") or ""),
-        display_name=str(
-            getattr(user, "display_name", "")
-            or getattr(user, "username", "")
-            or getattr(user, "email", "")
-            or ""
-        ),
-    )
-
-
-@app.route("/api/alignment/verify", methods=["POST"])
-def verify_alignment_api():
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"student", "teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    audit_context = get_route_audit_context(user)
-    data = request.get_json(silent=True) or {}
-    provider_name = str(data.get("provider") or data.get("provider_name") or "mock-rule-v1").strip()
-    card_uid = str(data.get("card_uid") or "").strip()
-    attach_to_card = data.get("attach_to_card", False)
-    if isinstance(attach_to_card, str):
-        attach_to_card = attach_to_card.strip().lower() in {"1", "true", "yes", "on"}
-    else:
-        attach_to_card = bool(attach_to_card)
-    result = alignment_verification_execution_service.execute_alignment_verification(
-        alignment_verification_execution_service.AlignmentVerificationExecutionRequest(
-            payload=data,
-            provider_name=provider_name,
-            card_uid=card_uid,
-            attach_to_card=attach_to_card,
-        ),
-        build_alignment_verification_actor(user),
-        build_alignment_verification_execution_context(audit_context),
-        build_alignment_verification_execution_dependencies(),
-    )
-    if result.succeeded:
-        return api_success_with_audit_context(result.payload, result.message, audit_context)
-    return api_error_with_audit_context(
-        result.error_code,
-        result.message,
-        result.status_code,
-        audit_context,
-        {"audit_error_code": result.audit_error_code},
-    )
+register_alignment_verification_routes(
+    app,
+    core=route_core,
+    execution_dependencies=build_alignment_verification_execution_dependencies,
+)
 
 
 def knowledge_ingestion_models():

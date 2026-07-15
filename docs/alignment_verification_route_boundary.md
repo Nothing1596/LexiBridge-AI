@@ -1,7 +1,7 @@
 # Alignment Verification Route Boundary
 
 Task 9C.4D characterizes `POST /api/alignment/verify` without moving the route or changing production behavior.
-Task 9C.4D.1 adds an application service boundary for the execution orchestration while leaving the route registered in `backend/app.py`.
+Task 9C.4D.1 adds an application service boundary for the execution orchestration. Task 9C.4E moves the resulting thin HTTP adapter into `backend/routes/alignment_verification.py` while keeping the same URL, method, Flask endpoint, request/response contract, provider modes, state machine, usage behavior, attach gate, audit events, and transaction behavior.
 
 ## Route Contract
 
@@ -9,12 +9,12 @@ Task 9C.4D.1 adds an application service boundary for the execution orchestratio
 |---|---|
 | URL | `POST /api/alignment/verify` |
 | Flask endpoint | `verify_alignment_api` |
-| Handler location | `backend/app.py:12059` through `backend/app.py:12339` |
-| Handler size | 281 lines including decorator and blanks |
+| Handler location | `backend/routes/alignment_verification.py` registered from `backend/app.py` |
+| Handler size | 31-line nested HTTP adapter; original 9C.4D handler was 281 lines including decorator and blanks |
 | Authentication | `require_current_user({"student", "teacher", "admin"})` |
 | Request body parsing | `request.get_json(silent=True) or {}`; malformed JSON currently follows the empty-body validation path |
 | Provider default | `mock-rule-v1` from `provider` or `provider_name` |
-| Card lookup | Optional `card_uid`; when present, route loads `ConceptAlignmentCard` and builds verification input from the card |
+| Card lookup | Optional `card_uid`; when present, the execution service loads `ConceptAlignmentCard` and builds verification input from the card |
 | Success status | `200` with success envelope and request ID |
 | Validation/provider errors | `400` with `audit_error_code` |
 | Missing card | `404` with `audit_error_code=concept_card_not_found` |
@@ -25,7 +25,7 @@ The response top-level data currently includes `run_uid`, provider metadata, par
 
 ## Direct Dependencies
 
-The route handler directly coordinates these dependencies:
+The original Task 9C.4D route handler directly coordinated these dependencies. After Task 9C.4D.1 and 9C.4E, `backend/routes/alignment_verification.py` only builds the execution DTOs and calls `execute_alignment_verification(...)`; the execution service owns this dependency chain:
 
 | Dependency | Use |
 |---|---|
@@ -195,10 +195,25 @@ The service now owns the application orchestration that was previously in `verif
 - business transaction commit/rollback;
 - safe response data construction.
 
-`verify_alignment_api` remains in `backend/app.py` and remains the Flask endpoint. Its remaining responsibilities are HTTP-only: authentication, request JSON parsing with the existing `silent=True` behavior, provider/card/attach field normalization, DTO construction, service invocation, and mapping `AlignmentVerificationExecutionResult` back to the existing API envelope.
+`verify_alignment_api` now lives in `backend/routes/alignment_verification.py` and remains the Flask endpoint. Its remaining responsibilities are HTTP-only: authentication, request JSON parsing with the existing `silent=True` behavior, provider/card/attach field normalization, DTO construction, service invocation, and mapping `AlignmentVerificationExecutionResult` back to the existing API envelope.
+
+Task 9C.4E status:
+
+`SERVICE_BOUNDARY_ESTABLISHED`
+
+`THIN_ROUTE_EXTRACTED`
+
+Current adapter snapshot:
+
+- Original Task 9C.4D handler: about 281 lines in `backend/app.py`.
+- Task 9C.4D.1 thin adapter: about 35 lines in `backend/app.py`.
+- Task 9C.4E route module: `backend/routes/alignment_verification.py`, 139 lines total.
+- Nested `verify_alignment_api` adapter body: 31 lines.
+- Register signature: `register_alignment_verification_routes(app, *, core, execution_dependencies, execute_fn=execute_alignment_verification)`.
+- Execution service public API unchanged: `execute_alignment_verification(...)`, `AlignmentVerificationExecutionRequest`, `AlignmentVerificationActor`, `AlignmentVerificationExecutionContext`, `AlignmentVerificationExecutionDependencies`, and `AlignmentVerificationExecutionResult`.
 
 This changes the extraction conclusion to:
 
-`GO_DIRECT_ROUTE_EXTRACTION_AFTER_9C.4D.1_GATE`
+`THIN_ROUTE_EXTRACTION_COMPLETE`
 
-The next route extraction may move only the thin HTTP adapter into a route module. It must not move or rewrite the verification state machine, provider execution behavior, usage write semantics, attach gate, audit events, or transaction behavior.
+Future tasks must not move or rewrite the verification state machine, provider execution behavior, usage write semantics, attach gate, audit events, or transaction behavior as part of route cleanup.

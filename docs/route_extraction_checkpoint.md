@@ -264,3 +264,28 @@ Post-9C.4D.1 snapshot:
 - Alignment verification execution service dataclasses: 5
 
 The next safe slice is to move only the thin `/api/alignment/verify` route adapter into a route module. That task must not move or rewrite the execution state machine, usage semantics, attach gate, audit events, or transaction behavior.
+
+## Task 9C.4E Update
+
+Task 9C.4E extracts only the already-thin `POST /api/alignment/verify` HTTP adapter into `backend/routes/alignment_verification.py`.
+
+- New route module: `backend/routes/alignment_verification.py`
+- Route count: 1
+- Registered route: `POST /api/alignment/verify`
+- Flask endpoint: `verify_alignment_api`
+- Register signature: `register_alignment_verification_routes(app, *, core, execution_dependencies, execute_fn=execute_alignment_verification)`
+- Execution dependency boundary: `AlignmentVerificationExecutionDependencies` remains an explicit verification-domain dependency and is not added to `RouteCoreDependencies`.
+- Execution service API: unchanged.
+- Business owner: `backend/services/alignment_verification_execution.py`
+
+The route module owns only auth, request parsing with the existing `silent=True` behavior, request ID/audit context, DTO construction, execution service invocation, and response mapping. It does not access `AlignmentVerificationRun`, `AlignmentProviderUsageRecord`, `AlignmentProviderPolicy`, provider transport, credentials, parser internals, card attach logic, or business commit/rollback.
+
+Post-9C.4E snapshot:
+
+- `backend/app.py` line count: 16,075
+- Direct `@app.route` handlers remaining in `backend/app.py`: 139
+- Extracted route modules: 8
+- Extracted routes: 23
+- RouteCoreDependencies fields: 9
+
+Remaining provider/admin-adjacent route domains include admin alignment run listing, legacy AI provider/admin views, upload/knowledge/evidence routes, course and policy management routes, and other legacy app routes. The next provider-related slice should be selected from the remaining route inventory and must not re-open external provider execution unless a separate task explicitly hardens that path.

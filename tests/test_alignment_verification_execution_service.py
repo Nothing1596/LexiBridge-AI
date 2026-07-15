@@ -229,13 +229,13 @@ def test_execution_service_boundary_and_immutable_dtos(app_module):
     assert "alignment_verification_execution_service" not in core_field_names
     assert "provider_execution_service" not in core_field_names
 
-    route_source = inspect.getsource(app_module.verify_alignment_api)
+    route_source = inspect.getsource(app_module.app.view_functions["verify_alignment_api"])
     assert "AlignmentVerificationRun" not in route_source
     assert "AlignmentProviderUsageRecord" not in route_source
     assert "record_alignment_provider_usage" not in route_source
     assert "verify_alignment(" not in route_source
     assert "apply_verification_result_to_card" not in route_source
-    assert "execute_alignment_verification" in route_source
+    assert "execute_fn(" in route_source
 
 
 def test_execution_service_provider_modes_and_usage_write_set(app_module):

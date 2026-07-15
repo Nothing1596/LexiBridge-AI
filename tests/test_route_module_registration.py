@@ -16,6 +16,7 @@ CONCEPT_FEEDBACK_MODULE_PATH = ROOT / "backend" / "routes" / "concept_card_feedb
 PROVIDER_GOVERNANCE_MODULE_PATH = ROOT / "backend" / "routes" / "provider_governance.py"
 PROVIDER_POLICY_MODULE_PATH = ROOT / "backend" / "routes" / "provider_policy.py"
 PROVIDER_PREFLIGHT_MODULE_PATH = ROOT / "backend" / "routes" / "provider_preflight.py"
+ALIGNMENT_VERIFICATION_MODULE_PATH = ROOT / "backend" / "routes" / "alignment_verification.py"
 
 
 def load_route_module(module_path, module_name):
@@ -141,6 +142,25 @@ def provider_preflight_dummy_dependencies(module):
     }
 
 
+def alignment_verification_dummy_dependencies(module):
+    return {
+        "core": dummy_core_dependencies(),
+        "execution_dependencies": lambda: object(),
+        "execute_fn": lambda *args, **kwargs: type(
+            "Result",
+            (),
+            {
+                "succeeded": True,
+                "payload": {"ok": True},
+                "message": "ok",
+                "error_code": "",
+                "status_code": 200,
+                "audit_error_code": "",
+            },
+        )(),
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -203,6 +223,11 @@ def test_route_modules_import_without_backend_app_dependency():
         PROVIDER_PREFLIGHT_MODULE_PATH,
         "register_provider_preflight_routes",
         "provider_preflight_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        ALIGNMENT_VERIFICATION_MODULE_PATH,
+        "register_alignment_verification_routes",
+        "alignment_verification_routes",
     )
 
 
@@ -381,6 +406,21 @@ def test_provider_preflight_register_function_registers_expected_routes_and_is_i
     assert {path: data for path, data in second.items() if path in expected} == expected
 
 
+def test_alignment_verification_register_function_registers_expected_route_and_is_idempotent():
+    module = load_route_module(ALIGNMENT_VERIFICATION_MODULE_PATH, "alignment_verification_routes")
+    app = Flask("alignment-verification-route-registration-test")
+    module.register_alignment_verification_routes(app, **alignment_verification_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/alignment/verify")
+    assert first == {
+        "/api/alignment/verify": {
+            "endpoint": "verify_alignment_api",
+            "methods": {"POST"},
+        },
+    }
+    module.register_alignment_verification_routes(app, **alignment_verification_dummy_dependencies(module))
+    assert target_route_summary(app, "/api/alignment/verify") == first
+
+
 def test_existing_app_has_no_duplicate_teacher_analytics_routes(app_module):
     summary = target_route_summary(app_module.app, "/api/teacher/learning-analytics")
     assert summary == {
@@ -485,6 +525,20 @@ def test_existing_app_has_no_duplicate_provider_governance_routes(app_module):
     for key, endpoint in expected.items():
         assert actual.get(key) == endpoint
         assert sum(1 for rule in app_module.app.url_map.iter_rules() if rule.rule == key[0] and key[1] in rule.methods) == 1
+
+
+def test_existing_app_has_single_alignment_verification_route(app_module):
+    actual = {}
+    for rule in app_module.app.url_map.iter_rules():
+        for method in rule.methods - {"HEAD", "OPTIONS"}:
+            if rule.rule == "/api/alignment/verify":
+                actual[(rule.rule, method)] = rule.endpoint
+    assert actual == {("/api/alignment/verify", "POST"): "verify_alignment_api"}
+    assert sum(
+        1
+        for rule in app_module.app.url_map.iter_rules()
+        if rule.rule == "/api/alignment/verify" and "POST" in rule.methods
+    ) == 1
 
 
 def test_app_startup_keeps_representative_legacy_routes(app_module, client, teacher_token):
