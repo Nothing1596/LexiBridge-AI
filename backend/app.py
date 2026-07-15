@@ -125,6 +125,7 @@ from services import provider_preflight as provider_preflight_service
 from services import student_course_access as student_course_access_service
 from services import student_learning_progress as student_learning_progress_service
 from services import concept_card_feedback as concept_card_feedback_service
+from routes.admin_alignment_runs import AdminAlignmentRunModels, register_admin_alignment_run_routes
 from routes.alignment_verification import register_alignment_verification_routes
 from routes.concept_card_feedback import ConceptCardFeedbackModels, register_concept_card_feedback_routes
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
@@ -13532,16 +13533,14 @@ def admin_ingestion_jobs():
     })
 
 
-@app.route("/api/admin/alignment-runs", methods=["GET"])
-def admin_alignment_runs():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    runs = AlignmentRun.query.order_by(AlignmentRun.id.desc()).limit(300).all()
-    return jsonify({
-        "status": "success",
-        "runs": [serialize_alignment_run(run) for run in runs]
-    })
+register_admin_alignment_run_routes(
+    app,
+    core=route_core,
+    models=AdminAlignmentRunModels(
+        AlignmentRun=AlignmentRun,
+    ),
+    serialize_alignment_run=serialize_alignment_run,
+)
 
 
 @app.route("/api/admin/personal-access-audit", methods=["GET"])

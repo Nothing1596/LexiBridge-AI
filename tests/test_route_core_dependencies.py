@@ -36,6 +36,10 @@ from routes.provider_preflight import (
     register_provider_preflight_routes,
 )
 from routes.alignment_verification import register_alignment_verification_routes
+from routes.admin_alignment_runs import (
+    AdminAlignmentRunModels,
+    register_admin_alignment_run_routes,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +52,7 @@ PROVIDER_GOVERNANCE_MODULE = ROOT / "backend" / "routes" / "provider_governance.
 PROVIDER_POLICY_MODULE = ROOT / "backend" / "routes" / "provider_policy.py"
 PROVIDER_PREFLIGHT_MODULE = ROOT / "backend" / "routes" / "provider_preflight.py"
 ALIGNMENT_VERIFICATION_MODULE = ROOT / "backend" / "routes" / "alignment_verification.py"
+ADMIN_ALIGNMENT_RUNS_MODULE = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
 
 EXPECTED_CORE_FIELDS = {
     "db",
@@ -121,6 +126,9 @@ def test_route_core_dependencies_shape_and_immutability():
     assert not hasattr(core, "provider_execution_service")
     assert not hasattr(core, "AlignmentVerificationRun")
     assert not hasattr(core, "AlignmentProviderUsageRecord")
+    assert not hasattr(core, "AlignmentRun")
+    assert not hasattr(core, "admin_alignment_run_service")
+    assert not hasattr(core, "run_query_service")
     with pytest.raises(FrozenInstanceError):
         core.db = object()
 
@@ -143,6 +151,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         PROVIDER_POLICY_MODULE,
         PROVIDER_PREFLIGHT_MODULE,
         ALIGNMENT_VERIFICATION_MODULE,
+        ADMIN_ALIGNMENT_RUNS_MODULE,
     ]:
         imports = set(_imports_for(path))
         assert "backend.app" not in imports
@@ -156,6 +165,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     provider_policy_sig = inspect.signature(register_provider_policy_routes)
     provider_preflight_sig = inspect.signature(register_provider_preflight_routes)
     alignment_verification_sig = inspect.signature(register_alignment_verification_routes)
+    admin_alignment_runs_sig = inspect.signature(register_admin_alignment_run_routes)
     assert "core" in teacher_sig.parameters
     assert "core" in student_sig.parameters
     assert "core" in review_sig.parameters
@@ -164,7 +174,10 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "core" in provider_policy_sig.parameters
     assert "core" in provider_preflight_sig.parameters
     assert "core" in alignment_verification_sig.parameters
+    assert "core" in admin_alignment_runs_sig.parameters
     assert "execution_dependencies" in alignment_verification_sig.parameters
+    assert "models" in admin_alignment_runs_sig.parameters
+    assert "serialize_alignment_run" in admin_alignment_runs_sig.parameters
     for name in {
         "db",
         "audit_model",
@@ -184,6 +197,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert name not in provider_policy_sig.parameters
         assert name not in provider_preflight_sig.parameters
         assert name not in alignment_verification_sig.parameters
+        assert name not in admin_alignment_runs_sig.parameters
     for service_name in {
         "concept_card_review_service",
         "concept_card_feedback_service",
@@ -196,6 +210,8 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         "credential_resolver",
         "alignment_verification_execution_service",
         "provider_execution_service",
+        "admin_alignment_run_service",
+        "run_query_service",
     }:
         assert service_name not in review_sig.parameters
         assert service_name not in feedback_sig.parameters
@@ -203,6 +219,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert service_name not in provider_policy_sig.parameters
         assert service_name not in provider_preflight_sig.parameters
         assert service_name not in alignment_verification_sig.parameters
+        assert service_name not in admin_alignment_runs_sig.parameters
 
 
 def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoints():
@@ -301,6 +318,14 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
             },
         )(),
     )
+    register_admin_alignment_run_routes(
+        app,
+        core=core,
+        models=AdminAlignmentRunModels(
+            AlignmentRun=object,
+        ),
+        serialize_alignment_run=lambda run: {},
+    )
     paths = [
         rule.rule
         for rule in app.url_map.iter_rules()
@@ -309,6 +334,7 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
         or rule.rule.startswith("/api/concept-cards")
         or rule.rule.startswith("/api/alignment/providers")
         or rule.rule == "/api/alignment/verify"
+        or rule.rule == "/api/admin/alignment-runs"
     ]
     method_paths = [
         (rule.rule, method)
@@ -325,3 +351,4 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
     assert "/api/alignment/providers/<path:provider_name>/policy" in paths
     assert "/api/alignment/providers/<path:provider_name>/preflight" in paths
     assert "/api/alignment/verify" in paths
+    assert "/api/admin/alignment-runs" in paths

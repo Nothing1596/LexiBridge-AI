@@ -3,7 +3,7 @@
 Task: 9C.4F
 Baseline commit: `cb63cd657929e5c5f15efd6a9adc0e6384a08a86`
 Branch: `audit/provider-admin-routes-9c4f`
-Status: route inventory and characterization only. No route is migrated in this task.
+Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`.
 
 ## Scope
 
@@ -20,7 +20,7 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 
 | Route | Method | Endpoint | Lines | Classification | Read only | Auth/roles | OpenAPI | Frontend/scripts | Database writes | Network risk | Secret risk | Recommendation |
 |---|---:|---|---:|---|---:|---|---:|---|---|---|---|---|
-| `/api/admin/alignment-runs` | GET | `admin_alignment_runs` | 9 | `READ_ONLY_ADMIN_LISTING` | yes | admin only | no | README only | none | none | serialized run summaries only | `DIRECT_EXTRACTION_SAFE` |
+| `/api/admin/alignment-runs` | GET | `admin_alignment_runs` | module | `EXTRACTED_READ_ONLY_ADMIN_LISTING` | yes | admin only | no | README only | none | none | serialized run summaries only | extracted in `backend/routes/admin_alignment_runs.py` |
 | `/api/admin/ai/providers` | GET | `admin_ai_providers` | 10 | `LEGACY_ACTIVE` / `READ_ONLY_PROVIDER_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none in GET | provider config fields; no API keys returned | `DEPRECATION_AUDIT_REQUIRED` before extraction |
 | `/api/admin/ai/models` | GET | `admin_ai_models` | 7 | `LEGACY_ACTIVE` / `READ_ONLY_PROVIDER_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | model registry fields; no credentials | `DEPRECATION_AUDIT_REQUIRED` before extraction |
 | `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | shared | `LEGACY_ACTIVE` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | prompt templates only | split GET from POST before extraction |
@@ -65,7 +65,8 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 - OpenAPI: not currently listed.
 - Frontend: no active frontend call found.
 - Existing tests before this task: no dedicated contract test found.
-- Suitability: `DIRECT_EXTRACTION_SAFE`, but low product value because it is not in OpenAPI/frontend.
+- Status: `EXTRACTED_READ_ONLY_ADMIN_LISTING` in `backend/routes/admin_alignment_runs.py`.
+- Suitability: extracted as a low-risk, narrow route module. It remains low product value because it is not in OpenAPI/frontend.
 
 ## Admin AI Providers Contract
 
@@ -166,7 +167,7 @@ OpenAPI dependencies:
 
 | Endpoint | Lines | Direct models | Service/helper calls | Returns | Writes | Network risk | Extraction suitability |
 |---|---:|---:|---:|---:|---:|---:|---|
-| `admin_alignment_runs` | 9 | 1 | serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` |
+| `admin_alignment_runs` | module | 1 | serializer | 1 | 0 | no | `EXTRACTED_READ_ONLY_ADMIN_LISTING` |
 | `admin_ai_providers` | 10 | 1 | seed, metadata, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
 | `admin_ai_models` | 7 | 1 | seed, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
 | `admin_ai_prompts` | 31 | 1 | seed, validation, serializer | 3 | yes on POST | no | `SERVICE_BOUNDARY_REQUIRED` |
@@ -180,7 +181,7 @@ OpenAPI dependencies:
 
 ## Final Decision
 
-Primary conclusion: `GO_ADMIN_ALIGNMENT_RUNS_EXTRACTION`
+Primary conclusion after Task 9C.4G: `ADMIN_ALIGNMENT_RUNS_EXTRACTED`
 
 Reasoning:
 
@@ -191,7 +192,7 @@ Reasoning:
 - It is independent from the active frontend provider admin views.
 - Extracting it should not freeze the legacy `/api/admin/ai/*` design.
 
-The next task should only extract `GET /api/admin/alignment-runs` into a focused admin alignment run route module. It must not include `/api/admin/ai/*`, `/api/alignment/run`, `/api/alignment/runs`, healthcheck, prompt mutation, or any provider transport path.
+Task 9C.4G extracted only `GET /api/admin/alignment-runs` into `backend/routes/admin_alignment_runs.py`. It did not include `/api/admin/ai/*`, `/api/alignment/run`, `/api/alignment/runs`, healthcheck, prompt mutation, or any provider transport path.
 
 Secondary follow-up:
 

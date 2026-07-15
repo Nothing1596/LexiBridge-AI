@@ -17,6 +17,7 @@ PROVIDER_GOVERNANCE_MODULE_PATH = ROOT / "backend" / "routes" / "provider_govern
 PROVIDER_POLICY_MODULE_PATH = ROOT / "backend" / "routes" / "provider_policy.py"
 PROVIDER_PREFLIGHT_MODULE_PATH = ROOT / "backend" / "routes" / "provider_preflight.py"
 ALIGNMENT_VERIFICATION_MODULE_PATH = ROOT / "backend" / "routes" / "alignment_verification.py"
+ADMIN_ALIGNMENT_RUNS_MODULE_PATH = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
 
 
 def load_route_module(module_path, module_name):
@@ -161,6 +162,30 @@ def alignment_verification_dummy_dependencies(module):
     }
 
 
+def admin_alignment_runs_dummy_dependencies(module):
+    class DummyQuery:
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return []
+
+    class DummyAlignmentRun:
+        id = object()
+        query = DummyQuery()
+
+    return {
+        "core": dummy_core_dependencies(),
+        "models": module.AdminAlignmentRunModels(
+            AlignmentRun=DummyAlignmentRun,
+        ),
+        "serialize_alignment_run": lambda run: {},
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -228,6 +253,11 @@ def test_route_modules_import_without_backend_app_dependency():
         ALIGNMENT_VERIFICATION_MODULE_PATH,
         "register_alignment_verification_routes",
         "alignment_verification_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        ADMIN_ALIGNMENT_RUNS_MODULE_PATH,
+        "register_admin_alignment_run_routes",
+        "admin_alignment_run_routes",
     )
 
 
@@ -421,6 +451,21 @@ def test_alignment_verification_register_function_registers_expected_route_and_i
     assert target_route_summary(app, "/api/alignment/verify") == first
 
 
+def test_admin_alignment_runs_register_function_registers_expected_route_and_is_idempotent():
+    module = load_route_module(ADMIN_ALIGNMENT_RUNS_MODULE_PATH, "admin_alignment_run_routes")
+    app = Flask("admin-alignment-run-route-registration-test")
+    module.register_admin_alignment_run_routes(app, **admin_alignment_runs_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/admin/alignment-runs")
+    assert first == {
+        "/api/admin/alignment-runs": {
+            "endpoint": "admin_alignment_runs",
+            "methods": {"GET"},
+        },
+    }
+    module.register_admin_alignment_run_routes(app, **admin_alignment_runs_dummy_dependencies(module))
+    assert target_route_summary(app, "/api/admin/alignment-runs") == first
+
+
 def test_existing_app_has_no_duplicate_teacher_analytics_routes(app_module):
     summary = target_route_summary(app_module.app, "/api/teacher/learning-analytics")
     assert summary == {
@@ -541,6 +586,20 @@ def test_existing_app_has_single_alignment_verification_route(app_module):
     ) == 1
 
 
+def test_existing_app_has_single_admin_alignment_runs_route(app_module):
+    actual = {}
+    for rule in app_module.app.url_map.iter_rules():
+        for method in rule.methods - {"HEAD", "OPTIONS"}:
+            if rule.rule == "/api/admin/alignment-runs":
+                actual[(rule.rule, method)] = rule.endpoint
+    assert actual == {("/api/admin/alignment-runs", "GET"): "admin_alignment_runs"}
+    assert sum(
+        1
+        for rule in app_module.app.url_map.iter_rules()
+        if rule.rule == "/api/admin/alignment-runs" and "GET" in rule.methods
+    ) == 1
+
+
 def test_app_startup_keeps_representative_legacy_routes(app_module, client, teacher_token):
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     for path in {
@@ -548,6 +607,7 @@ def test_app_startup_keeps_representative_legacy_routes(app_module, client, teac
         "/api/student/concept-cards",
         "/api/concept-cards/student-feedback-queue",
         "/api/alignment/verify",
+        "/api/admin/alignment-runs",
         "/api/alignment/providers",
         "/api/teacher/learning-analytics",
     }:

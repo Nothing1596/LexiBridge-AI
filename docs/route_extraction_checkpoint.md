@@ -328,3 +328,34 @@ Post-9C.4F snapshot:
 Primary next-slice conclusion: `GO_ADMIN_ALIGNMENT_RUNS_EXTRACTION`.
 
 The next route extraction should be limited to `GET /api/admin/alignment-runs`. It must not include legacy `/api/admin/ai/*`, `/api/alignment/run`, `/api/alignment/runs`, provider healthcheck, prompt mutation, or external provider transport. Legacy provider admin routes need a separate compatibility/deprecation audit before they are moved.
+
+## Task 9C.4G Update
+
+Task 9C.4G extracts only the legacy admin alignment run listing into `backend/routes/admin_alignment_runs.py`.
+
+- New route module: `backend/routes/admin_alignment_runs.py`
+- Route count: 1
+- Registered route: `GET /api/admin/alignment-runs`
+- Flask endpoint: `admin_alignment_runs`
+- Register signature: `register_admin_alignment_run_routes(app, *, core, models, serialize_alignment_run)`
+- Domain model dependency: `AdminAlignmentRunModels(AlignmentRun)`
+- Serializer dependency: existing `serialize_alignment_run` passed explicitly from `backend/app.py`
+- RouteCoreDependencies fields: 9
+
+The route module preserves the existing admin-only permission boundary, id-desc/limit-300 ordering, no-query-filter behavior, top-level `{"status", "runs"}` response shape, absence of `request_id`, and absence of view AuditRecord writes. It does not query or mutate `AlignmentVerificationRun`, `AlignmentProviderUsageRecord`, provider policy, provider preflight, Concept Cards, replay state, or provider transport.
+
+Post-9C.4G snapshot:
+
+- `backend/app.py` line count: 16,074
+- Direct `@app.route` handlers remaining in `backend/app.py`: 138
+- Extracted route modules: 9
+- Extracted routes: 24
+
+Remaining provider/admin-adjacent route domains:
+
+- active legacy `/api/admin/ai/*` provider admin views and prompt mutation;
+- `POST /api/admin/ai/healthcheck`, which has a live-probe transport risk;
+- legacy `/api/alignment/run`, which still owns execution/background-job/card/usage orchestration;
+- legacy `/api/alignment/runs` and `/api/alignment/runs/<int:run_id>` read paths.
+
+Do not migrate `/api/admin/ai/*` as the next step without a separate compatibility/deprecation audit. Healthcheck and `/api/alignment/run` require explicit service/security boundaries before route extraction.
