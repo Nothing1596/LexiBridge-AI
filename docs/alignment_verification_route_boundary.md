@@ -1,6 +1,7 @@
 # Alignment Verification Route Boundary
 
 Task 9C.4D characterizes `POST /api/alignment/verify` without moving the route or changing production behavior.
+Task 9C.4D.1 adds an application service boundary for the execution orchestration while leaving the route registered in `backend/app.py`.
 
 ## Route Contract
 
@@ -165,3 +166,39 @@ The route is not just thin HTTP glue. It still owns significant orchestration:
 - transaction commit/rollback behavior.
 
 Before moving this route into a route module, create or extend a domain service that owns the verification execution transaction. The route should eventually pass actor context, request payload, and request ID into that service, then translate a service result into the existing response envelope. The service contract must preserve the state machine, write-set matrix, usage behavior, audit events, no-network gate, secret redaction, and attach behavior documented here.
+
+## Task 9C.4D.1 Service Boundary
+
+Task 9C.4D.1 introduces `backend/services/alignment_verification_execution.py` as the application-layer execution boundary. The public entry point is:
+
+```text
+execute_alignment_verification(
+    request: AlignmentVerificationExecutionRequest,
+    actor: AlignmentVerificationActor,
+    context: AlignmentVerificationExecutionContext,
+    dependencies: AlignmentVerificationExecutionDependencies,
+) -> AlignmentVerificationExecutionResult
+```
+
+The DTOs are frozen dataclasses. The service accepts normalized request fields, safe actor metadata, safe audit context, and explicit verification-domain dependencies. It does not import Flask, `backend.app`, route modules, `RouteCoreDependencies`, credential resolvers, provider clients, or external transport.
+
+The service now owns the application orchestration that was previously in `verify_alignment_api`:
+
+- provider existence validation;
+- card-vs-direct-payload input branch;
+- provider governance gate;
+- policy-block run creation;
+- mock/fake/replay/disabled provider execution dispatch through existing services;
+- provider usage write;
+- optional attach gate and card update;
+- verification audit sequencing;
+- business transaction commit/rollback;
+- safe response data construction.
+
+`verify_alignment_api` remains in `backend/app.py` and remains the Flask endpoint. Its remaining responsibilities are HTTP-only: authentication, request JSON parsing with the existing `silent=True` behavior, provider/card/attach field normalization, DTO construction, service invocation, and mapping `AlignmentVerificationExecutionResult` back to the existing API envelope.
+
+This changes the extraction conclusion to:
+
+`GO_DIRECT_ROUTE_EXTRACTION_AFTER_9C.4D.1_GATE`
+
+The next route extraction may move only the thin HTTP adapter into a route module. It must not move or rewrite the verification state machine, provider execution behavior, usage write semantics, attach gate, audit events, or transaction behavior.

@@ -118,6 +118,7 @@ from services import bilingual_evidence_workflow as bilingual_evidence_service
 from services import concept_card_drafts as concept_card_draft_service
 from services import chinese_term_candidates as chinese_term_candidate_service
 from services import alignment_verification as alignment_verification_service
+from services import alignment_verification_execution as alignment_verification_execution_service
 from services import alignment_providers as alignment_provider_service
 from services import provider_governance as provider_governance_service
 from services import provider_preflight as provider_preflight_service
@@ -12056,6 +12057,54 @@ register_provider_preflight_routes(
 )
 
 
+def build_alignment_verification_execution_dependencies():
+    return alignment_verification_execution_service.AlignmentVerificationExecutionDependencies(
+        db=db,
+        models=alignment_verification_execution_service.AlignmentVerificationExecutionModels(
+            concept_alignment_card=ConceptAlignmentCard,
+            provider_policy=AlignmentProviderPolicy,
+            provider_usage_record=AlignmentProviderUsageRecord,
+            verification_run=AlignmentVerificationRun,
+        ),
+        provider_registry_service=alignment_provider_service,
+        provider_governance_service=provider_governance_service,
+        verification_service=alignment_verification_service,
+        concept_card_service=concept_card_service,
+        current_time_text=current_time_text,
+        record_alignment_verification_audit=record_alignment_verification_audit,
+        record_alignment_provider_usage=record_alignment_provider_usage,
+    )
+
+
+def build_alignment_verification_execution_context(audit_context):
+    normalized = audit_context_service.normalize_audit_context(audit_context)
+    return alignment_verification_execution_service.AlignmentVerificationExecutionContext(
+        request_id=normalized.get("request_id", ""),
+        actor_id=normalized.get("actor_id"),
+        actor_role=normalized.get("actor_role", ""),
+        actor_name=normalized.get("actor_name", ""),
+        source=normalized.get("source", "api"),
+        ip_hash=normalized.get("ip_hash", ""),
+        user_agent_summary=normalized.get("user_agent_summary", ""),
+        route="/api/alignment/verify",
+        occurred_at=current_time_text(),
+    )
+
+
+def build_alignment_verification_actor(user):
+    return alignment_verification_execution_service.AlignmentVerificationActor(
+        user_id=getattr(user, "id", None),
+        email=str(getattr(user, "email", "") or ""),
+        role=str(getattr(user, "role", "") or ""),
+        display_name=str(
+            getattr(user, "display_name", "")
+            or getattr(user, "username", "")
+            or getattr(user, "email", "")
+            or ""
+        ),
+    )
+
+
 @app.route("/api/alignment/verify", methods=["POST"])
 def verify_alignment_api():
     audit_context = get_route_audit_context()
@@ -12063,7 +12112,6 @@ def verify_alignment_api():
     if error_response:
         return attach_request_id_to_response(error_response, audit_context)
     audit_context = get_route_audit_context(user)
-    started_at = datetime.now()
     data = request.get_json(silent=True) or {}
     provider_name = str(data.get("provider") or data.get("provider_name") or "mock-rule-v1").strip()
     card_uid = str(data.get("card_uid") or "").strip()
@@ -12072,271 +12120,26 @@ def verify_alignment_api():
         attach_to_card = attach_to_card.strip().lower() in {"1", "true", "yes", "on"}
     else:
         attach_to_card = bool(attach_to_card)
-
-    record_alignment_verification_audit(
-        "alignment_verification_requested",
-        input_data=data,
-        card_uid=card_uid,
-        audit_context=audit_context,
-        commit=True,
+    result = alignment_verification_execution_service.execute_alignment_verification(
+        alignment_verification_execution_service.AlignmentVerificationExecutionRequest(
+            payload=data,
+            provider_name=provider_name,
+            card_uid=card_uid,
+            attach_to_card=attach_to_card,
+        ),
+        build_alignment_verification_actor(user),
+        build_alignment_verification_execution_context(audit_context),
+        build_alignment_verification_execution_dependencies(),
     )
-
-    try:
-        alignment_provider_service.get_alignment_provider(provider_name)
-        provider_options = {
-            "fake_response_type": str(data.get("fake_response_type") or "").strip(),
-            "replay_response_type": str(data.get("replay_response_type") or "").strip(),
-            "prompt_version": str(data.get("prompt_version") or "").strip(),
-            "max_prompt_chars": data.get("max_prompt_chars"),
-            "max_output_chars": data.get("max_output_chars"),
-            "max_estimated_cost": data.get("max_estimated_cost"),
-            "timeout_seconds": data.get("timeout_seconds"),
-            "max_retries": data.get("max_retries"),
-        }
-        if card_uid:
-            card = concept_card_service.get_concept_card(db.session, ConceptAlignmentCard, card_uid)
-            verification_input = alignment_verification_service.build_alignment_verification_input_from_card(card)
-            verification_input["provider_options"] = provider_options
-        else:
-            verification_input = alignment_verification_service.validate_alignment_verification_input(data)
-            card = None
-
-        gate_result = provider_governance_service.evaluate_provider_request(
-            db.session,
-            AlignmentProviderPolicy,
-            AlignmentProviderUsageRecord,
-            provider_name,
-            verification_input,
-            actor_role=getattr(user, "role", ""),
-            audit_context=audit_context,
-            now_fn=current_time_text,
-        )
-        attached_card = None
-        attach_blocked_reason = ""
-        if not gate_result.get("allowed"):
-            output = provider_governance_service.provider_blocked_output(
-                provider_name,
-                provider_type_for_name(provider_name),
-                gate_result,
-            )
-            run = alignment_verification_service.create_alignment_verification_run(
-                db.session,
-                AlignmentVerificationRun,
-                verification_input,
-                output,
-                card_uid=verification_input.get("card_uid", ""),
-                now_fn=current_time_text,
-                commit=False,
-            )
-            record_alignment_verification_audit(
-                "alignment_verification_blocked_by_policy",
-                input_data=data,
-                run=run,
-                output_data=output,
-                card_uid=card_uid,
-                error_code=gate_result.get("reason", "provider_policy_invalid"),
-                error_message=gate_result.get("reason", "provider_policy_invalid"),
-                audit_context=audit_context,
-                commit=False,
-            )
-            record_alignment_provider_usage(
-                provider_name,
-                run=run,
-                input_data=verification_input,
-                output_data=output,
-                audit_context=audit_context,
-                commit=False,
-            )
-            db.session.commit()
-        else:
-            run, output = alignment_verification_service.verify_alignment(
-                db.session,
-                AlignmentVerificationRun,
-                verification_input,
-                provider_name=provider_name,
-                audit_context=audit_context,
-                now_fn=current_time_text,
-                commit=False,
-            )
-            record_alignment_provider_usage(
-                provider_name,
-                run=run,
-                input_data=verification_input,
-                output_data=output,
-                audit_context=audit_context,
-                commit=False,
-            )
-            if attach_to_card and getattr(run, "card_uid", ""):
-                if provider_governance_service.can_attach_verification_to_card(run, gate_result.get("policy", {})):
-                    attached_card = alignment_verification_service.apply_verification_result_to_card(
-                        db.session,
-                        ConceptAlignmentCard,
-                        run,
-                        mode="attach_only",
-                        commit=False,
-                    )
-                else:
-                    attach_blocked_reason = "provider_attach_not_allowed"
-                    record_alignment_verification_audit(
-                        "alignment_verification_blocked_by_policy",
-                        input_data=data,
-                        run=run,
-                        output_data=output,
-                        card_uid=card_uid,
-                        error_code=attach_blocked_reason,
-                        error_message=attach_blocked_reason,
-                        audit_context=audit_context,
-                        commit=False,
-                    )
-            db.session.commit()
-    except concept_card_service.ConceptCardNotFoundError as exc:
-        db.session.rollback()
-        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-        record_alignment_verification_audit(
-            "alignment_verification_failed",
-            input_data=data,
-            card_uid=card_uid,
-            error_code="concept_card_not_found",
-            error_message=str(exc),
-            latency_ms=latency_ms,
-            audit_context=audit_context,
-        )
-        return api_error_with_audit_context(
-            "RESOURCE_NOT_FOUND",
-            str(exc),
-            404,
-            audit_context,
-            {"audit_error_code": "concept_card_not_found"},
-        )
-    except alignment_provider_service.AlignmentProviderError as exc:
-        db.session.rollback()
-        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-        record_alignment_verification_audit(
-            "alignment_verification_failed",
-            input_data=data,
-            card_uid=card_uid,
-            error_code="unknown_provider",
-            error_message=str(exc),
-            latency_ms=latency_ms,
-            audit_context=audit_context,
-        )
-        return api_error_with_audit_context(
-            "VALIDATION_ERROR",
-            str(exc),
-            400,
-            audit_context,
-            {"audit_error_code": "unknown_provider"},
-        )
-    except alignment_verification_service.AlignmentVerificationProviderError as exc:
-        db.session.rollback()
-        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-        record_alignment_verification_audit(
-            "alignment_verification_failed",
-            input_data=data,
-            card_uid=card_uid,
-            error_code="unknown_provider",
-            error_message=str(exc),
-            latency_ms=latency_ms,
-            audit_context=audit_context,
-        )
-        return api_error_with_audit_context(
-            "VALIDATION_ERROR",
-            str(exc),
-            400,
-            audit_context,
-            {"audit_error_code": "unknown_provider"},
-        )
-    except alignment_verification_service.AlignmentVerificationError as exc:
-        db.session.rollback()
-        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-        record_alignment_verification_audit(
-            "alignment_verification_failed",
-            input_data=data,
-            card_uid=card_uid,
-            error_code="alignment_verification_validation_error",
-            error_message=str(exc),
-            latency_ms=latency_ms,
-            audit_context=audit_context,
-        )
-        return api_error_with_audit_context(
-            "VALIDATION_ERROR",
-            str(exc),
-            400,
-            audit_context,
-            {"audit_error_code": "alignment_verification_validation_error"},
-        )
-    except Exception as exc:
-        db.session.rollback()
-        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-        record_alignment_verification_audit(
-            "alignment_verification_failed",
-            input_data=data,
-            card_uid=card_uid,
-            error_code="alignment_verification_failed",
-            error_message=str(exc),
-            latency_ms=latency_ms,
-            audit_context=audit_context,
-        )
-        return api_error_with_audit_context(
-            "INTERNAL_ERROR",
-            "Alignment verification failed.",
-            500,
-            audit_context,
-            {"audit_error_code": "alignment_verification_failed"},
-        )
-
-    latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-    completion_event_type = "alignment_verification_failed" if getattr(run, "verification_status", "") == "failed" else "alignment_verification_completed"
-    record_alignment_verification_audit(
-        completion_event_type,
-        input_data=data,
-        run=run,
-        output_data=output,
-        card_uid=card_uid,
-        error_code=getattr(run, "error_code", "") if completion_event_type == "alignment_verification_failed" else "",
-        error_message=getattr(run, "error_message", "") if completion_event_type == "alignment_verification_failed" else "",
-        latency_ms=latency_ms,
-        audit_context=audit_context,
+    if result.succeeded:
+        return api_success_with_audit_context(result.payload, result.message, audit_context)
+    return api_error_with_audit_context(
+        result.error_code,
+        result.message,
+        result.status_code,
+        audit_context,
+        {"audit_error_code": result.audit_error_code},
     )
-    if attached_card is not None:
-        record_alignment_verification_audit(
-            "alignment_verification_attached_to_card",
-            input_data=data,
-            run=run,
-            output_data=output,
-            card_uid=getattr(attached_card, "card_uid", ""),
-            latency_ms=latency_ms,
-            audit_context=audit_context,
-        )
-
-    serialized_run = alignment_verification_service.serialize_alignment_verification_run(run)
-    response_data = {
-        "run_uid": run.run_uid,
-        "provider_name": run.provider_name,
-        "provider_type": run.provider_type,
-        "provider_version": run.provider_version,
-        "prompt_version": getattr(run, "prompt_version", ""),
-        "output_schema_version": getattr(run, "output_schema_version", ""),
-        "parser_version": getattr(run, "parser_version", ""),
-        "provider_response_status": getattr(run, "provider_response_status", ""),
-        "verification_status": run.verification_status,
-        "alignment_decision": output.get("alignment_decision", "") if isinstance(output, dict) else "",
-        "alignment_confidence": run.alignment_confidence,
-        "recommendation": run.recommendation,
-        "risk_labels": serialized_run["risk_labels"],
-        "estimated_cost": output.get("estimated_cost", {}) if isinstance(output, dict) else {},
-        "retry_count": output.get("retry_count", 0) if isinstance(output, dict) else 0,
-        "can_auto_approve": bool(output.get("can_auto_approve")) if isinstance(output, dict) else False,
-        "is_production_result": bool(output.get("is_production_result")) if isinstance(output, dict) else False,
-        "run": serialized_run,
-    }
-    if attach_blocked_reason:
-        response_data["attach_blocked_reason"] = attach_blocked_reason
-    if attached_card is not None:
-        response_data["card"] = concept_card_service.serialize_concept_card(attached_card)
-    elif card is not None:
-        response_data["card"] = concept_card_service.serialize_concept_card(card)
-    return api_success_with_audit_context(response_data, "Alignment verification completed.", audit_context)
 
 
 def knowledge_ingestion_models():

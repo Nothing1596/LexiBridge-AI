@@ -236,3 +236,31 @@ Provider routes still in `backend/app.py` after 9C.4D:
 - `GET /api/admin/alignment-runs`
 - `GET /api/admin/ai/providers`
 - other legacy AI provider registry/health endpoints outside the alignment-provider governance group
+
+## Task 9C.4D.1 Update
+
+Task 9C.4D.1 does not extract `POST /api/alignment/verify` into a route module. It creates an application-layer execution service boundary:
+
+- Service module: `backend/services/alignment_verification_execution.py`
+- Public entry point: `execute_alignment_verification(...)`
+- Request DTO: `AlignmentVerificationExecutionRequest`
+- Actor DTO: `AlignmentVerificationActor`
+- Context DTO: `AlignmentVerificationExecutionContext`
+- Dependency object: `AlignmentVerificationExecutionDependencies`
+- Result DTO: `AlignmentVerificationExecutionResult`
+
+The service owns provider existence checks, card-vs-payload input branching, provider governance, `AlignmentVerificationRun`, `AlignmentProviderUsageRecord`, mock/fake/replay/disabled provider dispatch, output parsing through existing services, optional card attach, audit sequencing, and business transaction commit/rollback. It does not import Flask, `backend.app`, route modules, credential resolvers, provider clients, or external transport.
+
+`verify_alignment_api` remains registered in `backend/app.py` with the same URL, method, and endpoint name. It is now a thin HTTP adapter that handles auth, request parsing, request ID/audit context, DTO construction, service invocation, and response mapping.
+
+Post-9C.4D.1 snapshot:
+
+- `backend/app.py` line count: 16,133
+- `verify_alignment_api` adapter size: 35 lines including decorator and blanks
+- Direct `@app.route` handlers remaining in `backend/app.py`: 140
+- Extracted route modules: 7
+- Extracted routes: 22
+- RouteCoreDependencies fields: 9
+- Alignment verification execution service dataclasses: 5
+
+The next safe slice is to move only the thin `/api/alignment/verify` route adapter into a route module. That task must not move or rewrite the execution state machine, usage semantics, attach gate, audit events, or transaction behavior.
