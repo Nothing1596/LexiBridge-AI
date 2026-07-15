@@ -128,6 +128,7 @@ from routes.concept_card_feedback import ConceptCardFeedbackModels, register_con
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
 from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
 from routes.provider_policy import ProviderPolicyModels, register_provider_policy_routes
+from routes.provider_preflight import ProviderPreflightModels, register_provider_preflight_routes
 from routes.shared import RouteCoreDependencies
 from routes.student_concept_cards import StudentConceptCardModels, register_student_concept_card_routes
 from routes.teacher_learning_analytics import TeacherLearningAnalyticsModels, register_teacher_learning_analytics_routes
@@ -12044,52 +12045,15 @@ register_provider_policy_routes(
 )
 
 
-@app.route("/api/alignment/providers/<path:provider_name>/preflight", methods=["POST"])
-def run_alignment_provider_preflight_api(provider_name):
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    audit_context = get_route_audit_context(user)
-    data = request.get_json(silent=True) or {}
-    course = str(data.get("course") or "").strip()
-    include_replay_dry_run = data.get("include_replay_dry_run", True)
-    if isinstance(include_replay_dry_run, str):
-        include_replay_dry_run = include_replay_dry_run.strip().lower() in {"1", "true", "yes", "on"}
-    else:
-        include_replay_dry_run = bool(include_replay_dry_run)
-
-    record_provider_preflight_audit(
-        "provider_preflight_requested",
-        provider_name=provider_name,
-        course=course,
-        audit_context=audit_context,
-        commit=True,
-    )
-    run, report = provider_preflight_service.run_provider_preflight(
-        db.session,
-        AlignmentProviderPreflightRun,
-        AlignmentProviderPolicy,
-        provider_name,
-        course=course,
-        actor=user,
-        include_replay_dry_run=include_replay_dry_run,
-        replay_response_type=str(data.get("replay_response_type") or "valid"),
-        now_fn=current_time_text,
-        commit=True,
-    )
-    event_type = "provider_preflight_completed" if report.get("check_status") in {"passed", "warning"} else "provider_preflight_failed"
-    record_provider_preflight_audit(
-        event_type,
-        provider_name=provider_name,
-        preflight_run=run,
-        course=course,
-        error_code=";".join(report.get("blocking_reasons", [])) if event_type == "provider_preflight_failed" else "",
-        error_message="Provider preflight did not meet readiness gates." if event_type == "provider_preflight_failed" else "",
-        audit_context=audit_context,
-        commit=True,
-    )
-    return api_success_with_audit_context(report, audit_context=audit_context)
+register_provider_preflight_routes(
+    app,
+    core=route_core,
+    models=ProviderPreflightModels(
+        AlignmentProviderPreflightRun=AlignmentProviderPreflightRun,
+        AlignmentProviderPolicy=AlignmentProviderPolicy,
+    ),
+    record_provider_preflight_audit=record_provider_preflight_audit,
+)
 
 
 @app.route("/api/alignment/verify", methods=["POST"])

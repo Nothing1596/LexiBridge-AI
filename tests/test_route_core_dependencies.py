@@ -31,6 +31,10 @@ from routes.provider_policy import (
     ProviderPolicyModels,
     register_provider_policy_routes,
 )
+from routes.provider_preflight import (
+    ProviderPreflightModels,
+    register_provider_preflight_routes,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +45,7 @@ CONCEPT_REVIEW_MODULE = ROOT / "backend" / "routes" / "concept_card_review.py"
 CONCEPT_FEEDBACK_MODULE = ROOT / "backend" / "routes" / "concept_card_feedback.py"
 PROVIDER_GOVERNANCE_MODULE = ROOT / "backend" / "routes" / "provider_governance.py"
 PROVIDER_POLICY_MODULE = ROOT / "backend" / "routes" / "provider_policy.py"
+PROVIDER_PREFLIGHT_MODULE = ROOT / "backend" / "routes" / "provider_preflight.py"
 
 EXPECTED_CORE_FIELDS = {
     "db",
@@ -129,6 +134,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         CONCEPT_FEEDBACK_MODULE,
         PROVIDER_GOVERNANCE_MODULE,
         PROVIDER_POLICY_MODULE,
+        PROVIDER_PREFLIGHT_MODULE,
     ]:
         imports = set(_imports_for(path))
         assert "backend.app" not in imports
@@ -140,12 +146,14 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     feedback_sig = inspect.signature(register_concept_card_feedback_routes)
     provider_sig = inspect.signature(register_provider_governance_routes)
     provider_policy_sig = inspect.signature(register_provider_policy_routes)
+    provider_preflight_sig = inspect.signature(register_provider_preflight_routes)
     assert "core" in teacher_sig.parameters
     assert "core" in student_sig.parameters
     assert "core" in review_sig.parameters
     assert "core" in feedback_sig.parameters
     assert "core" in provider_sig.parameters
     assert "core" in provider_policy_sig.parameters
+    assert "core" in provider_preflight_sig.parameters
     for name in {
         "db",
         "audit_model",
@@ -163,6 +171,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert name not in feedback_sig.parameters
         assert name not in provider_sig.parameters
         assert name not in provider_policy_sig.parameters
+        assert name not in provider_preflight_sig.parameters
     for service_name in {
         "concept_card_review_service",
         "concept_card_feedback_service",
@@ -178,6 +187,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert service_name not in feedback_sig.parameters
         assert service_name not in provider_sig.parameters
         assert service_name not in provider_policy_sig.parameters
+        assert service_name not in provider_preflight_sig.parameters
 
 
 def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoints():
@@ -250,6 +260,15 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
         ),
         record_provider_governance_audit=lambda *args, **kwargs: None,
     )
+    register_provider_preflight_routes(
+        app,
+        core=core,
+        models=ProviderPreflightModels(
+            AlignmentProviderPreflightRun=object,
+            AlignmentProviderPolicy=object,
+        ),
+        record_provider_preflight_audit=lambda *args, **kwargs: None,
+    )
     paths = [
         rule.rule
         for rule in app.url_map.iter_rules()
@@ -271,3 +290,4 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
     assert "/api/concept-cards/student-feedback-queue" in paths
     assert "/api/alignment/providers" in paths
     assert "/api/alignment/providers/<path:provider_name>/policy" in paths
+    assert "/api/alignment/providers/<path:provider_name>/preflight" in paths

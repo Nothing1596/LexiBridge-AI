@@ -175,3 +175,32 @@ Post-extraction route snapshot:
 The provider policy route module keeps provider policy persistence in `services/provider_governance.py` and keeps the existing provider governance audit adapter explicit. Its POST handler writes only provider policy data and does not run transport, create verification runs, write provider usage, execute preflight, manage credentials, enable real external providers, or call external networks.
 
 The next provider slice should be selected from the remaining route list. Provider preflight execution is the next reasonable candidate, but it should remain separate from alignment verification execution because those paths have different state and audit semantics.
+
+## Task 9C.4C Update
+
+Task 9C.4C extracts only provider preflight execution into `backend/routes/provider_preflight.py`. It does not extract alignment verification execution, provider usage writes, replay execution, credential management, environment mutation, or transport code.
+
+Migrated route:
+
+- `POST /api/alignment/providers/<provider_name>/preflight`
+
+Provider routes still in `backend/app.py` after 9C.4C:
+
+- `POST /api/alignment/verify`
+- `GET /api/admin/alignment-runs`
+- `GET /api/admin/ai/providers`
+- other legacy AI provider registry/health endpoints outside the alignment-provider governance group
+
+Post-extraction route snapshot:
+
+- `backend/app.py` line count: 16,330
+- Direct `@app.route` handlers remaining in `backend/app.py`: 140
+- Extracted route modules: 7
+- Extracted routes: 22
+- `RouteCoreDependencies` fields: 9
+- `register_provider_preflight_routes(app, *, core, models, record_provider_preflight_audit)` register parameter count: 4
+- `ProviderPreflightModels` fields: 2
+
+The provider preflight route module keeps preflight readiness logic in `services/provider_preflight.py` and keeps the existing provider preflight audit adapter explicit. Its POST handler creates only `AlignmentProviderPreflightRun` records and audit records, does not run transport, does not create alignment verification runs, does not write provider usage, does not mutate provider policy, does not manage credentials, and does not call external networks.
+
+The next provider slice should not begin by moving `/api/alignment/verify`. First scan the verification route's state machine, provider usage writes, fake/replay provider behavior, result parsing, attach-to-card gate, audit semantics, and no-network/external-provider gates before deciding the next extraction boundary.
