@@ -110,3 +110,38 @@ It must remain limited to cross-domain route infrastructure. It must not grow in
 Provider governance and preflight routes are a reasonable next route-extraction slice only after this checkpoint is committed and reproduced from a clean worktree. That slice must preserve provider policy gates, disabled external provider behavior, no-network checks, AuditRecord behavior, and OpenAPI parity.
 
 Do not begin provider governance extraction from an uncommitted or unreproducible working tree.
+
+## Task 9C.4A Update
+
+Task 9C.4A extracts only read-only provider governance and preflight GET routes into `backend/routes/provider_governance.py`. It does not extract provider policy mutation, preflight execution, alignment verification execution, replay behavior, provider usage recording, credential management, or transport code.
+
+Migrated routes:
+
+- `GET /api/alignment/providers`
+- `GET /api/alignment/providers/<provider_name>/policy`
+- `GET /api/alignment/providers/<provider_name>/usage`
+- `GET /api/alignment/providers/preflight/<preflight_uid>`
+- `GET /api/alignment/providers/<provider_name>/preflight`
+
+Provider routes still in `backend/app.py` after 9C.4A:
+
+- `POST /api/alignment/providers/<provider_name>/policy`
+- `POST /api/alignment/providers/<provider_name>/preflight`
+- `POST /api/alignment/verify`
+- `GET /api/admin/alignment-runs`
+- `GET /api/admin/ai/providers`
+- other legacy AI provider registry/health endpoints outside the alignment-provider governance group
+
+Post-extraction route snapshot:
+
+- `backend/app.py` line count: 16,385
+- Direct `@app.route` handlers remaining in `backend/app.py`: 142
+- Extracted route modules: 5
+- Extracted routes: 20
+- `RouteCoreDependencies` fields: 9
+- `register_provider_governance_routes(app, *, core, models)` register parameter count: 3
+- `ProviderGovernanceModels` fields: 3
+
+The provider governance route module keeps provider services domain-specific and outside `RouteCoreDependencies`. Its GET handlers are local read paths: they query registry/policy/usage/preflight history and do not run transport, create verification runs, write provider usage, mutate policy, enable external providers, or call external networks.
+
+Next provider slices should be decided from the remaining route list. Reasonable candidates are provider policy mutation or preflight execution, but real provider transport and external calls must remain disabled unless a later task explicitly changes that boundary with tests.

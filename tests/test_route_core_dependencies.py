@@ -23,6 +23,10 @@ from routes.concept_card_feedback import (
     ConceptCardFeedbackModels,
     register_concept_card_feedback_routes,
 )
+from routes.provider_governance import (
+    ProviderGovernanceModels,
+    register_provider_governance_routes,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +35,7 @@ TEACHER_MODULE = ROOT / "backend" / "routes" / "teacher_learning_analytics.py"
 STUDENT_MODULE = ROOT / "backend" / "routes" / "student_concept_cards.py"
 CONCEPT_REVIEW_MODULE = ROOT / "backend" / "routes" / "concept_card_review.py"
 CONCEPT_FEEDBACK_MODULE = ROOT / "backend" / "routes" / "concept_card_feedback.py"
+PROVIDER_GOVERNANCE_MODULE = ROOT / "backend" / "routes" / "provider_governance.py"
 
 EXPECTED_CORE_FIELDS = {
     "db",
@@ -92,6 +97,10 @@ def test_route_core_dependencies_shape_and_immutability():
     assert not hasattr(core, "concept_card_feedback_service")
     assert not hasattr(core, "course_review_policy_service")
     assert not hasattr(core, "student_feedback_service")
+    assert not hasattr(core, "provider_governance_service")
+    assert not hasattr(core, "provider_preflight_service")
+    assert not hasattr(core, "provider_transport")
+    assert not hasattr(core, "alignment_verification_service")
     with pytest.raises(FrozenInstanceError):
         core.db = object()
 
@@ -105,7 +114,7 @@ def test_shared_route_module_import_boundary():
 
 
 def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
-    for path in [TEACHER_MODULE, STUDENT_MODULE, CONCEPT_REVIEW_MODULE, CONCEPT_FEEDBACK_MODULE]:
+    for path in [TEACHER_MODULE, STUDENT_MODULE, CONCEPT_REVIEW_MODULE, CONCEPT_FEEDBACK_MODULE, PROVIDER_GOVERNANCE_MODULE]:
         imports = set(_imports_for(path))
         assert "backend.app" not in imports
         assert "app" not in imports
@@ -114,10 +123,12 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     student_sig = inspect.signature(register_student_concept_card_routes)
     review_sig = inspect.signature(register_concept_card_review_routes)
     feedback_sig = inspect.signature(register_concept_card_feedback_routes)
+    provider_sig = inspect.signature(register_provider_governance_routes)
     assert "core" in teacher_sig.parameters
     assert "core" in student_sig.parameters
     assert "core" in review_sig.parameters
     assert "core" in feedback_sig.parameters
+    assert "core" in provider_sig.parameters
     for name in {
         "db",
         "audit_model",
@@ -133,14 +144,19 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert name not in student_sig.parameters
         assert name not in review_sig.parameters
         assert name not in feedback_sig.parameters
+        assert name not in provider_sig.parameters
     for service_name in {
         "concept_card_review_service",
         "concept_card_feedback_service",
         "course_review_policy_service",
         "student_feedback_service",
+        "provider_governance_service",
+        "provider_preflight_service",
+        "provider_transport",
     }:
         assert service_name not in review_sig.parameters
         assert service_name not in feedback_sig.parameters
+        assert service_name not in provider_sig.parameters
 
 
 def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoints():
@@ -196,15 +212,32 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
             CourseReviewPolicy=object,
         ),
     )
+    register_provider_governance_routes(
+        app,
+        core=core,
+        models=ProviderGovernanceModels(
+            AlignmentProviderPolicy=object,
+            AlignmentProviderUsageRecord=object,
+            AlignmentProviderPreflightRun=object,
+        ),
+    )
     paths = [
         rule.rule
         for rule in app.url_map.iter_rules()
         if rule.rule.startswith("/api/teacher/learning-analytics")
         or rule.rule.startswith("/api/student/concept-cards")
         or rule.rule.startswith("/api/concept-cards")
+        or rule.rule.startswith("/api/alignment/providers")
     ]
-    assert len(paths) == len(set(paths))
+    method_paths = [
+        (rule.rule, method)
+        for rule in app.url_map.iter_rules()
+        for method in rule.methods - {"HEAD", "OPTIONS"}
+        if rule.rule in paths
+    ]
+    assert len(method_paths) == len(set(method_paths))
     assert "/api/teacher/learning-analytics" in paths
     assert "/api/student/concept-cards" in paths
     assert "/api/concept-cards/review-queue" in paths
     assert "/api/concept-cards/student-feedback-queue" in paths
+    assert "/api/alignment/providers" in paths

@@ -13,6 +13,7 @@ TEACHER_MODULE_PATH = ROOT / "backend" / "routes" / "teacher_learning_analytics.
 STUDENT_MODULE_PATH = ROOT / "backend" / "routes" / "student_concept_cards.py"
 CONCEPT_REVIEW_MODULE_PATH = ROOT / "backend" / "routes" / "concept_card_review.py"
 CONCEPT_FEEDBACK_MODULE_PATH = ROOT / "backend" / "routes" / "concept_card_feedback.py"
+PROVIDER_GOVERNANCE_MODULE_PATH = ROOT / "backend" / "routes" / "provider_governance.py"
 
 
 def load_route_module(module_path, module_name):
@@ -106,6 +107,17 @@ def concept_feedback_dummy_dependencies(module):
     }
 
 
+def provider_governance_dummy_dependencies(module):
+    return {
+        "core": dummy_core_dependencies(),
+        "models": module.ProviderGovernanceModels(
+            AlignmentProviderPolicy=object,
+            AlignmentProviderUsageRecord=object,
+            AlignmentProviderPreflightRun=object,
+        ),
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -153,6 +165,11 @@ def test_route_modules_import_without_backend_app_dependency():
         CONCEPT_FEEDBACK_MODULE_PATH,
         "register_concept_card_feedback_routes",
         "concept_card_feedback_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        PROVIDER_GOVERNANCE_MODULE_PATH,
+        "register_provider_governance_routes",
+        "provider_governance_routes",
     )
 
 
@@ -264,6 +281,39 @@ def test_concept_card_feedback_register_function_registers_expected_routes_and_i
     assert {path: data for path, data in second.items() if path in expected} == expected
 
 
+def test_provider_governance_register_function_registers_expected_routes_and_is_idempotent():
+    module = load_route_module(PROVIDER_GOVERNANCE_MODULE_PATH, "provider_governance_routes")
+    app = Flask("provider-governance-route-registration-test")
+    module.register_provider_governance_routes(app, **provider_governance_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/alignment/providers")
+    expected = {
+        "/api/alignment/providers": {
+            "endpoint": "list_alignment_providers_api",
+            "methods": {"GET"},
+        },
+        "/api/alignment/providers/<path:provider_name>/policy": {
+            "endpoint": "get_alignment_provider_policy_api",
+            "methods": {"GET"},
+        },
+        "/api/alignment/providers/<path:provider_name>/usage": {
+            "endpoint": "list_alignment_provider_usage_api",
+            "methods": {"GET"},
+        },
+        "/api/alignment/providers/preflight/<preflight_uid>": {
+            "endpoint": "get_alignment_provider_preflight_api",
+            "methods": {"GET"},
+        },
+        "/api/alignment/providers/<path:provider_name>/preflight": {
+            "endpoint": "list_alignment_provider_preflights_api",
+            "methods": {"GET"},
+        },
+    }
+    assert {path: data for path, data in first.items() if path in expected} == expected
+    module.register_provider_governance_routes(app, **provider_governance_dummy_dependencies(module))
+    second = target_route_summary(app, "/api/alignment/providers")
+    assert {path: data for path, data in second.items() if path in expected} == expected
+
+
 def test_existing_app_has_no_duplicate_teacher_analytics_routes(app_module):
     summary = target_route_summary(app_module.app, "/api/teacher/learning-analytics")
     assert summary == {
@@ -350,6 +400,26 @@ def test_existing_app_has_no_duplicate_concept_card_feedback_routes(app_module):
     assert {path: data for path, data in summary.items() if path in expected} == expected
 
 
+def test_existing_app_has_no_duplicate_provider_governance_routes(app_module):
+    expected = {
+        ("/api/alignment/providers", "GET"): "list_alignment_providers_api",
+        ("/api/alignment/providers/<path:provider_name>/policy", "GET"): "get_alignment_provider_policy_api",
+        ("/api/alignment/providers/<path:provider_name>/policy", "POST"): "update_alignment_provider_policy_api",
+        ("/api/alignment/providers/<path:provider_name>/usage", "GET"): "list_alignment_provider_usage_api",
+        ("/api/alignment/providers/preflight/<preflight_uid>", "GET"): "get_alignment_provider_preflight_api",
+        ("/api/alignment/providers/<path:provider_name>/preflight", "GET"): "list_alignment_provider_preflights_api",
+        ("/api/alignment/providers/<path:provider_name>/preflight", "POST"): "run_alignment_provider_preflight_api",
+    }
+    actual = {}
+    for rule in app_module.app.url_map.iter_rules():
+        for method in rule.methods - {"HEAD", "OPTIONS"}:
+            if rule.rule.startswith("/api/alignment/providers"):
+                actual[(rule.rule, method)] = rule.endpoint
+    for key, endpoint in expected.items():
+        assert actual.get(key) == endpoint
+        assert sum(1 for rule in app_module.app.url_map.iter_rules() if rule.rule == key[0] and key[1] in rule.methods) == 1
+
+
 def test_app_startup_keeps_representative_legacy_routes(app_module, client, teacher_token):
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     for path in {
@@ -357,6 +427,7 @@ def test_app_startup_keeps_representative_legacy_routes(app_module, client, teac
         "/api/student/concept-cards",
         "/api/concept-cards/student-feedback-queue",
         "/api/alignment/verify",
+        "/api/alignment/providers",
         "/api/teacher/learning-analytics",
     }:
         assert path in rules

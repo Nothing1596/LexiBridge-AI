@@ -126,6 +126,7 @@ from services import student_learning_progress as student_learning_progress_serv
 from services import concept_card_feedback as concept_card_feedback_service
 from routes.concept_card_feedback import ConceptCardFeedbackModels, register_concept_card_feedback_routes
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
+from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
 from routes.shared import RouteCoreDependencies
 from routes.student_concept_cards import StudentConceptCardModels, register_student_concept_card_routes
 from routes.teacher_learning_analytics import TeacherLearningAnalyticsModels, register_teacher_learning_analytics_routes
@@ -11059,6 +11060,17 @@ register_teacher_learning_analytics_routes(
 )
 
 
+register_provider_governance_routes(
+    app,
+    core=route_core,
+    models=ProviderGovernanceModels(
+        AlignmentProviderPolicy=AlignmentProviderPolicy,
+        AlignmentProviderUsageRecord=AlignmentProviderUsageRecord,
+        AlignmentProviderPreflightRun=AlignmentProviderPreflightRun,
+    ),
+)
+
+
 @app.route("/api/concept-cards", methods=["POST"])
 def create_concept_card_api():
     audit_context = get_route_audit_context()
@@ -12021,31 +12033,6 @@ def record_alignment_provider_usage(provider_name, run=None, input_data=None, ou
     return record
 
 
-@app.route("/api/alignment/providers", methods=["GET"])
-def list_alignment_providers_api():
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    providers = []
-    for item in alignment_provider_service.list_alignment_providers():
-        policy = get_serialized_provider_policy(item.get("provider_name", ""))
-        providers.append({**item, "policy": policy})
-    return api_success_with_audit_context({"providers": providers, "total": len(providers)}, audit_context=audit_context)
-
-
-@app.route("/api/alignment/providers/<path:provider_name>/policy", methods=["GET"])
-def get_alignment_provider_policy_api(provider_name):
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    return api_success_with_audit_context(
-        {"policy": get_serialized_provider_policy(provider_name)},
-        audit_context=audit_context,
-    )
-
-
 @app.route("/api/alignment/providers/<path:provider_name>/policy", methods=["POST"])
 def update_alignment_provider_policy_api(provider_name):
     audit_context = get_route_audit_context()
@@ -12072,83 +12059,6 @@ def update_alignment_provider_policy_api(provider_name):
     )
     return api_success_with_audit_context(
         {"policy": provider_governance_service.serialize_provider_policy(policy), "created": created},
-        audit_context=audit_context,
-    )
-
-
-@app.route("/api/alignment/providers/<path:provider_name>/usage", methods=["GET"])
-def list_alignment_provider_usage_api(provider_name):
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    items, total, page, per_page = provider_governance_service.list_provider_usage_records(
-        db.session,
-        AlignmentProviderUsageRecord,
-        provider_name,
-        filters={
-            "course": request.args.get("course", ""),
-            "date_from": request.args.get("date_from", ""),
-            "date_to": request.args.get("date_to", ""),
-            "page": request.args.get("page", 1),
-            "per_page": request.args.get("per_page", 20),
-        },
-    )
-    return api_success_with_audit_context(
-        {
-            "items": [provider_governance_service.serialize_provider_usage_record(item) for item in items],
-            "total": total,
-            "page": page,
-            "per_page": per_page,
-        },
-        audit_context=audit_context,
-    )
-
-
-@app.route("/api/alignment/providers/preflight/<preflight_uid>", methods=["GET"])
-def get_alignment_provider_preflight_api(preflight_uid):
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    run = provider_preflight_service.get_preflight_run(db.session, AlignmentProviderPreflightRun, preflight_uid)
-    if run is None:
-        return api_error_with_audit_context(
-            "RESOURCE_NOT_FOUND",
-            "Provider preflight run not found.",
-            404,
-            audit_context,
-            {"audit_error_code": "provider_preflight_not_found"},
-        )
-    return api_success_with_audit_context(
-        {"preflight": provider_preflight_service.serialize_preflight_run(run)},
-        audit_context=audit_context,
-    )
-
-
-@app.route("/api/alignment/providers/<path:provider_name>/preflight", methods=["GET"])
-def list_alignment_provider_preflights_api(provider_name):
-    audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"teacher", "admin"})
-    if error_response:
-        return attach_request_id_to_response(error_response, audit_context)
-    items, total, page, per_page = provider_preflight_service.list_preflight_runs(
-        db.session,
-        AlignmentProviderPreflightRun,
-        provider_name,
-        filters={
-            "course": request.args.get("course", ""),
-            "page": request.args.get("page", 1),
-            "per_page": request.args.get("per_page", 20),
-        },
-    )
-    return api_success_with_audit_context(
-        {
-            "items": [provider_preflight_service.serialize_preflight_run(item) for item in items],
-            "total": total,
-            "page": page,
-            "per_page": per_page,
-        },
         audit_context=audit_context,
     )
 
