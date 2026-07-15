@@ -289,3 +289,42 @@ Post-9C.4E snapshot:
 - RouteCoreDependencies fields: 9
 
 Remaining provider/admin-adjacent route domains include admin alignment run listing, legacy AI provider/admin views, upload/knowledge/evidence routes, course and policy management routes, and other legacy app routes. The next provider-related slice should be selected from the remaining route inventory and must not re-open external provider execution unless a separate task explicitly hardens that path.
+
+## Task 9C.4F Update
+
+Task 9C.4F does not extract any route. It adds `docs/provider_admin_route_inventory.md` and characterization coverage for the remaining provider/admin-adjacent routes in `backend/app.py`.
+
+Characterized remaining provider/admin routes:
+
+- `GET /api/admin/alignment-runs`
+- `GET /api/admin/ai/providers`
+- `GET /api/admin/ai/models`
+- `GET, POST /api/admin/ai/prompts`
+- `GET /api/admin/ai/calls`
+- `GET /api/admin/ai/usage`
+- `GET /api/admin/ai/health`
+- `POST /api/admin/ai/healthcheck`
+- `POST /api/alignment/run`
+- `GET /api/alignment/runs`
+- `GET /api/alignment/runs/<int:run_id>`
+
+Inventory result:
+
+- Unknown provider/admin route count: 0
+- `GET /api/admin/alignment-runs`: `READ_ONLY_ADMIN_LISTING`, direct extraction safe
+- legacy `/api/admin/ai/*`: active frontend/OpenAPI surface, overlaps formal provider governance but is not an alias; requires deprecation/compatibility or service-boundary work before extraction
+- `POST /api/admin/ai/healthcheck`: `HEALTH_EXTERNAL_RISK` because live provider mode plus `live_probe=true` can call provider transport
+- `POST /api/alignment/run`: `SERVICE_BOUNDARY_REQUIRED` because it creates legacy `AlignmentRun`, background jobs/cards, usage, and commits
+- legacy `/api/alignment/runs*`: active frontend/OpenAPI read paths tied to the older `AlignmentRun` surface
+
+Post-9C.4F snapshot:
+
+- `backend/app.py` line count: 16,075
+- Direct `@app.route` handlers remaining in `backend/app.py`: 139
+- Extracted route modules: 8
+- Extracted routes: 23
+- `RouteCoreDependencies` fields: 9
+
+Primary next-slice conclusion: `GO_ADMIN_ALIGNMENT_RUNS_EXTRACTION`.
+
+The next route extraction should be limited to `GET /api/admin/alignment-runs`. It must not include legacy `/api/admin/ai/*`, `/api/alignment/run`, `/api/alignment/runs`, provider healthcheck, prompt mutation, or external provider transport. Legacy provider admin routes need a separate compatibility/deprecation audit before they are moved.
