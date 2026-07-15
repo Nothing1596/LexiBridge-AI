@@ -204,3 +204,35 @@ Post-extraction route snapshot:
 The provider preflight route module keeps preflight readiness logic in `services/provider_preflight.py` and keeps the existing provider preflight audit adapter explicit. Its POST handler creates only `AlignmentProviderPreflightRun` records and audit records, does not run transport, does not create alignment verification runs, does not write provider usage, does not mutate provider policy, does not manage credentials, and does not call external networks.
 
 The next provider slice should not begin by moving `/api/alignment/verify`. First scan the verification route's state machine, provider usage writes, fake/replay provider behavior, result parsing, attach-to-card gate, audit semantics, and no-network/external-provider gates before deciding the next extraction boundary.
+
+## Task 9C.4D Update
+
+Task 9C.4D does not extract a route. It adds characterization coverage and documents the boundary of `POST /api/alignment/verify` in `docs/alignment_verification_route_boundary.md`.
+
+Current verification route snapshot:
+
+- Route: `POST /api/alignment/verify`
+- Endpoint: `verify_alignment_api`
+- Handler location: `backend/app.py:12059` through `backend/app.py:12339`
+- Handler size: 281 lines including decorator and blanks
+- Direct model dependencies: 4 (`ConceptAlignmentCard`, `AlignmentProviderPolicy`, `AlignmentProviderUsageRecord`, `AlignmentVerificationRun`)
+- Main write tables: `alignment_verification_run`, `alignment_provider_usage_record`, optional `concept_alignment_card`, and `audit_record`
+- Provider modes characterized: `mock-rule-v1`, `fake-llm-v1`, `external-llm-replay-v1`, `deepseek-alignment-v1-disabled`
+- Verification route conclusion: `SERVICE_BOUNDARY_REQUIRED_FIRST`
+
+The route handler still owns too much execution orchestration for direct movement into a route module. It sequences initial audit, provider existence checks, card-vs-payload input construction, provider governance, policy-block run creation, provider execution, provider usage recording, optional card attach, completion/failed audit, and rollback behavior. The next step should create or extend a domain service that owns this transaction and returns the existing response contract; only after that service boundary is frozen should route extraction proceed.
+
+Post-9C.4D route snapshot remains:
+
+- `backend/app.py` line count: 16,330
+- Direct `@app.route` handlers remaining in `backend/app.py`: 140
+- Extracted route modules: 7
+- Extracted routes: 22
+- `RouteCoreDependencies` fields: 9
+
+Provider routes still in `backend/app.py` after 9C.4D:
+
+- `POST /api/alignment/verify`
+- `GET /api/admin/alignment-runs`
+- `GET /api/admin/ai/providers`
+- other legacy AI provider registry/health endpoints outside the alignment-provider governance group
