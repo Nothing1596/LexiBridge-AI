@@ -359,3 +359,32 @@ Remaining provider/admin-adjacent route domains:
 - legacy `/api/alignment/runs` and `/api/alignment/runs/<int:run_id>` read paths.
 
 Do not migrate `/api/admin/ai/*` as the next step without a separate compatibility/deprecation audit. Healthcheck and `/api/alignment/run` require explicit service/security boundaries before route extraction.
+
+## Task 9C.4H Update
+
+Task 9C.4H does not extract any route. It adds `docs/legacy_provider_admin_surface.md` and characterization coverage for the active legacy `/api/admin/ai/*` provider admin surface.
+
+Characterized legacy provider admin routes:
+
+- `GET /api/admin/ai/providers`
+- `GET /api/admin/ai/models`
+- `GET /api/admin/ai/prompts`
+- `POST /api/admin/ai/prompts`
+- `GET /api/admin/ai/calls`
+- `GET /api/admin/ai/usage`
+- `GET /api/admin/ai/health`
+- `POST /api/admin/ai/healthcheck`
+
+Inventory result:
+
+- Unknown legacy provider admin route count: 0
+- All `/api/admin/ai/*` routes are admin-only and present in OpenAPI.
+- The frontend uses the six legacy GET views: providers, models, prompts, calls, usage, and health.
+- `GET /api/admin/ai/providers`, `/models`, `/prompts`, and `/health` call `ensure_ai_registry_seed(...)`; characterization shows the GET seed path flushes default registry/model/prompt rows for the response but does not persist them without a later commit.
+- `POST /api/admin/ai/prompts` is a mutation and commits `PromptTemplate` changes.
+- `POST /api/admin/ai/healthcheck` commits provider health fields and may also persist env-selected seed rows.
+- `POST /api/admin/ai/healthcheck` passes `live_probe=True` into provider health logic for an enabled live provider; `services.ai_health.healthcheck_provider(...)` calls the provider adapter only in live mode with non-placeholder credential and `live_probe=true`.
+
+Primary conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
+
+Next safe slice: extract only the safe legacy read-only admin provider views after splitting them away from prompt mutation and healthcheck transport risk. Do not migrate `/api/admin/ai/healthcheck` until a service boundary separates local health summary from live transport probing. Do not migrate `POST /api/alignment/run` as part of this provider admin slice.

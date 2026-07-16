@@ -3,7 +3,7 @@
 Task: 9C.4F
 Baseline commit: `cb63cd657929e5c5f15efd6a9adc0e6384a08a86`
 Branch: `audit/provider-admin-routes-9c4f`
-Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`.
+Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`.
 
 ## Scope
 
@@ -178,6 +178,23 @@ OpenAPI dependencies:
 | `run_alignment` | 159 | many | course/auth/job/alignment/card/usage helpers | 14 | yes | provider-dependent | `SERVICE_BOUNDARY_REQUIRED` |
 | `alignment_runs` | 29 | 2 | course permission, serializer | 1 | 0 | no | `EXTRACTION_AFTER_LEGACY_BOUNDARY` |
 | `alignment_run_detail` | 16 | 2 | course permission, serializer | 4 | 0 | no | `EXTRACTION_AFTER_LEGACY_BOUNDARY` |
+
+## Task 9C.4H Legacy Provider Admin Audit
+
+Task 9C.4H keeps all production routes in place and adds a dedicated audit for `/api/admin/ai/*`.
+
+Additional findings:
+
+- Unknown `/api/admin/ai/*` route count remains `0`.
+- `/api/admin/ai/providers`, `/models`, `/prompts` GET, and `/health` call `ensure_ai_registry_seed(...)`; GET paths flush seed rows for the response but do not persist them without a later commit.
+- `/api/admin/ai/prompts` POST is a prompt mutation route and must not be migrated with read-only views.
+- `/api/admin/ai/healthcheck` commits provider health state and may persist env-selected seed rows.
+- `/api/admin/ai/healthcheck` has a live transport risk when an enabled live provider with a usable credential is checked with `live_probe=true`.
+- `services.ai_health.healthcheck_provider(...)` calls the provider adapter only when `live_probe=true`, provider mode is `live`, and the credential is non-placeholder.
+
+Task 9C.4H conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
+
+Next step should separate safe legacy read-only admin provider views from prompt mutation and healthcheck. Do not extract `/api/admin/ai/healthcheck` until local health summary and live transport probing have an explicit service boundary.
 
 ## Final Decision
 
