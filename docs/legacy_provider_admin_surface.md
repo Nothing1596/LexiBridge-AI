@@ -229,3 +229,19 @@ Task 9C.4K extracts only the seed-backed legacy configuration GET views into `ba
 The module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency and preserves the legacy compatibility contract: admin-only access, endpoint names, OpenAPI/frontend URLs, `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, and seed flush/no-explicit-commit behavior. Legitimate prompt metadata remains part of the prompt GET contract, while credential-like provider/model metadata remains excluded from responses.
 
 `POST /api/admin/ai/prompts` still keeps its mutation logic in `backend/app.py` through an explicit `prompt_post_handler` callback because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. `POST /api/admin/ai/healthcheck`, live transport probing, prompt mutation service work, and `/api/alignment/run` remain separate future tasks.
+
+## Task 9C.4L Healthcheck Boundary Audit
+
+Task 9C.4L does not migrate `POST /api/admin/ai/healthcheck` and does not change production behavior. The detailed audit is in `docs/legacy_provider_healthcheck_boundary.md`.
+
+Additional findings:
+
+- The route remains admin-only, OpenAPI-listed, and not directly called by `frontend/index.html`.
+- The handler still calls `ensure_ai_registry_seed(...)`, reads optional `live_probe`, loops over enabled `AIProviderConfig` rows, writes health fields, commits, and returns the legacy `api_success` envelope without `request_id`.
+- Local readiness is separable from live probing: `none`, `mock`, `local_heuristic`, missing credential, and `live_probe=false` paths do not need provider transport.
+- Live probe starts only for an enabled live provider with a usable credential and `live_probe=true`.
+- The current health helper echoes adapter/provider error `message`; a sentinel in that message appears in the result. That makes live probe redaction insufficient for direct route extraction.
+
+Primary conclusion after 9C.4L: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
+
+Next step should not be route extraction. First disable/deprecate the live probe behavior or add a live-probe service boundary with explicit redaction, timeout, transport, and transaction handling. Local readiness can then be split into a separate safe service before a thin route module is created.

@@ -488,3 +488,27 @@ Post-9C.4K status:
 - `POST /api/admin/ai/prompts`, `POST /api/admin/ai/healthcheck`, and legacy `/api/alignment/run` remain separate future tasks.
 
 Next recommended slice: establish a healthcheck service-boundary audit that separates local readiness state from live transport probing before moving `POST /api/admin/ai/healthcheck`; prompt mutation and legacy `/api/alignment/run` should remain separate tasks.
+
+## Task 9C.4L Legacy Provider Healthcheck Boundary Audit
+
+Task 9C.4L does not extract a route and does not modify production behavior. It adds `tests/test_legacy_provider_healthcheck_characterization.py` and `docs/legacy_provider_healthcheck_boundary.md`.
+
+Findings:
+
+- `POST /api/admin/ai/healthcheck` remains in `backend/app.py`.
+- Endpoint remains `admin_ai_healthcheck`.
+- The handler is 16 function body lines, 17 lines including the decorator.
+- It calls `ensure_ai_registry_seed(...)`, reads optional `live_probe`, checks all enabled `AIProviderConfig` rows, writes provider health fields, commits, and returns the legacy `api_success` envelope without `request_id`.
+- Local readiness paths do not call transport.
+- Live probe transport intent exists for enabled live providers with usable credential and `live_probe=true`.
+- The current live probe helper echoes adapter error `message`, so a sentinel in a transport-adjacent error message appears in the result.
+- No route module was added.
+- `backend/app.py` line count remains 16,007.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 132.
+- Extracted route modules: 11.
+- Extracted routes: 30.
+- `RouteCoreDependencies` fields: 9.
+
+Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
+
+Next recommended slice: before extracting `POST /api/admin/ai/healthcheck`, disable/deprecate live probe behavior or create a dedicated live-probe service with explicit redaction, timeout/error mapping, and transport spy tests. Then split local readiness into its own service and only afterwards move the thin route adapter. Keep `POST /api/admin/ai/prompts` and legacy `/api/alignment/run` separate.

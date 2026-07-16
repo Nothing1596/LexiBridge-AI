@@ -28,7 +28,7 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | serialized call logs; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | mostly | admin only | yes | frontend active | seed flush only; no explicit commit | none | health/config summary only | extracted as local health view, not live probe |
-| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 16 | `HEALTH_EXTERNAL_RISK` | no | admin only | yes | tested | updates provider health fields, commits | live mode with `live_probe=true` can call provider transport | health result only; must not expose credentials | do not extract until health service/security boundary is explicit |
+| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 16 | `HEALTH_EXTERNAL_RISK` | no | admin only | yes | tested | updates provider health fields, commits | live mode with `live_probe=true` can call provider transport | adapter error message can be echoed by current live probe | disable/deprecate live probe or add redaction/service boundary before extraction |
 | `/api/alignment/run` | POST | `run_alignment` | 159 | `EXECUTION_OR_REPLAY` / `SERVICE_BOUNDARY_REQUIRED` | no | student, teacher, admin | yes | frontend active, scripts/tests | creates `AlignmentRun`, background job or cards, records personal usage, commits | current provider metadata and legacy execution path; no live probe in normal characterization | alignment/card payloads | service boundary first |
 | `/api/alignment/runs` | GET | `alignment_runs` | 29 | `LEGACY_ACTIVE` | yes | student, teacher, admin | yes | frontend active | none | none | serialized legacy `AlignmentRun` summaries | extract only after legacy alignment-run boundary decision |
 | `/api/alignment/runs/<int:run_id>` | GET | `alignment_run_detail` | 16 | `LEGACY_ACTIVE` | yes | student, teacher, admin with owner/course/admin checks | yes | README/docs/tests | none | none | serialized legacy run detail | extract only after legacy alignment-run boundary decision |
@@ -227,6 +227,24 @@ Still in `backend/app.py` after 9C.4K:
 - prompt mutation logic for `POST /api/admin/ai/prompts`, passed to the route module as an explicit callback to preserve the shared `admin_ai_prompts` endpoint;
 - live-probe risk route: `POST /api/admin/ai/healthcheck`;
 - legacy alignment execution routes: `/api/alignment/run` and `/api/alignment/runs*`.
+
+## Task 9C.4L Legacy Healthcheck Boundary Audit
+
+Task 9C.4L keeps `POST /api/admin/ai/healthcheck` in `backend/app.py` and adds dedicated characterization in `tests/test_legacy_provider_healthcheck_characterization.py` plus `docs/legacy_provider_healthcheck_boundary.md`.
+
+Confirmed contract:
+
+- URL/method/endpoint remain `POST /api/admin/ai/healthcheck` and `admin_ai_healthcheck`.
+- The route is admin-only and uses the legacy `api_success` envelope without `request_id`.
+- The route calls the shared seed wrapper, writes `AIProviderConfig` health fields, and commits.
+- The route does not write `AICallLog`, alignment provider usage, verification runs, preflight runs, cards, or `AuditRecord`.
+- Local readiness paths do not call transport.
+- Live probe transport intent exists only for enabled live providers with usable credential and `live_probe=true`.
+- Current live probe error handling can echo adapter/provider error `message`, including a sentinel supplied by a transport-adjacent test double.
+
+Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
+
+Do not extract `/api/admin/ai/healthcheck` until live probe behavior is disabled/deprecated or isolated behind a service with explicit redaction and timeout/error mapping. Prompt mutation and legacy `/api/alignment/run` remain separate tasks.
 
 ## Final Decision
 

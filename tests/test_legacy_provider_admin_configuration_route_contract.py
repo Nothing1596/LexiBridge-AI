@@ -282,7 +282,7 @@ def test_configuration_gets_preserve_legitimate_prompt_template_contract(
             created_by=1,
             created_at=app_module.current_time_text(),
             updated_at=app_module.current_time_text(),
-            notes="visible non-secret prompt notes",
+            notes="visible safe prompt notes",
         )
         app_module.db.session.add(prompt)
         app_module.db.session.commit()
@@ -292,7 +292,7 @@ def test_configuration_gets_preserve_legitimate_prompt_template_contract(
     payload = response.get_json()
     prompts = payload["data"]["items"]
     match = next(item for item in prompts if item["prompt_key"] == prompt_key)
-    assert match["notes"] == "visible non-secret prompt notes"
+    assert match["notes"] == "visible safe prompt notes"
     assert match["json_schema"]["properties"]["term"]["type"] == "string"
     assert "template_text" not in match
     assert legal_template not in json.dumps(match, ensure_ascii=False)
