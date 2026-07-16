@@ -3,7 +3,7 @@
 Task: 9C.4F
 Baseline commit: `cb63cd657929e5c5f15efd6a9adc0e6384a08a86`
 Branch: `audit/provider-admin-routes-9c4f`
-Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`.
+Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`; Task 9C.4I has since extracted only the legacy observability GET views.
 
 ## Scope
 
@@ -25,9 +25,9 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 | `/api/admin/ai/models` | GET | `admin_ai_models` | 7 | `LEGACY_ACTIVE` / `READ_ONLY_PROVIDER_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | model registry fields; no credentials | `DEPRECATION_AUDIT_REQUIRED` before extraction |
 | `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | shared | `LEGACY_ACTIVE` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | prompt templates only | split GET from POST before extraction |
 | `/api/admin/ai/prompts` | POST | `admin_ai_prompts` | shared | `SERVICE_BOUNDARY_REQUIRED` | no | admin only | yes | frontend active | creates/updates `PromptTemplate`, commits | none | accepts template/schema text; no credentials by contract | service/contract task first |
-| `/api/admin/ai/calls` | GET | `admin_ai_calls` | 6 | `READ_ONLY_PROVIDER_VIEW` | yes | admin only | yes | frontend active | none | none | serialized call logs; characterization verifies no sentinel secret | possible later with admin AI group |
-| `/api/admin/ai/usage` | GET | `admin_ai_usage` | 6 | `READ_ONLY_PROVIDER_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | possible later with admin AI group |
-| `/api/admin/ai/health` | GET | `admin_ai_health` | 7 | `HEALTH_LOCAL_ONLY` / `LEGACY_ACTIVE` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | health/config summary only | deprecation/service boundary first |
+| `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | serialized call logs; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
+| `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
+| `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | mostly | admin only | yes | frontend active | seed flush only; no explicit commit | none | health/config summary only | extracted as local health view, not live probe |
 | `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 16 | `HEALTH_EXTERNAL_RISK` | no | admin only | yes | tested | updates provider health fields, commits | live mode with `live_probe=true` can call provider transport | health result only; must not expose credentials | do not extract until health service/security boundary is explicit |
 | `/api/alignment/run` | POST | `run_alignment` | 159 | `EXECUTION_OR_REPLAY` / `SERVICE_BOUNDARY_REQUIRED` | no | student, teacher, admin | yes | frontend active, scripts/tests | creates `AlignmentRun`, background job or cards, records personal usage, commits | current provider metadata and legacy execution path; no live probe in normal characterization | alignment/card payloads | service boundary first |
 | `/api/alignment/runs` | GET | `alignment_runs` | 29 | `LEGACY_ACTIVE` | yes | student, teacher, admin | yes | frontend active | none | none | serialized legacy `AlignmentRun` summaries | extract only after legacy alignment-run boundary decision |
@@ -195,6 +195,23 @@ Additional findings:
 Task 9C.4H conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
 
 Next step should separate safe legacy read-only admin provider views from prompt mutation and healthcheck. Do not extract `/api/admin/ai/healthcheck` until local health summary and live transport probing have an explicit service boundary.
+
+## Task 9C.4I Legacy Observability Extraction
+
+Task 9C.4I extracts only the safe legacy observability GET views into `backend/routes/legacy_provider_admin_observability.py`:
+
+- `GET /api/admin/ai/calls`
+- `GET /api/admin/ai/usage`
+- `GET /api/admin/ai/health`
+
+The extracted routes keep the legacy endpoint names, admin-only permission, OpenAPI/frontend URLs, `api_success` response envelope without `request_id`, no view `AuditRecord`, and existing id-desc limits. `/api/admin/ai/health` still calls the existing seed helper for local registry defaults but does not add commit/rollback, live probe, provider transport, provider usage writes, policy/preflight writes, verification runs, or card writes.
+
+Still in `backend/app.py`:
+
+- seed-backed configuration views: `GET /api/admin/ai/providers`, `GET /api/admin/ai/models`, and `GET /api/admin/ai/prompts`;
+- prompt mutation: `POST /api/admin/ai/prompts`;
+- live-probe risk route: `POST /api/admin/ai/healthcheck`;
+- legacy alignment execution routes: `/api/alignment/run` and `/api/alignment/runs*`.
 
 ## Final Decision
 

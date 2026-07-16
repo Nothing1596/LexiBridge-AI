@@ -40,6 +40,10 @@ from routes.admin_alignment_runs import (
     AdminAlignmentRunModels,
     register_admin_alignment_run_routes,
 )
+from routes.legacy_provider_admin_observability import (
+    LegacyProviderAdminObservabilityModels,
+    register_legacy_provider_admin_observability_routes,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +57,7 @@ PROVIDER_POLICY_MODULE = ROOT / "backend" / "routes" / "provider_policy.py"
 PROVIDER_PREFLIGHT_MODULE = ROOT / "backend" / "routes" / "provider_preflight.py"
 ALIGNMENT_VERIFICATION_MODULE = ROOT / "backend" / "routes" / "alignment_verification.py"
 ADMIN_ALIGNMENT_RUNS_MODULE = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
+LEGACY_PROVIDER_OBSERVABILITY_MODULE = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
 
 EXPECTED_CORE_FIELDS = {
     "db",
@@ -129,6 +134,10 @@ def test_route_core_dependencies_shape_and_immutability():
     assert not hasattr(core, "AlignmentRun")
     assert not hasattr(core, "admin_alignment_run_service")
     assert not hasattr(core, "run_query_service")
+    assert not hasattr(core, "legacy_provider_observability_service")
+    assert not hasattr(core, "AICallLog")
+    assert not hasattr(core, "AIProviderConfig")
+    assert not hasattr(core, "healthcheck_executor")
     with pytest.raises(FrozenInstanceError):
         core.db = object()
 
@@ -152,6 +161,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         PROVIDER_PREFLIGHT_MODULE,
         ALIGNMENT_VERIFICATION_MODULE,
         ADMIN_ALIGNMENT_RUNS_MODULE,
+        LEGACY_PROVIDER_OBSERVABILITY_MODULE,
     ]:
         imports = set(_imports_for(path))
         assert "backend.app" not in imports
@@ -166,6 +176,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     provider_preflight_sig = inspect.signature(register_provider_preflight_routes)
     alignment_verification_sig = inspect.signature(register_alignment_verification_routes)
     admin_alignment_runs_sig = inspect.signature(register_admin_alignment_run_routes)
+    legacy_provider_observability_sig = inspect.signature(register_legacy_provider_admin_observability_routes)
     assert "core" in teacher_sig.parameters
     assert "core" in student_sig.parameters
     assert "core" in review_sig.parameters
@@ -175,9 +186,14 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "core" in provider_preflight_sig.parameters
     assert "core" in alignment_verification_sig.parameters
     assert "core" in admin_alignment_runs_sig.parameters
+    assert "core" in legacy_provider_observability_sig.parameters
     assert "execution_dependencies" in alignment_verification_sig.parameters
     assert "models" in admin_alignment_runs_sig.parameters
     assert "serialize_alignment_run" in admin_alignment_runs_sig.parameters
+    assert "models" in legacy_provider_observability_sig.parameters
+    assert "serializers" in legacy_provider_observability_sig.parameters
+    assert "health_seed" in legacy_provider_observability_sig.parameters
+    assert "api_success" not in legacy_provider_observability_sig.parameters
     for name in {
         "db",
         "audit_model",
@@ -198,6 +214,10 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert name not in provider_preflight_sig.parameters
         assert name not in alignment_verification_sig.parameters
         assert name not in admin_alignment_runs_sig.parameters
+        assert name not in legacy_provider_observability_sig.parameters
+
+    assert "AICallLog" in LegacyProviderAdminObservabilityModels.__dataclass_fields__
+    assert "AIProviderConfig" in LegacyProviderAdminObservabilityModels.__dataclass_fields__
     for service_name in {
         "concept_card_review_service",
         "concept_card_feedback_service",

@@ -388,3 +388,39 @@ Inventory result:
 Primary conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
 
 Next safe slice: extract only the safe legacy read-only admin provider views after splitting them away from prompt mutation and healthcheck transport risk. Do not migrate `/api/admin/ai/healthcheck` until a service boundary separates local health summary from live transport probing. Do not migrate `POST /api/alignment/run` as part of this provider admin slice.
+
+## Task 9C.4I Update
+
+Task 9C.4I extracts only legacy provider admin observability GET views into `backend/routes/legacy_provider_admin_observability.py`.
+
+Migrated routes:
+
+- `GET /api/admin/ai/calls`
+- `GET /api/admin/ai/usage`
+- `GET /api/admin/ai/health`
+
+Routes intentionally left in `backend/app.py`:
+
+- `GET /api/admin/ai/providers`
+- `GET /api/admin/ai/models`
+- `GET /api/admin/ai/prompts`
+- `POST /api/admin/ai/prompts`
+- `POST /api/admin/ai/healthcheck`
+- legacy `/api/alignment/run`
+- legacy `/api/alignment/runs`
+- legacy `/api/alignment/runs/<int:run_id>`
+
+Post-9C.4I snapshot:
+
+- `backend/app.py` line count: 16,068
+- Direct `@app.route` handlers remaining in `backend/app.py`: 135
+- Extracted route modules: 10
+- Extracted routes: 27
+- `RouteCoreDependencies` fields: 9
+- `register_legacy_provider_admin_observability_routes(app, *, core, models, serializers, health_seed)` register parameter count: 5
+- `LegacyProviderAdminObservabilityModels` fields: 2
+- `LegacyProviderAdminObservabilitySerializers` fields: 4
+
+The route module keeps the legacy endpoint names, admin-only permission, OpenAPI/frontend URLs, legacy `api_success` envelopes without `request_id`, id-desc limits, local health seed-flush behavior, and no view `AuditRecord`. It does not commit or roll back, does not execute live health probes, does not call provider transport, does not create verification runs, does not write provider usage, and does not mutate provider policy, provider preflight, prompts, cards, or credentials.
+
+Next recommended slice: audit and isolate seed-backed provider/model/prompt configuration GET behavior before extraction, or establish a dedicated healthcheck service boundary that separates local health summary from live transport probing. Do not move `POST /api/admin/ai/healthcheck` or `POST /api/alignment/run` as part of an observability route slice.

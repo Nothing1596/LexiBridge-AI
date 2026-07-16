@@ -18,6 +18,7 @@ PROVIDER_POLICY_MODULE_PATH = ROOT / "backend" / "routes" / "provider_policy.py"
 PROVIDER_PREFLIGHT_MODULE_PATH = ROOT / "backend" / "routes" / "provider_preflight.py"
 ALIGNMENT_VERIFICATION_MODULE_PATH = ROOT / "backend" / "routes" / "alignment_verification.py"
 ADMIN_ALIGNMENT_RUNS_MODULE_PATH = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
+LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
 
 
 def load_route_module(module_path, module_name):
@@ -186,6 +187,41 @@ def admin_alignment_runs_dummy_dependencies(module):
     }
 
 
+def legacy_provider_observability_dummy_dependencies(module):
+    class DummyQuery:
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return []
+
+    class DummyAICallLog:
+        id = object()
+        query = DummyQuery()
+
+    class DummyAIProviderConfig:
+        id = object()
+        query = DummyQuery()
+
+    return {
+        "core": dummy_core_dependencies(),
+        "models": module.LegacyProviderAdminObservabilityModels(
+            AICallLog=DummyAICallLog,
+            AIProviderConfig=DummyAIProviderConfig,
+        ),
+        "serializers": module.LegacyProviderAdminObservabilitySerializers(
+            api_success=lambda data=None, message="Operation completed.": data,
+            serialize_ai_call_log=lambda log: {},
+            serialize_ai_provider_config=lambda config: {},
+            summarize_ai_calls=lambda logs: {"total_calls": len(logs)},
+        ),
+        "health_seed": lambda owner_user_id=0: None,
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -258,6 +294,11 @@ def test_route_modules_import_without_backend_app_dependency():
         ADMIN_ALIGNMENT_RUNS_MODULE_PATH,
         "register_admin_alignment_run_routes",
         "admin_alignment_run_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH,
+        "register_legacy_provider_admin_observability_routes",
+        "legacy_provider_admin_observability_routes",
     )
 
 
@@ -466,6 +507,31 @@ def test_admin_alignment_runs_register_function_registers_expected_route_and_is_
     assert target_route_summary(app, "/api/admin/alignment-runs") == first
 
 
+def test_legacy_provider_observability_register_function_registers_expected_routes_and_is_idempotent():
+    module = load_route_module(LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH, "legacy_provider_admin_observability_routes")
+    app = Flask("legacy-provider-observability-route-registration-test")
+    module.register_legacy_provider_admin_observability_routes(app, **legacy_provider_observability_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/admin/ai")
+    expected = {
+        "/api/admin/ai/calls": {
+            "endpoint": "admin_ai_calls",
+            "methods": {"GET"},
+        },
+        "/api/admin/ai/usage": {
+            "endpoint": "admin_ai_usage",
+            "methods": {"GET"},
+        },
+        "/api/admin/ai/health": {
+            "endpoint": "admin_ai_health",
+            "methods": {"GET"},
+        },
+    }
+    assert {path: data for path, data in first.items() if path in expected} == expected
+    module.register_legacy_provider_admin_observability_routes(app, **legacy_provider_observability_dummy_dependencies(module))
+    second = target_route_summary(app, "/api/admin/ai")
+    assert {path: data for path, data in second.items() if path in expected} == expected
+
+
 def test_existing_app_has_no_duplicate_teacher_analytics_routes(app_module):
     summary = target_route_summary(app_module.app, "/api/teacher/learning-analytics")
     assert summary == {
@@ -600,6 +666,26 @@ def test_existing_app_has_single_admin_alignment_runs_route(app_module):
     ) == 1
 
 
+def test_existing_app_has_single_legacy_provider_observability_routes(app_module):
+    expected = {
+        ("/api/admin/ai/calls", "GET"): "admin_ai_calls",
+        ("/api/admin/ai/usage", "GET"): "admin_ai_usage",
+        ("/api/admin/ai/health", "GET"): "admin_ai_health",
+    }
+    actual = {}
+    for rule in app_module.app.url_map.iter_rules():
+        for method in rule.methods - {"HEAD", "OPTIONS"}:
+            if rule.rule in {path for path, _method in expected}:
+                actual[(rule.rule, method)] = rule.endpoint
+    assert actual == expected
+    for path, method in expected:
+        assert sum(
+            1
+            for rule in app_module.app.url_map.iter_rules()
+            if rule.rule == path and method in rule.methods
+        ) == 1
+
+
 def test_app_startup_keeps_representative_legacy_routes(app_module, client, teacher_token):
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     for path in {
@@ -608,6 +694,9 @@ def test_app_startup_keeps_representative_legacy_routes(app_module, client, teac
         "/api/concept-cards/student-feedback-queue",
         "/api/alignment/verify",
         "/api/admin/alignment-runs",
+        "/api/admin/ai/calls",
+        "/api/admin/ai/usage",
+        "/api/admin/ai/health",
         "/api/alignment/providers",
         "/api/teacher/learning-analytics",
     }:

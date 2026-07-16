@@ -129,6 +129,11 @@ from routes.admin_alignment_runs import AdminAlignmentRunModels, register_admin_
 from routes.alignment_verification import register_alignment_verification_routes
 from routes.concept_card_feedback import ConceptCardFeedbackModels, register_concept_card_feedback_routes
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
+from routes.legacy_provider_admin_observability import (
+    LegacyProviderAdminObservabilityModels,
+    LegacyProviderAdminObservabilitySerializers,
+    register_legacy_provider_admin_observability_routes,
+)
 from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
 from routes.provider_policy import ProviderPolicyModels, register_provider_policy_routes
 from routes.provider_preflight import ProviderPreflightModels, register_provider_preflight_routes
@@ -13543,6 +13548,23 @@ register_admin_alignment_run_routes(
 )
 
 
+register_legacy_provider_admin_observability_routes(
+    app,
+    core=route_core,
+    models=LegacyProviderAdminObservabilityModels(
+        AICallLog=AICallLog,
+        AIProviderConfig=AIProviderConfig,
+    ),
+    serializers=LegacyProviderAdminObservabilitySerializers(
+        api_success=api_success,
+        serialize_ai_call_log=serialize_ai_call_log,
+        serialize_ai_provider_config=serialize_ai_provider_config,
+        summarize_ai_calls=summarize_ai_calls,
+    ),
+    health_seed=ensure_ai_registry_seed,
+)
+
+
 @app.route("/api/admin/personal-access-audit", methods=["GET"])
 def admin_personal_access_audit():
     user, error_response = require_current_user({"admin"})
@@ -13650,34 +13672,6 @@ def admin_ai_prompts():
         return api_success(serialize_prompt_template(prompt), "Prompt saved.")
     prompts = PromptTemplate.query.order_by(PromptTemplate.prompt_key.asc(), PromptTemplate.id.desc()).all()
     return api_success({"items": [serialize_prompt_template(prompt) for prompt in prompts]})
-
-
-@app.route("/api/admin/ai/calls", methods=["GET"])
-def admin_ai_calls():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    logs = AICallLog.query.order_by(AICallLog.id.desc()).limit(300).all()
-    return api_success({"items": [serialize_ai_call_log(log) for log in logs]})
-
-
-@app.route("/api/admin/ai/usage", methods=["GET"])
-def admin_ai_usage():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    logs = AICallLog.query.order_by(AICallLog.id.desc()).limit(1000).all()
-    return api_success({"summary": summarize_ai_calls(logs), "recent": [serialize_ai_call_log(log) for log in logs[:50]]})
-
-
-@app.route("/api/admin/ai/health", methods=["GET"])
-def admin_ai_health():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    ensure_ai_registry_seed(owner_user_id=user.id)
-    providers = AIProviderConfig.query.order_by(AIProviderConfig.id.asc()).all()
-    return api_success({"items": [serialize_ai_provider_config(provider) for provider in providers]})
 
 
 @app.route("/api/admin/ai/healthcheck", methods=["POST"])

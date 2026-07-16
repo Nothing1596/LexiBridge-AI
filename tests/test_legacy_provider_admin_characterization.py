@@ -440,13 +440,17 @@ def test_legacy_admin_ai_source_boundaries_are_static():
         "admin_ai_providers",
         "admin_ai_models",
         "admin_ai_prompts",
-        "admin_ai_health",
         "admin_ai_healthcheck",
     ]:
         start = source.index(f"def {handler_name}(")
         end = source.find("\n\n@app.route", start + 1)
         block = source[start:end if end != -1 else len(source)]
         assert "ensure_ai_registry_seed(owner_user_id=user.id)" in block
+    module_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py").read_text(encoding="utf-8")
+    assert "def admin_ai_health(" in module_source
+    assert "health_seed(owner_user_id=user.id)" in module_source
+    assert "healthcheck_provider" not in module_source
+    assert "health_seed=ensure_ai_registry_seed" in source
     health_start = source.index("def admin_ai_healthcheck(")
     health_end = source.find("\n\n@app.route", health_start + 1)
     health_block = source[health_start:health_end]

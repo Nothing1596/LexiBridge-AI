@@ -3,7 +3,7 @@
 Task: 9C.4H
 Baseline commit: `b9b5b0a53b5db6a89911bd659a9ec6c39b0c49dd`
 Branch: `audit/legacy-provider-admin-9c4h`
-Status: characterization and boundary audit only. No production route was migrated or changed.
+Status: characterization and boundary audit. Task 9C.4I has since extracted only the legacy observability GET views: `/api/admin/ai/calls`, `/api/admin/ai/usage`, and `/api/admin/ai/health`.
 
 ## Scope
 
@@ -19,9 +19,9 @@ Unknown legacy provider admin route count after scan: `0`.
 | `/api/admin/ai/models` | GET | `admin_ai_models` | 7 | `LEGACY_READ_ONLY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | safe read candidate after legacy API decision |
 | `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | shared | `LEGACY_READ_ONLY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | split from POST before extraction |
 | `/api/admin/ai/prompts` | POST | `admin_ai_prompts` | shared | `LEGACY_MUTATION` | admin only | yes | no direct frontend call found | yes | creates/updates `PromptTemplate`, commits | no | separate mutation/service-boundary task |
-| `/api/admin/ai/calls` | GET | `admin_ai_calls` | 6 | `LEGACY_READ_ONLY_VIEW` | admin only | yes | yes | no | none | no | safe read candidate inside legacy read-only group |
-| `/api/admin/ai/usage` | GET | `admin_ai_usage` | 6 | `LEGACY_READ_ONLY_VIEW` | admin only | yes | yes | no | none | no | safe read candidate inside legacy read-only group |
-| `/api/admin/ai/health` | GET | `admin_ai_health` | 7 | `LEGACY_LOCAL_HEALTH` | admin only | yes | yes | yes | seed flush only; no commit | no | keep with read-only view, not live probe |
+| `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
+| `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
+| `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted as local health view, not live probe |
 | `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 16 | `LEGACY_EXTERNAL_HEALTH_RISK` | admin only | yes | no direct frontend call found | yes | commits provider health and may persist env seed | yes when live provider plus `live_probe=true` | service boundary required before extraction |
 
 All routes keep the existing legacy response convention from `api_success`: top-level `status`, `message`, and `data`. None of these legacy admin AI routes returns `request_id` today.
@@ -163,3 +163,13 @@ Reasoning:
 - There are no unknown `/api/admin/ai/*` routes after scan.
 
 Next precise slice: split and extract only the safe legacy read-only provider admin views, while leaving prompt mutation and healthcheck in `backend/app.py`. A separate follow-up should then create a service boundary that separates local health summary from live transport probing before moving `/api/admin/ai/healthcheck`.
+
+## Task 9C.4I Update
+
+Task 9C.4I implements the first half of the split by extracting only:
+
+- `GET /api/admin/ai/calls`
+- `GET /api/admin/ai/usage`
+- `GET /api/admin/ai/health`
+
+The new module preserves the legacy active API contract: admin-only access, endpoint names, `api_success` envelopes without `request_id`, id-desc limits, local health seed-flush behavior, no view `AuditRecord`, no provider transport, and no live probe. It does not migrate provider/model/prompt configuration views, `POST /api/admin/ai/prompts`, `POST /api/admin/ai/healthcheck`, `/api/alignment/run`, credential management, replay, or any provider execution path.
