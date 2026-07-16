@@ -44,6 +44,10 @@ from routes.legacy_provider_admin_observability import (
     LegacyProviderAdminObservabilityModels,
     register_legacy_provider_admin_observability_routes,
 )
+from routes.legacy_provider_admin_configuration import (
+    LegacyProviderAdminConfigurationModels,
+    register_legacy_provider_admin_configuration_routes,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +62,7 @@ PROVIDER_PREFLIGHT_MODULE = ROOT / "backend" / "routes" / "provider_preflight.py
 ALIGNMENT_VERIFICATION_MODULE = ROOT / "backend" / "routes" / "alignment_verification.py"
 ADMIN_ALIGNMENT_RUNS_MODULE = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
 LEGACY_PROVIDER_OBSERVABILITY_MODULE = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
+LEGACY_PROVIDER_CONFIGURATION_MODULE = ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
 
 EXPECTED_CORE_FIELDS = {
     "db",
@@ -135,8 +140,12 @@ def test_route_core_dependencies_shape_and_immutability():
     assert not hasattr(core, "admin_alignment_run_service")
     assert not hasattr(core, "run_query_service")
     assert not hasattr(core, "legacy_provider_observability_service")
+    assert not hasattr(core, "legacy_provider_configuration_service")
+    assert not hasattr(core, "registry_seed_service")
     assert not hasattr(core, "AICallLog")
     assert not hasattr(core, "AIProviderConfig")
+    assert not hasattr(core, "AIModelRegistry")
+    assert not hasattr(core, "PromptTemplate")
     assert not hasattr(core, "healthcheck_executor")
     with pytest.raises(FrozenInstanceError):
         core.db = object()
@@ -162,6 +171,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         ALIGNMENT_VERIFICATION_MODULE,
         ADMIN_ALIGNMENT_RUNS_MODULE,
         LEGACY_PROVIDER_OBSERVABILITY_MODULE,
+        LEGACY_PROVIDER_CONFIGURATION_MODULE,
     ]:
         imports = set(_imports_for(path))
         assert "backend.app" not in imports
@@ -177,6 +187,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     alignment_verification_sig = inspect.signature(register_alignment_verification_routes)
     admin_alignment_runs_sig = inspect.signature(register_admin_alignment_run_routes)
     legacy_provider_observability_sig = inspect.signature(register_legacy_provider_admin_observability_routes)
+    legacy_provider_configuration_sig = inspect.signature(register_legacy_provider_admin_configuration_routes)
     assert "core" in teacher_sig.parameters
     assert "core" in student_sig.parameters
     assert "core" in review_sig.parameters
@@ -187,6 +198,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "core" in alignment_verification_sig.parameters
     assert "core" in admin_alignment_runs_sig.parameters
     assert "core" in legacy_provider_observability_sig.parameters
+    assert "core" in legacy_provider_configuration_sig.parameters
     assert "execution_dependencies" in alignment_verification_sig.parameters
     assert "models" in admin_alignment_runs_sig.parameters
     assert "serialize_alignment_run" in admin_alignment_runs_sig.parameters
@@ -194,6 +206,15 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "serializers" in legacy_provider_observability_sig.parameters
     assert "registry_seed_service" in legacy_provider_observability_sig.parameters
     assert "api_success" not in legacy_provider_observability_sig.parameters
+    assert "models" in legacy_provider_configuration_sig.parameters
+    assert "serializers" in legacy_provider_configuration_sig.parameters
+    assert "registry_seed_service" in legacy_provider_configuration_sig.parameters
+    assert "seed_models" in legacy_provider_configuration_sig.parameters
+    assert "provider_selection_factory" in legacy_provider_configuration_sig.parameters
+    assert "default_prompts" in legacy_provider_configuration_sig.parameters
+    assert "model_version_factory" in legacy_provider_configuration_sig.parameters
+    assert "prompt_post_handler" in legacy_provider_configuration_sig.parameters
+    assert "api_success" not in legacy_provider_configuration_sig.parameters
     for name in {
         "db",
         "audit_model",
@@ -215,9 +236,13 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert name not in alignment_verification_sig.parameters
         assert name not in admin_alignment_runs_sig.parameters
         assert name not in legacy_provider_observability_sig.parameters
+        assert name not in legacy_provider_configuration_sig.parameters
 
     assert "AICallLog" in LegacyProviderAdminObservabilityModels.__dataclass_fields__
     assert "AIProviderConfig" in LegacyProviderAdminObservabilityModels.__dataclass_fields__
+    assert "AIProviderConfig" in LegacyProviderAdminConfigurationModels.__dataclass_fields__
+    assert "AIModelRegistry" in LegacyProviderAdminConfigurationModels.__dataclass_fields__
+    assert "PromptTemplate" in LegacyProviderAdminConfigurationModels.__dataclass_fields__
     for service_name in {
         "concept_card_review_service",
         "concept_card_feedback_service",
@@ -232,6 +257,10 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         "provider_execution_service",
         "admin_alignment_run_service",
         "run_query_service",
+        "legacy_provider_configuration_service",
+        "healthcheck_executor",
+        "provider_transport",
+        "credential_resolver",
     }:
         assert service_name not in review_sig.parameters
         assert service_name not in feedback_sig.parameters
@@ -240,6 +269,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert service_name not in provider_preflight_sig.parameters
         assert service_name not in alignment_verification_sig.parameters
         assert service_name not in admin_alignment_runs_sig.parameters
+        assert service_name not in legacy_provider_configuration_sig.parameters
 
 
 def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoints():
@@ -346,6 +376,55 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
         ),
         serialize_alignment_run=lambda run: {},
     )
+
+    class DummyQuery:
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return []
+
+    class DummyAIProviderConfig:
+        id = object()
+        is_default = object()
+        query = DummyQuery()
+
+    class DummyAIModelRegistry:
+        provider_name = object()
+        id = object()
+        query = DummyQuery()
+
+    class DummyPromptTemplate:
+        prompt_key = object()
+        id = object()
+        query = DummyQuery()
+
+    register_legacy_provider_admin_configuration_routes(
+        app,
+        core=core,
+        models=LegacyProviderAdminConfigurationModels(
+            AIProviderConfig=DummyAIProviderConfig,
+            AIModelRegistry=DummyAIModelRegistry,
+            PromptTemplate=DummyPromptTemplate,
+        ),
+        serializers=type(
+            "Serializers",
+            (),
+            {
+                "api_success": staticmethod(lambda data=None, message="Operation completed.": data),
+                "serialize_ai_provider_config": staticmethod(lambda provider: {}),
+                "serialize_ai_model_registry": staticmethod(lambda model: {}),
+                "serialize_prompt_template": staticmethod(lambda prompt: {}),
+                "current_provider_metadata": staticmethod(lambda: {}),
+            },
+        )(),
+        registry_seed_service=lambda **kwargs: None,
+        seed_models=object(),
+        provider_selection_factory=lambda: object(),
+        default_prompts=[],
+        model_version_factory=lambda: "local-mvp-v1",
+        prompt_post_handler=lambda user: {},
+    )
     paths = [
         rule.rule
         for rule in app.url_map.iter_rules()
@@ -355,6 +434,7 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
         or rule.rule.startswith("/api/alignment/providers")
         or rule.rule == "/api/alignment/verify"
         or rule.rule == "/api/admin/alignment-runs"
+        or rule.rule.startswith("/api/admin/ai/")
     ]
     method_paths = [
         (rule.rule, method)
@@ -372,3 +452,6 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
     assert "/api/alignment/providers/<path:provider_name>/preflight" in paths
     assert "/api/alignment/verify" in paths
     assert "/api/admin/alignment-runs" in paths
+    assert "/api/admin/ai/providers" in paths
+    assert "/api/admin/ai/models" in paths
+    assert "/api/admin/ai/prompts" in paths

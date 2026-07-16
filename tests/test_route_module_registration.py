@@ -19,6 +19,7 @@ PROVIDER_PREFLIGHT_MODULE_PATH = ROOT / "backend" / "routes" / "provider_preflig
 ALIGNMENT_VERIFICATION_MODULE_PATH = ROOT / "backend" / "routes" / "alignment_verification.py"
 ADMIN_ALIGNMENT_RUNS_MODULE_PATH = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
 LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
+LEGACY_PROVIDER_CONFIGURATION_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
 
 
 def load_route_module(module_path, module_name):
@@ -222,6 +223,52 @@ def legacy_provider_observability_dummy_dependencies(module):
     }
 
 
+def legacy_provider_configuration_dummy_dependencies(module):
+    class DummyQuery:
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return []
+
+    class DummyAIProviderConfig:
+        id = object()
+        is_default = object()
+        query = DummyQuery()
+
+    class DummyAIModelRegistry:
+        provider_name = object()
+        id = object()
+        query = DummyQuery()
+
+    class DummyPromptTemplate:
+        prompt_key = object()
+        id = object()
+        query = DummyQuery()
+
+    return {
+        "core": dummy_core_dependencies(),
+        "models": module.LegacyProviderAdminConfigurationModels(
+            AIProviderConfig=DummyAIProviderConfig,
+            AIModelRegistry=DummyAIModelRegistry,
+            PromptTemplate=DummyPromptTemplate,
+        ),
+        "serializers": module.LegacyProviderAdminConfigurationSerializers(
+            api_success=lambda data=None, message="Operation completed.": data,
+            serialize_ai_provider_config=lambda provider: {},
+            serialize_ai_model_registry=lambda model: {},
+            serialize_prompt_template=lambda prompt: {},
+            current_provider_metadata=lambda: {},
+        ),
+        "registry_seed_service": lambda **kwargs: None,
+        "seed_models": object(),
+        "provider_selection_factory": lambda: object(),
+        "default_prompts": [],
+        "model_version_factory": lambda: "local-mvp-v1",
+        "prompt_post_handler": lambda user: {},
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -299,6 +346,11 @@ def test_route_modules_import_without_backend_app_dependency():
         LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH,
         "register_legacy_provider_admin_observability_routes",
         "legacy_provider_admin_observability_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        LEGACY_PROVIDER_CONFIGURATION_MODULE_PATH,
+        "register_legacy_provider_admin_configuration_routes",
+        "legacy_provider_admin_configuration_routes",
     )
 
 
@@ -532,6 +584,31 @@ def test_legacy_provider_observability_register_function_registers_expected_rout
     assert {path: data for path, data in second.items() if path in expected} == expected
 
 
+def test_legacy_provider_configuration_register_function_registers_expected_routes_and_is_idempotent():
+    module = load_route_module(LEGACY_PROVIDER_CONFIGURATION_MODULE_PATH, "legacy_provider_admin_configuration_routes")
+    app = Flask("legacy-provider-configuration-route-registration-test")
+    module.register_legacy_provider_admin_configuration_routes(app, **legacy_provider_configuration_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/admin/ai")
+    expected = {
+        "/api/admin/ai/providers": {
+            "endpoint": "admin_ai_providers",
+            "methods": {"GET"},
+        },
+        "/api/admin/ai/models": {
+            "endpoint": "admin_ai_models",
+            "methods": {"GET"},
+        },
+        "/api/admin/ai/prompts": {
+            "endpoint": "admin_ai_prompts",
+            "methods": {"GET", "POST"},
+        },
+    }
+    assert {path: data for path, data in first.items() if path in expected} == expected
+    module.register_legacy_provider_admin_configuration_routes(app, **legacy_provider_configuration_dummy_dependencies(module))
+    second = target_route_summary(app, "/api/admin/ai")
+    assert {path: data for path, data in second.items() if path in expected} == expected
+
+
 def test_existing_app_has_no_duplicate_teacher_analytics_routes(app_module):
     summary = target_route_summary(app_module.app, "/api/teacher/learning-analytics")
     assert summary == {
@@ -686,6 +763,27 @@ def test_existing_app_has_single_legacy_provider_observability_routes(app_module
         ) == 1
 
 
+def test_existing_app_has_single_legacy_provider_configuration_routes(app_module):
+    expected = {
+        ("/api/admin/ai/providers", "GET"): "admin_ai_providers",
+        ("/api/admin/ai/models", "GET"): "admin_ai_models",
+        ("/api/admin/ai/prompts", "GET"): "admin_ai_prompts",
+        ("/api/admin/ai/prompts", "POST"): "admin_ai_prompts",
+    }
+    actual = {}
+    for rule in app_module.app.url_map.iter_rules():
+        for method in rule.methods - {"HEAD", "OPTIONS"}:
+            if rule.rule in {path for path, _method in expected}:
+                actual[(rule.rule, method)] = rule.endpoint
+    assert actual == expected
+    for path, method in expected:
+        assert sum(
+            1
+            for rule in app_module.app.url_map.iter_rules()
+            if rule.rule == path and method in rule.methods
+        ) == 1
+
+
 def test_app_startup_keeps_representative_legacy_routes(app_module, client, teacher_token):
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     for path in {
@@ -697,6 +795,9 @@ def test_app_startup_keeps_representative_legacy_routes(app_module, client, teac
         "/api/admin/ai/calls",
         "/api/admin/ai/usage",
         "/api/admin/ai/health",
+        "/api/admin/ai/providers",
+        "/api/admin/ai/models",
+        "/api/admin/ai/prompts",
         "/api/alignment/providers",
         "/api/teacher/learning-analytics",
     }:

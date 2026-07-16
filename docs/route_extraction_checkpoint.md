@@ -459,3 +459,32 @@ Post-9C.4J status:
 - `POST /api/admin/ai/healthcheck`, `POST /api/admin/ai/prompts`, and legacy `/api/alignment/run` remain separate future tasks.
 
 Next recommended slice: if 9C.4J gates pass, migrate only the seed-backed provider/model/prompt GET views in a narrow task. Keep prompt mutation, healthcheck live transport, and legacy alignment execution out of that slice.
+
+## Task 9C.4K Legacy Provider Configuration Routes
+
+Task 9C.4K extracts only the seed-backed legacy provider admin configuration GET views into `backend/routes/legacy_provider_admin_configuration.py`:
+
+- `GET /api/admin/ai/providers`
+- `GET /api/admin/ai/models`
+- `GET /api/admin/ai/prompts`
+
+The module registers the shared `/api/admin/ai/prompts` endpoint with `GET` and `POST` to preserve the Flask endpoint name `admin_ai_prompts`, but the POST mutation logic remains app-owned through the explicit `prompt_post_handler` callback. This keeps prompt mutation out of the route extraction slice while avoiding URL/method/endpoint drift.
+
+Register signature:
+
+`register_legacy_provider_admin_configuration_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, prompt_post_handler)`
+
+The extracted GET views call `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency. They preserve admin-only access, OpenAPI/frontend URLs, legacy `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, seed flush/no-explicit-commit behavior, and no transport/live-probe behavior.
+
+Post-9C.4K status:
+
+- New route module: `backend/routes/legacy_provider_admin_configuration.py`.
+- Migrated GET routes in this slice: 3.
+- `backend/app.py` line count: 16,007.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 132.
+- Extracted route modules: 11.
+- Extracted routes: 30.
+- `RouteCoreDependencies` fields: 9.
+- `POST /api/admin/ai/prompts`, `POST /api/admin/ai/healthcheck`, and legacy `/api/alignment/run` remain separate future tasks.
+
+Next recommended slice: establish a healthcheck service-boundary audit that separates local readiness state from live transport probing before moving `POST /api/admin/ai/healthcheck`; prompt mutation and legacy `/api/alignment/run` should remain separate tasks.

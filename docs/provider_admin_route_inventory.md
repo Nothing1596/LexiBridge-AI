@@ -3,7 +3,7 @@
 Task: 9C.4F
 Baseline commit: `cb63cd657929e5c5f15efd6a9adc0e6384a08a86`
 Branch: `audit/provider-admin-routes-9c4f`
-Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`; Task 9C.4I has since extracted only the legacy observability GET views; Task 9C.4J has since moved the shared legacy provider registry seed implementation into `backend/services/legacy_provider_registry_seed.py` without changing route contracts.
+Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`; Task 9C.4I has since extracted only the legacy observability GET views; Task 9C.4J has since moved the shared legacy provider registry seed implementation into `backend/services/legacy_provider_registry_seed.py` without changing route contracts; Task 9C.4K has since extracted only the seed-backed legacy configuration GET views.
 
 ## Scope
 
@@ -21,9 +21,9 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 | Route | Method | Endpoint | Lines | Classification | Read only | Auth/roles | OpenAPI | Frontend/scripts | Database writes | Network risk | Secret risk | Recommendation |
 |---|---:|---|---:|---|---:|---|---:|---|---|---|---|---|
 | `/api/admin/alignment-runs` | GET | `admin_alignment_runs` | module | `EXTRACTED_READ_ONLY_ADMIN_LISTING` | yes | admin only | no | README only | none | none | serialized run summaries only | extracted in `backend/routes/admin_alignment_runs.py` |
-| `/api/admin/ai/providers` | GET | `admin_ai_providers` | 10 | `LEGACY_ACTIVE` / `READ_ONLY_PROVIDER_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none in GET | provider config fields; no API keys returned | `DEPRECATION_AUDIT_REQUIRED` before extraction |
-| `/api/admin/ai/models` | GET | `admin_ai_models` | 7 | `LEGACY_ACTIVE` / `READ_ONLY_PROVIDER_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | model registry fields; no credentials | `DEPRECATION_AUDIT_REQUIRED` before extraction |
-| `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | shared | `LEGACY_ACTIVE` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | prompt templates only | split GET from POST before extraction |
+| `/api/admin/ai/providers` | GET | `admin_ai_providers` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none in GET | provider config fields; no API keys returned | extracted in `backend/routes/legacy_provider_admin_configuration.py` |
+| `/api/admin/ai/models` | GET | `admin_ai_models` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | model registry fields; no credentials | extracted in `backend/routes/legacy_provider_admin_configuration.py` |
+| `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | mostly | admin only | yes | frontend active | may flush registry seed if missing; no explicit commit | none | prompt metadata by current serializer | extracted in `backend/routes/legacy_provider_admin_configuration.py`; POST remains app callback |
 | `/api/admin/ai/prompts` | POST | `admin_ai_prompts` | shared | `SERVICE_BOUNDARY_REQUIRED` | no | admin only | yes | frontend active | creates/updates `PromptTemplate`, commits | none | accepts template/schema text; no credentials by contract | service/contract task first |
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | serialized call logs; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
@@ -81,22 +81,22 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 - `request_id`: not returned by the current implementation.
 - AuditRecord event: none observed.
 - Data source: `AIProviderConfig` plus `current_provider_metadata()`.
-- Writes: calls the legacy registry seed service through the `ensure_ai_registry_seed(owner_user_id=user.id)` compatibility wrapper, which can add/flush `AIProviderConfig`, `AIModelRegistry`, and `PromptTemplate` rows when the seed is missing. The GET handler does not explicitly commit.
+- Writes: calls the legacy registry seed service directly from `backend/routes/legacy_provider_admin_configuration.py`, which can add/flush `AIProviderConfig`, `AIModelRegistry`, and `PromptTemplate` rows when the seed is missing. The GET handler does not explicitly commit.
 - Network: none for this GET route.
 - Secret redaction: characterization injects sentinel API key values and verifies they do not appear in the response.
 - Relationship to formal API: overlaps with `GET /api/alignment/providers`, but schema, role set, storage model, and frontend use differ.
-- Suitability: do not directly extract yet; first decide whether this legacy active view remains separate or should be deprecated/bridged to the formal provider governance API.
+- Status: `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` in `backend/routes/legacy_provider_admin_configuration.py`. It remains a legacy active view, not a formal provider governance API alias.
 
 ## Legacy Provider Routes
 
 The `/api/admin/ai/*` group is active in `frontend/index.html` and OpenAPI. It is not the same surface as the 9C.4A formal provider governance API.
 
-- `/api/admin/ai/providers`, `/models`, `/prompts`, and `/health` all call the shared legacy registry seed service. `backend/app.py` keeps `ensure_ai_registry_seed(...)` as a compatibility wrapper for the app-local routes and non-route callers; the extracted local health route receives it as the explicit `registry_seed_service` dependency.
-- `/api/admin/ai/prompts` combines GET and POST in one handler; POST mutates `PromptTemplate`.
+- `/api/admin/ai/providers`, `/models`, `/prompts`, and `/health` all call the shared legacy registry seed service. The extracted provider/model/prompt configuration route module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency; `backend/app.py` keeps `ensure_ai_registry_seed(...)` as a compatibility wrapper for app-local callers, including prompt mutation, healthcheck, and non-route helper paths.
+- `/api/admin/ai/prompts` still preserves the shared Flask endpoint `admin_ai_prompts`; GET is handled by the configuration route module and POST delegates to the app-owned prompt mutation callback.
 - `/api/admin/ai/healthcheck` mutates provider health fields and can reach external provider transport if a live provider is configured and `live_probe=true`.
 - `/api/admin/ai/calls` and `/usage` are read-only over `AICallLog`, a legacy AI usage/cost surface distinct from `AlignmentProviderUsageRecord`.
 
-These routes should not be extracted as one group until their compatibility and deprecation boundary is explicit.
+The remaining legacy provider admin write/high-risk routes should not be extracted as one group until their service boundaries are explicit.
 
 ## Legacy Alignment Run Routes
 
@@ -168,9 +168,9 @@ OpenAPI dependencies:
 | Endpoint | Lines | Direct models | Service/helper calls | Returns | Writes | Network risk | Extraction suitability |
 |---|---:|---:|---:|---:|---:|---:|---|
 | `admin_alignment_runs` | module | 1 | serializer | 1 | 0 | no | `EXTRACTED_READ_ONLY_ADMIN_LISTING` |
-| `admin_ai_providers` | 10 | 1 | seed, metadata, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
-| `admin_ai_models` | 7 | 1 | seed, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
-| `admin_ai_prompts` | 31 | 1 | seed, validation, serializer | 3 | yes on POST | no | `SERVICE_BOUNDARY_REQUIRED` |
+| `admin_ai_providers` | module | 1 | seed service, metadata, serializer | 1 | possible seed flush | no | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` |
+| `admin_ai_models` | module | 1 | seed service, serializer | 1 | possible seed flush | no | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` |
+| `admin_ai_prompts` | module + app callback | 1 | seed service, serializer, validation callback for POST | 3 | yes on POST | no | GET extracted; POST remains `SERVICE_BOUNDARY_REQUIRED` |
 | `admin_ai_calls` | 6 | 1 | serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` inside legacy group |
 | `admin_ai_usage` | 6 | 1 | summary serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` inside legacy group |
 | `admin_ai_health` | 7 | 1 | seed, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
@@ -208,8 +208,23 @@ The extracted routes keep the legacy endpoint names, admin-only permission, Open
 
 Still in `backend/app.py`:
 
-- seed-backed configuration views: `GET /api/admin/ai/providers`, `GET /api/admin/ai/models`, and `GET /api/admin/ai/prompts`;
 - prompt mutation: `POST /api/admin/ai/prompts`;
+- live-probe risk route: `POST /api/admin/ai/healthcheck`;
+- legacy alignment execution routes: `/api/alignment/run` and `/api/alignment/runs*`.
+
+## Task 9C.4K Legacy Configuration Extraction
+
+Task 9C.4K extracts only the seed-backed legacy configuration GET views into `backend/routes/legacy_provider_admin_configuration.py`:
+
+- `GET /api/admin/ai/providers`
+- `GET /api/admin/ai/models`
+- `GET /api/admin/ai/prompts`
+
+The extracted routes keep the legacy endpoint names, admin-only permission, OpenAPI/frontend URLs, `api_success` response envelope without `request_id`, no view `AuditRecord`, existing ordering, and seed flush/no-explicit-commit behavior. The route module calls `ensure_legacy_provider_registry_seed(...)` directly and does not import `backend.app` or the compatibility wrapper.
+
+Still in `backend/app.py` after 9C.4K:
+
+- prompt mutation logic for `POST /api/admin/ai/prompts`, passed to the route module as an explicit callback to preserve the shared `admin_ai_prompts` endpoint;
 - live-probe risk route: `POST /api/admin/ai/healthcheck`;
 - legacy alignment execution routes: `/api/alignment/run` and `/api/alignment/runs*`.
 

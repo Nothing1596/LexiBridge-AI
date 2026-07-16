@@ -138,6 +138,11 @@ from routes.legacy_provider_admin_observability import (
     LegacyProviderAdminObservabilitySerializers,
     register_legacy_provider_admin_observability_routes,
 )
+from routes.legacy_provider_admin_configuration import (
+    LegacyProviderAdminConfigurationModels,
+    LegacyProviderAdminConfigurationSerializers,
+    register_legacy_provider_admin_configuration_routes,
+)
 from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
 from routes.provider_policy import ProviderPolicyModels, register_provider_policy_routes
 from routes.provider_preflight import ProviderPreflightModels, register_provider_preflight_routes
@@ -13556,59 +13561,56 @@ def admin_model_registry():
     })
 
 
-@app.route("/api/admin/ai/providers", methods=["GET"])
-def admin_ai_providers():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    ensure_ai_registry_seed(owner_user_id=user.id)
-    providers = AIProviderConfig.query.order_by(AIProviderConfig.is_default.desc(), AIProviderConfig.id.asc()).all()
-    return api_success({
-        "items": [serialize_ai_provider_config(provider) for provider in providers],
-        "current": current_provider_metadata(),
-    })
+def admin_ai_prompts_post_handler(user):
+    data = request.get_json() or {}
+    prompt_key = str(data.get("prompt_key", "")).strip()
+    prompt_version = str(data.get("prompt_version", "")).strip()
+    if not prompt_key or not prompt_version:
+        return api_error("VALIDATION_ERROR", "prompt_key and prompt_version are required.", 400)
+    prompt = PromptTemplate.query.filter_by(prompt_key=prompt_key, prompt_version=prompt_version).first()
+    if prompt is None:
+        prompt = PromptTemplate(prompt_key=prompt_key, prompt_version=prompt_version, created_at=current_time_text())
+        db.session.add(prompt)
+    prompt.task_type = str(data.get("task_type", prompt.task_type or prompt_key)).strip()
+    prompt.language = str(data.get("language", prompt.language or "bilingual")).strip()
+    prompt.template_text = str(data.get("template_text", prompt.template_text or "")).strip()
+    schema = data.get("json_schema", safe_json_loads(prompt.json_schema, {}))
+    prompt.json_schema = json.dumps(schema, ensure_ascii=False) if isinstance(schema, (dict, list)) else str(schema)
+    prompt.is_active = bool(data.get("is_active", prompt.is_active))
+    prompt.is_default = bool(data.get("is_default", prompt.is_default))
+    prompt.created_by = prompt.created_by or user.id
+    prompt.updated_at = current_time_text()
+    prompt.notes = str(data.get("notes", prompt.notes or "")).strip()
+    db.session.commit()
+    return api_success(serialize_prompt_template(prompt), "Prompt saved.")
 
 
-@app.route("/api/admin/ai/models", methods=["GET"])
-def admin_ai_models():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    ensure_ai_registry_seed(owner_user_id=user.id)
-    models = AIModelRegistry.query.order_by(AIModelRegistry.provider_name.asc(), AIModelRegistry.id.desc()).all()
-    return api_success({"items": [serialize_ai_model_registry(model) for model in models]})
-
-
-@app.route("/api/admin/ai/prompts", methods=["GET", "POST"])
-def admin_ai_prompts():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    ensure_ai_registry_seed(owner_user_id=user.id)
-    if request.method == "POST":
-        data = request.get_json() or {}
-        prompt_key = str(data.get("prompt_key", "")).strip()
-        prompt_version = str(data.get("prompt_version", "")).strip()
-        if not prompt_key or not prompt_version:
-            return api_error("VALIDATION_ERROR", "prompt_key and prompt_version are required.", 400)
-        prompt = PromptTemplate.query.filter_by(prompt_key=prompt_key, prompt_version=prompt_version).first()
-        if prompt is None:
-            prompt = PromptTemplate(prompt_key=prompt_key, prompt_version=prompt_version, created_at=current_time_text())
-            db.session.add(prompt)
-        prompt.task_type = str(data.get("task_type", prompt.task_type or prompt_key)).strip()
-        prompt.language = str(data.get("language", prompt.language or "bilingual")).strip()
-        prompt.template_text = str(data.get("template_text", prompt.template_text or "")).strip()
-        schema = data.get("json_schema", safe_json_loads(prompt.json_schema, {}))
-        prompt.json_schema = json.dumps(schema, ensure_ascii=False) if isinstance(schema, (dict, list)) else str(schema)
-        prompt.is_active = bool(data.get("is_active", prompt.is_active))
-        prompt.is_default = bool(data.get("is_default", prompt.is_default))
-        prompt.created_by = prompt.created_by or user.id
-        prompt.updated_at = current_time_text()
-        prompt.notes = str(data.get("notes", prompt.notes or "")).strip()
-        db.session.commit()
-        return api_success(serialize_prompt_template(prompt), "Prompt saved.")
-    prompts = PromptTemplate.query.order_by(PromptTemplate.prompt_key.asc(), PromptTemplate.id.desc()).all()
-    return api_success({"items": [serialize_prompt_template(prompt) for prompt in prompts]})
+register_legacy_provider_admin_configuration_routes(
+    app,
+    core=route_core,
+    models=LegacyProviderAdminConfigurationModels(
+        AIProviderConfig=AIProviderConfig,
+        AIModelRegistry=AIModelRegistry,
+        PromptTemplate=PromptTemplate,
+    ),
+    serializers=LegacyProviderAdminConfigurationSerializers(
+        api_success=api_success,
+        serialize_ai_provider_config=serialize_ai_provider_config,
+        serialize_ai_model_registry=serialize_ai_model_registry,
+        serialize_prompt_template=serialize_prompt_template,
+        current_provider_metadata=current_provider_metadata,
+    ),
+    registry_seed_service=ensure_legacy_provider_registry_seed,
+    seed_models=LegacyProviderRegistrySeedModels(
+        AIProviderConfig=AIProviderConfig,
+        AIModelRegistry=AIModelRegistry,
+        PromptTemplate=PromptTemplate,
+    ),
+    provider_selection_factory=lambda: env_provider_selection(os.environ),
+    default_prompts=DEFAULT_PROMPTS,
+    model_version_factory=lambda: os.environ.get("MODEL_VERSION", "local-mvp-v1"),
+    prompt_post_handler=admin_ai_prompts_post_handler,
+)
 
 
 @app.route("/api/admin/ai/healthcheck", methods=["POST"])

@@ -3,7 +3,7 @@
 Task: 9C.4H
 Baseline commit: `b9b5b0a53b5db6a89911bd659a9ec6c39b0c49dd`
 Branch: `audit/legacy-provider-admin-9c4h`
-Status: characterization and boundary audit. Task 9C.4I has since extracted only the legacy observability GET views: `/api/admin/ai/calls`, `/api/admin/ai/usage`, and `/api/admin/ai/health`.
+Status: characterization and boundary audit. Task 9C.4I has since extracted only the legacy observability GET views: `/api/admin/ai/calls`, `/api/admin/ai/usage`, and `/api/admin/ai/health`. Task 9C.4K has since extracted the seed-backed legacy configuration GET views: `/api/admin/ai/providers`, `/api/admin/ai/models`, and `/api/admin/ai/prompts`.
 
 ## Scope
 
@@ -15,9 +15,9 @@ Unknown legacy provider admin route count after scan: `0`.
 
 | Route | Method | Endpoint | Handler lines | Classification | Auth/roles | OpenAPI | Frontend | Seed helper | Writes | Network risk | Recommendation |
 |---|---:|---|---:|---|---|---:|---:|---:|---|---|---|
-| `/api/admin/ai/providers` | GET | `admin_ai_providers` | 10 | `LEGACY_AGGREGATE_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | keep as legacy read view or shim; do not mix with healthcheck |
-| `/api/admin/ai/models` | GET | `admin_ai_models` | 7 | `LEGACY_READ_ONLY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | safe read candidate after legacy API decision |
-| `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | shared | `LEGACY_READ_ONLY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | split from POST before extraction |
+| `/api/admin/ai/providers` | GET | `admin_ai_providers` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted in `backend/routes/legacy_provider_admin_configuration.py` |
+| `/api/admin/ai/models` | GET | `admin_ai_models` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted in `backend/routes/legacy_provider_admin_configuration.py` |
+| `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted in `backend/routes/legacy_provider_admin_configuration.py`; POST still app-owned mutation callback |
 | `/api/admin/ai/prompts` | POST | `admin_ai_prompts` | shared | `LEGACY_MUTATION` | admin only | yes | no direct frontend call found | yes | creates/updates `PromptTemplate`, commits | no | separate mutation/service-boundary task |
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
@@ -172,9 +172,9 @@ All `/api/admin/ai/*` routes are present in `docs/openapi.yaml`.
 
 | Route | Suitability |
 |---|---|
-| `/api/admin/ai/providers` GET | `KEEP_LEGACY_SHIM` or extract with read-only legacy group after frontend/formal API mapping |
-| `/api/admin/ai/models` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
-| `/api/admin/ai/prompts` GET | `KEEP_AND_EXTRACT` only after splitting from POST |
+| `/api/admin/ai/providers` GET | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW`; keep legacy shim/API contract |
+| `/api/admin/ai/models` GET | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW`; keep legacy shim/API contract |
+| `/api/admin/ai/prompts` GET | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW`; shared endpoint preserved while POST mutation remains separate |
 | `/api/admin/ai/prompts` POST | `SERVICE_BOUNDARY_FIRST` |
 | `/api/admin/ai/calls` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
 | `/api/admin/ai/usage` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
@@ -185,9 +185,9 @@ All `/api/admin/ai/*` routes are present in `docs/openapi.yaml`.
 
 | Endpoint | Lines | Direct models | Helper/service calls | Returns | Writes | Network risk | Migration suitability |
 |---|---:|---:|---:|---:|---:|---:|---|
-| `admin_ai_providers` | 10 | 1 | seed, metadata, serializer | 1 | seed flush only | no | extract only with read-only legacy group |
-| `admin_ai_models` | 7 | 1 | seed, serializer | 1 | seed flush only | no | extract only with read-only legacy group |
-| `admin_ai_prompts` GET | shared | 1 | seed, serializer | 1 | seed flush only | no | split from POST first |
+| `admin_ai_providers` | module | 1 | seed service, metadata, serializer | 1 | seed flush only | no | extracted seed-backed configuration view |
+| `admin_ai_models` | module | 1 | seed service, serializer | 1 | seed flush only | no | extracted seed-backed configuration view |
+| `admin_ai_prompts` GET | module | 1 | seed service, serializer | 1 | seed flush only | no | extracted seed-backed configuration view; POST callback remains app-owned |
 | `admin_ai_prompts` POST | shared | 1 | seed, validation, serializer | 3 | commit | no | service boundary or separate mutation task |
 | `admin_ai_calls` | 6 | 1 | serializer | 1 | 0 | no | read-only extraction candidate |
 | `admin_ai_usage` | 6 | 1 | summary serializer | 1 | 0 | no | read-only extraction candidate |
@@ -217,3 +217,15 @@ Task 9C.4I implements the first half of the split by extracting only:
 - `GET /api/admin/ai/health`
 
 The new module preserves the legacy active API contract: admin-only access, endpoint names, `api_success` envelopes without `request_id`, id-desc limits, local health seed-flush behavior, no view `AuditRecord`, no provider transport, and no live probe. It does not migrate provider/model/prompt configuration views, `POST /api/admin/ai/prompts`, `POST /api/admin/ai/healthcheck`, `/api/alignment/run`, credential management, replay, or any provider execution path.
+
+## Task 9C.4K Update
+
+Task 9C.4K extracts only the seed-backed legacy configuration GET views into `backend/routes/legacy_provider_admin_configuration.py`:
+
+- `GET /api/admin/ai/providers`
+- `GET /api/admin/ai/models`
+- `GET /api/admin/ai/prompts`
+
+The module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency and preserves the legacy compatibility contract: admin-only access, endpoint names, OpenAPI/frontend URLs, `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, and seed flush/no-explicit-commit behavior. Legitimate prompt metadata remains part of the prompt GET contract, while credential-like provider/model metadata remains excluded from responses.
+
+`POST /api/admin/ai/prompts` still keeps its mutation logic in `backend/app.py` through an explicit `prompt_post_handler` callback because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. `POST /api/admin/ai/healthcheck`, live transport probing, prompt mutation service work, and `/api/alignment/run` remain separate future tasks.

@@ -221,16 +221,23 @@ def test_admin_ai_provider_views_contract_permissions_secret_redaction_and_no_ne
 
 def test_admin_ai_get_handlers_include_registry_seed_boundary():
     source = (ROOT / "backend" / "app.py").read_text(encoding="utf-8")
+    configuration_source = (
+        ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
+    ).read_text(encoding="utf-8")
     for handler_name in [
         "admin_ai_providers",
         "admin_ai_models",
         "admin_ai_prompts",
-        "admin_ai_healthcheck",
     ]:
-        start = source.index(f"def {handler_name}(")
-        end = source.find("\n\n@app.route", start + 1)
-        block = source[start:end if end != -1 else len(source)]
-        assert "ensure_ai_registry_seed(owner_user_id=user.id)" in block
+        assert f"def {handler_name}(" in configuration_source
+    assert "seed_registry(user.id)" in configuration_source
+    assert "registry_seed_service(" in configuration_source
+    assert "ensure_ai_registry_seed" not in configuration_source
+    assert "prompt_post_handler(user)" in configuration_source
+    assert "def admin_ai_prompts_post_handler(user):" in source
+    assert "register_legacy_provider_admin_configuration_routes(" in source
+    assert "registry_seed_service=ensure_legacy_provider_registry_seed" in source
+    assert "prompt_post_handler=admin_ai_prompts_post_handler" in source
     module_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py").read_text(encoding="utf-8")
     assert "def admin_ai_health(" in module_source
     assert "registry_seed_service(owner_user_id=user.id)" in module_source
