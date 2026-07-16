@@ -64,6 +64,7 @@ from services.ai_registry import (
     env_provider_selection,
     validate_ai_config as validate_ai_environment_config,
     can_default_provider,
+    is_placeholder_secret,
 )
 from services.legacy_provider_registry_seed import (
     LegacyProviderRegistrySeedModels,
@@ -87,7 +88,11 @@ from services.ai_cost import (
     estimate_ai_cost,
     summarize_ai_calls,
 )
-from services.ai_health import healthcheck_provider
+from services.legacy_provider_local_readiness import (
+    LegacyProviderLocalReadinessProvider,
+    LegacyProviderLocalReadinessRequest,
+    evaluate_legacy_provider_local_readiness,
+)
 from services.chunk_dedup import compute_content_hash, find_duplicate_chunk, mark_duplicate_chunk, normalize_chunk_text
 from services.knowledge_health import summarize_health as summarize_kb_health
 from services.knowledge_indexing import (
@@ -6937,6 +6942,17 @@ def ai_selection_from_config(config=None, provider_name=None, model_name=None):
     return selection
 
 
+def legacy_provider_credential_present(provider_name):
+    provider = str(provider_name or "").strip().lower()
+    if provider == "deepseek":
+        value = DEEPSEEK_API_KEY
+    elif provider in {"openai", "custom_openai_compatible"}:
+        value = OPENAI_API_KEY
+    else:
+        value = ""
+    return bool(value and not is_placeholder_secret(value))
+
+
 def ensure_ai_registry_seed(owner_user_id=0):
     result = ensure_legacy_provider_registry_seed(
         db=db,
@@ -13622,19 +13638,20 @@ def admin_ai_healthcheck():
     live_probe = bool((request.get_json() or {}).get("live_probe", False))
     results = []
     for config in AIProviderConfig.query.filter_by(is_enabled=True).all():
-        if live_probe and str(config.provider_mode or "").strip().lower() == "live":
-            result = {
-                "provider_name": config.provider_name,
-                "provider_mode": config.provider_mode,
-                "health_status": "unknown",
-                "latency_ms": 0,
-                "message": "Legacy live probe is disabled; provider transport was not attempted.",
-                "error_code": "LEGACY_LIVE_PROBE_DISABLED",
-            }
-        else:
-            selection = ai_selection_from_config(config=config)
-            result = healthcheck_provider(selection, live_probe=False)
-        config.health_status = result.get("health_status", "unknown")
+        readiness = evaluate_legacy_provider_local_readiness(
+            request=LegacyProviderLocalReadinessRequest(live_probe_requested=live_probe),
+            provider=LegacyProviderLocalReadinessProvider(
+                provider_name=config.provider_name,
+                provider_mode=config.provider_mode,
+                model_name=config.default_model or "",
+                enabled=bool(config.is_enabled),
+                credential_present=legacy_provider_credential_present(config.provider_name),
+                adapter_available=True,
+                external_execution_enabled=False,
+            ),
+        )
+        result = readiness.to_payload()
+        config.health_status = readiness.health_updates["health_status"]
         config.last_healthcheck_at = current_time_text()
         config.updated_at = current_time_text()
         results.append(result)

@@ -487,7 +487,7 @@ Post-9C.4K status:
 - `RouteCoreDependencies` fields: 9.
 - `POST /api/admin/ai/prompts`, `POST /api/admin/ai/healthcheck`, and legacy `/api/alignment/run` remain separate future tasks.
 
-Next recommended slice: establish a healthcheck service-boundary audit that separates local readiness state from live transport probing before moving `POST /api/admin/ai/healthcheck`; prompt mutation and legacy `/api/alignment/run` should remain separate tasks.
+Historical next slice after 9C.4K: audit the healthcheck boundary before any `POST /api/admin/ai/healthcheck` route extraction; prompt mutation and legacy `/api/alignment/run` remain separate tasks.
 
 ## Task 9C.4L Legacy Provider Healthcheck Boundary Audit
 
@@ -538,4 +538,35 @@ Post-9C.4L.1 status:
 - Extracted routes remain 30.
 - `RouteCoreDependencies` remains 9 fields.
 
-Next recommended slice: extract local healthcheck readiness into a service while preserving the disabled live-probe response. After the route is a thin HTTP adapter, migrate it to a route module. Keep prompt mutation and legacy `/api/alignment/run` separate.
+Post-9C.4L.1 next slice was Task 9C.4M, which established the local readiness service while preserving the disabled live-probe response. After 9C.4M, the next safe slice is moving the thin healthcheck HTTP adapter to a route module. Keep prompt mutation and legacy `/api/alignment/run` separate.
+
+## Task 9C.4M Legacy Provider Local Readiness Service
+
+Task 9C.4M keeps `POST /api/admin/ai/healthcheck` in `backend/app.py` and adds `backend/services/legacy_provider_local_readiness.py`.
+
+Service API:
+
+- `LegacyProviderLocalReadinessRequest(live_probe_requested)`
+- `LegacyProviderLocalReadinessProvider(provider_name, provider_mode, model_name, enabled, credential_present, adapter_available, external_execution_enabled)`
+- `LegacyProviderLocalReadinessResult(...)`
+- `evaluate_legacy_provider_local_readiness(request, provider)`
+
+Boundary:
+
+- The service has no Flask, `backend.app`, route, provider adapter, provider transport, environment, credential, commit, rollback, AuditRecord, usage, verification, preflight, card, or network dependency.
+- The healthcheck route now passes only `credential_present: bool`; it does not pass API keys or raw environment values to the service.
+- `live_probe=true` keeps returning `LEGACY_LIVE_PROBE_DISABLED`.
+- `live_probe` omitted and `live_probe=false` keep local readiness behavior.
+- Seed remains owned by `backend/services/legacy_provider_registry_seed.py`.
+- The route still owns provider query, health-field writes, `last_healthcheck_at`, `updated_at`, commit, and the legacy `api_success` envelope without `request_id`.
+
+Post-9C.4M status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` direct route count remains 132.
+- Extracted route modules remain 11.
+- Extracted routes remain 30.
+- `RouteCoreDependencies` remains 9 fields.
+
+Next recommended slice: move the now-thin `POST /api/admin/ai/healthcheck` HTTP adapter into a route module. Keep `POST /api/admin/ai/prompts` and legacy `/api/alignment/run` separate.

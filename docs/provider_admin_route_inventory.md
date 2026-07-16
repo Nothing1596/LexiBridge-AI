@@ -28,7 +28,7 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | serialized call logs; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | mostly | admin only | yes | frontend active | seed flush only; no explicit commit | none | health/config summary only | extracted as local health view, not live probe |
-| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 26 | `LEGACY_LIVE_PROBE_DISABLED` | no | admin only | yes | tested | updates provider health fields, commits | no through legacy endpoint; live mode returns disabled result | lower-level helper still needs redaction before future live probe | extract local readiness service before route migration |
+| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 27 | `LOCAL_READINESS_SERVICE_ESTABLISHED` | no | admin only | yes | tested | updates provider health fields, commits | no through legacy endpoint; live mode returns disabled result from service | lower-level helper still needs redaction before future live probe | route migration candidate after 9C.4M |
 | `/api/alignment/run` | POST | `run_alignment` | 159 | `EXECUTION_OR_REPLAY` / `SERVICE_BOUNDARY_REQUIRED` | no | student, teacher, admin | yes | frontend active, scripts/tests | creates `AlignmentRun`, background job or cards, records personal usage, commits | current provider metadata and legacy execution path; no live probe in normal characterization | alignment/card payloads | service boundary first |
 | `/api/alignment/runs` | GET | `alignment_runs` | 29 | `LEGACY_ACTIVE` | yes | student, teacher, admin | yes | frontend active | none | none | serialized legacy `AlignmentRun` summaries | extract only after legacy alignment-run boundary decision |
 | `/api/alignment/runs/<int:run_id>` | GET | `alignment_run_detail` | 16 | `LEGACY_ACTIVE` | yes | student, teacher, admin with owner/course/admin checks | yes | README/docs/tests | none | none | serialized legacy run detail | extract only after legacy alignment-run boundary decision |
@@ -93,7 +93,7 @@ The `/api/admin/ai/*` group is active in `frontend/index.html` and OpenAPI. It i
 
 - `/api/admin/ai/providers`, `/models`, `/prompts`, and `/health` all call the shared legacy registry seed service. The extracted provider/model/prompt configuration route module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency; `backend/app.py` keeps `ensure_ai_registry_seed(...)` as a compatibility wrapper for app-local callers, including prompt mutation, healthcheck, and non-route helper paths.
 - `/api/admin/ai/prompts` still preserves the shared Flask endpoint `admin_ai_prompts`; GET is handled by the configuration route module and POST delegates to the app-owned prompt mutation callback.
-- `/api/admin/ai/healthcheck` mutates provider health fields. After 9C.4L.1, `live_probe=true` for an enabled live provider returns `LEGACY_LIVE_PROBE_DISABLED` and does not reach provider transport.
+- `/api/admin/ai/healthcheck` mutates provider health fields. After 9C.4M, local readiness and `LEGACY_LIVE_PROBE_DISABLED` are computed by `services/legacy_provider_local_readiness.py`; the route still owns seed, query, health-field writes, and commit.
 - `/api/admin/ai/calls` and `/usage` are read-only over `AICallLog`, a legacy AI usage/cost surface distinct from `AlignmentProviderUsageRecord`.
 
 The remaining legacy provider admin write/high-risk routes should not be extracted as one group until their service boundaries are explicit.
@@ -174,7 +174,7 @@ OpenAPI dependencies:
 | `admin_ai_calls` | 6 | 1 | serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` inside legacy group |
 | `admin_ai_usage` | 6 | 1 | summary serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` inside legacy group |
 | `admin_ai_health` | 7 | 1 | seed, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
-| `admin_ai_healthcheck` | 26 | 1 | seed, healthcheck service for local paths | 1 | yes | disabled in legacy live-probe mode | `LOCAL_READINESS_SERVICE_NEXT` |
+| `admin_ai_healthcheck` | 27 | 1 | seed, local readiness service | 1 | yes | disabled in legacy live-probe mode | `ROUTE_EXTRACTION_NEXT` |
 | `run_alignment` | 159 | many | course/auth/job/alignment/card/usage helpers | 14 | yes | provider-dependent | `SERVICE_BOUNDARY_REQUIRED` |
 | `alignment_runs` | 29 | 2 | course permission, serializer | 1 | 0 | no | `EXTRACTION_AFTER_LEGACY_BOUNDARY` |
 | `alignment_run_detail` | 16 | 2 | course permission, serializer | 4 | 0 | no | `EXTRACTION_AFTER_LEGACY_BOUNDARY` |
@@ -194,7 +194,7 @@ Additional findings:
 
 Task 9C.4H conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
 
-Next step should extract local healthcheck readiness into a service while preserving disabled live probe behavior. Do not re-enable live transport probing without an explicit service boundary.
+Task 9C.4M has extracted local healthcheck readiness into a service while preserving disabled live probe behavior. The next safe step is moving the thin healthcheck HTTP adapter to a route module. Do not re-enable live transport probing without an explicit service boundary.
 
 ## Task 9C.4I Legacy Observability Extraction
 
@@ -244,7 +244,7 @@ Confirmed contract:
 
 Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
 
-Task 9C.4L.1 disables legacy live probe behavior. Do not extract `/api/admin/ai/healthcheck` until local readiness is moved behind a service. Prompt mutation and legacy `/api/alignment/run` remain separate tasks.
+Task 9C.4M establishes the local readiness service. The next narrow slice can move the thin healthcheck route adapter while preserving caller-owned transaction behavior. Prompt mutation and legacy `/api/alignment/run` remain separate tasks.
 
 ## Final Decision
 

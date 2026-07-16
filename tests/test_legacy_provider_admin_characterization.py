@@ -299,7 +299,11 @@ def test_legacy_admin_ai_healthcheck_local_paths_write_health_only_without_netwo
         assert payload["status"] == "success"
         assert "items" in payload["data"]
         assert payload["data"]["items"][0]["provider_mode"] == "mock"
-        assert payload["data"]["items"][0]["health_status"] == "healthy"
+        if live_probe:
+            assert payload["data"]["items"][0]["health_status"] == "unknown"
+            assert payload["data"]["items"][0]["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
+        else:
+            assert payload["data"]["items"][0]["health_status"] == "healthy"
         assert "request_id" not in payload
         assert_no_sentinel(payload)
 
@@ -320,7 +324,7 @@ def test_legacy_admin_ai_healthcheck_local_paths_write_health_only_without_netwo
             config.provider_mode: config.health_status
             for config in app_module.AIProviderConfig.query.all()
         }
-        assert statuses["mock"] == "healthy"
+        assert statuses["mock"] == "unknown"
 
 
 def test_legacy_admin_ai_healthcheck_live_probe_disabled_without_network(
@@ -331,21 +335,17 @@ def test_legacy_admin_ai_healthcheck_live_probe_disabled_without_network(
 ):
     no_network(monkeypatch)
     captured_route_calls = []
+    original_evaluate = app_module.evaluate_legacy_provider_local_readiness
 
-    def route_healthcheck_spy(selection, live_probe=False):
+    def readiness_spy(*, request, provider):
         captured_route_calls.append({
-            "provider_name": selection.provider_name,
-            "provider_mode": selection.provider_mode,
-            "model_name": selection.model_name,
-            "live_probe": live_probe,
+            "provider_name": provider.provider_name,
+            "provider_mode": provider.provider_mode,
+            "model_name": provider.model_name,
+            "live_probe": request.live_probe_requested,
+            "credential_present": provider.credential_present,
         })
-        return {
-            "provider_name": selection.provider_name,
-            "provider_mode": selection.provider_mode,
-            "health_status": "unknown",
-            "latency_ms": 0,
-            "message": "Transport spy intercepted live probe.",
-        }
+        return original_evaluate(request=request, provider=provider)
 
     with app_module.app.app_context():
         reset_legacy_registry_tables(app_module)
@@ -364,7 +364,7 @@ def test_legacy_admin_ai_healthcheck_live_probe_disabled_without_network(
         app_module.db.session.commit()
         before = side_effect_counts(app_module)
 
-    monkeypatch.setattr(app_module, "healthcheck_provider", route_healthcheck_spy)
+    monkeypatch.setattr(app_module, "evaluate_legacy_provider_local_readiness", readiness_spy)
     response = client.post(
         "/api/admin/ai/healthcheck",
         json={"live_probe": True},
@@ -376,7 +376,15 @@ def test_legacy_admin_ai_healthcheck_live_probe_disabled_without_network(
     live_item = next(item for item in payload["data"]["items"] if item["provider_name"] == "deepseek")
     assert live_item["health_status"] == "unknown"
     assert live_item["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
-    assert [item for item in captured_route_calls if item["provider_name"] == "deepseek"] == []
+    live_calls = [item for item in captured_route_calls if item["provider_name"] == "deepseek"]
+    assert live_calls == [{
+        "provider_name": "deepseek",
+        "provider_mode": "live",
+        "model_name": "deepseek-chat",
+        "live_probe": True,
+        "credential_present": live_calls[0]["credential_present"],
+    }]
+    assert isinstance(live_calls[0]["credential_present"], bool)
     assert_no_sentinel(payload)
 
     with app_module.app.app_context():
@@ -458,7 +466,8 @@ def test_legacy_admin_ai_source_boundaries_are_static():
     health_start = source.index("def admin_ai_healthcheck(")
     health_end = source.find("\n\n@app.route", health_start + 1)
     health_block = source[health_start:health_end]
-    assert '"error_code": "LEGACY_LIVE_PROBE_DISABLED"' in health_block
-    assert "provider transport was not attempted" in health_block
+    assert "evaluate_legacy_provider_local_readiness(" in health_block
+    assert "LegacyProviderLocalReadinessProvider(" in health_block
+    assert "credential_present=legacy_provider_credential_present(config.provider_name)" in health_block
     assert "db.session.commit()" in health_block
-    assert "healthcheck_provider(selection, live_probe=False)" in health_block
+    assert "healthcheck_provider" not in health_block

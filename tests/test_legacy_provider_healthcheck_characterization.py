@@ -94,11 +94,12 @@ def test_healthcheck_route_contract_openapi_and_static_handler_boundary(app_modu
     assert "/api/admin/ai/healthcheck" not in frontend
 
     block = handler_block()
-    assert len(block.splitlines()) == 27
+    assert len(block.splitlines()) == 28
     assert "ensure_ai_registry_seed(owner_user_id=user.id)" in block
-    assert '"error_code": "LEGACY_LIVE_PROBE_DISABLED"' in block
-    assert "provider transport was not attempted" in block
-    assert "healthcheck_provider(selection, live_probe=False)" in block
+    assert "evaluate_legacy_provider_local_readiness(" in block
+    assert "LegacyProviderLocalReadinessProvider(" in block
+    assert "credential_present=legacy_provider_credential_present(config.provider_name)" in block
+    assert "healthcheck_provider" not in block
     assert "db.session.commit()" in block
     assert "AuditRecord" not in block
     assert "AICallLog" not in block
@@ -199,25 +200,17 @@ def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_he
 ):
     no_network(monkeypatch)
     captured = []
+    original_evaluate = app_module.evaluate_legacy_provider_local_readiness
 
-    def route_healthcheck_spy(selection, live_probe=False):
+    def readiness_spy(*, request, provider):
         captured.append({
-            "provider_name": selection.provider_name,
-            "provider_mode": selection.provider_mode,
-            "model_name": selection.model_name,
-            "api_key": selection.api_key,
-            "base_url": selection.base_url,
-            "live_probe": live_probe,
+            "provider_name": provider.provider_name,
+            "provider_mode": provider.provider_mode,
+            "model_name": provider.model_name,
+            "credential_present": provider.credential_present,
+            "live_probe_requested": request.live_probe_requested,
         })
-        if live_probe:
-            raise AssertionError("legacy live probe should not call healthcheck provider")
-        return {
-            "provider_name": selection.provider_name,
-            "provider_mode": selection.provider_mode,
-            "health_status": "unknown",
-            "latency_ms": 0,
-            "message": "Transport spy intercepted live probe.",
-        }
+        return original_evaluate(request=request, provider=provider)
 
     with app_module.app.app_context():
         reset_legacy_registry_tables(app_module)
@@ -238,7 +231,7 @@ def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_he
 
     monkeypatch.setattr(app_module, "DEEPSEEK_API_KEY", SENTINEL)
     monkeypatch.setattr(app_module, "DEEPSEEK_BASE_URL", f"https://example.invalid/{SENTINEL}")
-    monkeypatch.setattr(app_module, "healthcheck_provider", route_healthcheck_spy)
+    monkeypatch.setattr(app_module, "evaluate_legacy_provider_local_readiness", readiness_spy)
 
     response = client.post(
         "/api/admin/ai/healthcheck",
@@ -253,7 +246,13 @@ def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_he
     assert live_item["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
     assert "disabled" in live_item["message"].lower()
     live_calls = [item for item in captured if item["provider_name"] == "deepseek"]
-    assert live_calls == []
+    assert live_calls == [{
+        "provider_name": "deepseek",
+        "provider_mode": "live",
+        "model_name": "deepseek-chat",
+        "credential_present": True,
+        "live_probe_requested": True,
+    }]
 
     with app_module.app.app_context():
         after = side_effect_counts(app_module)

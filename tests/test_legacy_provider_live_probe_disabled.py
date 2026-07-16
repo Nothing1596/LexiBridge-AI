@@ -87,22 +87,15 @@ def test_live_probe_true_is_disabled_before_health_provider_logic(
         before = side_effect_counts(app_module)
 
     calls = []
+    original_evaluate = app_module.evaluate_legacy_provider_local_readiness
 
-    def healthcheck_should_not_receive_live_probe(selection, live_probe=False):
-        calls.append((selection.provider_name, selection.provider_mode, live_probe))
-        if live_probe:
-            raise AssertionError("legacy live probe reached healthcheck provider")
-        return {
-            "provider_name": selection.provider_name,
-            "provider_mode": selection.provider_mode,
-            "health_status": "unknown",
-            "latency_ms": 0,
-            "message": "local readiness only",
-        }
+    def readiness_spy(*, request, provider):
+        calls.append((provider.provider_name, provider.provider_mode, request.live_probe_requested, provider.credential_present))
+        return original_evaluate(request=request, provider=provider)
 
     monkeypatch.setattr(app_module, "DEEPSEEK_API_KEY", SENTINEL)
     monkeypatch.setattr(app_module, "DEEPSEEK_BASE_URL", f"https://example.invalid/{SENTINEL}")
-    monkeypatch.setattr(app_module, "healthcheck_provider", healthcheck_should_not_receive_live_probe)
+    monkeypatch.setattr(app_module, "evaluate_legacy_provider_local_readiness", readiness_spy)
 
     response = client.post(
         "/api/admin/ai/healthcheck",
@@ -123,7 +116,7 @@ def test_live_probe_true_is_disabled_before_health_provider_logic(
     assert live_item["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
     assert "disabled" in live_item["message"].lower()
     live_calls = [call for call in calls if call[0] == "deepseek"]
-    assert live_calls == []
+    assert live_calls == [("deepseek", "live", True, True)]
 
     with app_module.app.app_context():
         after = side_effect_counts(app_module)
@@ -149,22 +142,8 @@ def test_live_probe_omitted_and_false_keep_local_readiness_path(
         reset_legacy_registry_tables(app_module)
         create_enabled_live_provider(app_module)
 
-    calls = []
-
-    def local_healthcheck_spy(selection, live_probe=False):
-        calls.append((selection.provider_name, selection.provider_mode, live_probe))
-        assert live_probe is False
-        return {
-            "provider_name": selection.provider_name,
-            "provider_mode": selection.provider_mode,
-            "health_status": "unknown",
-            "latency_ms": 0,
-            "message": "Config is complete; live probe skipped.",
-        }
-
     monkeypatch.setattr(app_module, "DEEPSEEK_API_KEY", SENTINEL)
     monkeypatch.setattr(app_module, "DEEPSEEK_BASE_URL", f"https://example.invalid/{SENTINEL}")
-    monkeypatch.setattr(app_module, "healthcheck_provider", local_healthcheck_spy)
 
     omitted = client.post("/api/admin/ai/healthcheck", json={}, headers=bearer(admin_token))
     explicit_false = client.post(
@@ -175,11 +154,11 @@ def test_live_probe_omitted_and_false_keep_local_readiness_path(
 
     assert omitted.status_code == 200
     assert explicit_false.status_code == 200
-    deepseek_calls = [call for call in calls if call[0] == "deepseek"]
-    assert deepseek_calls == [
-        ("deepseek", "live", False),
-        ("deepseek", "live", False),
-    ]
+    for response in (omitted, explicit_false):
+        live_item = next(item for item in response.get_json()["data"]["items"] if item["provider_name"] == "deepseek")
+        assert live_item["health_status"] == "unknown"
+        assert live_item["message"] == "Config is complete; live probe skipped."
+        assert "error_code" not in live_item
     assert_no_sentinel(omitted.get_json())
     assert_no_sentinel(explicit_false.get_json())
 
