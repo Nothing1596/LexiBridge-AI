@@ -54,7 +54,7 @@ def register_legacy_provider_admin_observability_routes(
     core: RouteCoreDependencies,
     models: LegacyProviderAdminObservabilityModels,
     serializers: LegacyProviderAdminObservabilitySerializers,
-    health_seed: Callable[..., Any],
+    registry_seed_service: Callable[..., Any],
 ) -> None:
     """Register legacy admin AI calls, usage, and local health GET routes."""
 
@@ -89,7 +89,7 @@ def register_legacy_provider_admin_observability_routes(
         user, error_response = core.require_current_user({"admin"})
         if error_response:
             return error_response
-        health_seed(owner_user_id=user.id)
+        registry_seed_service(owner_user_id=user.id)
         providers = models.AIProviderConfig.query.order_by(models.AIProviderConfig.id.asc()).all()
         return serializers.api_success(
             {"items": [serializers.serialize_ai_provider_config(provider) for provider in providers]}

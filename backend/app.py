@@ -65,6 +65,10 @@ from services.ai_registry import (
     validate_ai_config as validate_ai_environment_config,
     can_default_provider,
 )
+from services.legacy_provider_registry_seed import (
+    LegacyProviderRegistrySeedModels,
+    ensure_legacy_provider_registry_seed,
+)
 from services.ai_provider import provider_from_selection
 from services.prompt_registry import (
     DEFAULT_PROMPTS,
@@ -6929,91 +6933,24 @@ def ai_selection_from_config(config=None, provider_name=None, model_name=None):
 
 
 def ensure_ai_registry_seed(owner_user_id=0):
-    selection = env_provider_selection(os.environ)
-    now = current_time_text()
-    existing_default = AIProviderConfig.query.filter_by(is_default=True, is_enabled=True).order_by(AIProviderConfig.id.desc()).first()
-    provider = AIProviderConfig.query.filter_by(provider_name=selection.provider_name).first()
-    if provider is None:
-        provider = AIProviderConfig(
-            provider_name=selection.provider_name,
-            provider_mode=selection.provider_mode,
-            base_url=selection.base_url,
-            default_model=selection.model_name,
-            is_enabled=True,
-            is_default=existing_default is None,
-            timeout_seconds=selection.timeout_seconds,
-            max_retries=selection.max_retries,
-            cost_per_1k_input_tokens=selection.cost_per_1k_input_tokens,
-            cost_per_1k_output_tokens=selection.cost_per_1k_output_tokens,
-            health_status="unknown",
-            created_at=now,
-            updated_at=now,
-        )
-        db.session.add(provider)
-        db.session.flush()
-    else:
-        provider.provider_mode = provider.provider_mode or selection.provider_mode
-        provider.base_url = provider.base_url or selection.base_url
-        provider.default_model = provider.default_model or selection.model_name
-        provider.timeout_seconds = provider.timeout_seconds or selection.timeout_seconds
-        provider.max_retries = provider.max_retries or selection.max_retries
-        provider.updated_at = now
-    defaults = AIProviderConfig.query.filter_by(is_default=True).order_by(AIProviderConfig.id.desc()).all()
-    if not defaults:
-        provider.is_default = True
-    elif provider.is_default:
-        for other in defaults:
-            if other.id != provider.id:
-                other.is_default = False
-
-    model = AIModelRegistry.query.filter_by(
-        provider_name=provider.provider_name,
-        model_name=provider.default_model or selection.model_name or provider.provider_name,
-    ).first()
-    if model is None:
-        model = AIModelRegistry(
-            provider_name=provider.provider_name,
-            model_name=provider.default_model or selection.model_name or provider.provider_name,
-            model_version=os.environ.get("MODEL_VERSION", "local-mvp-v1"),
-            model_display_name=provider.default_model or selection.model_name or provider.provider_name,
-            provider_mode=provider.provider_mode,
-            is_enabled=True,
-            is_default_for_provider=True,
-            known_risks_json=json.dumps(
-                ["mock/local providers cannot auto-approve"] if provider.provider_mode in {"mock", "local_heuristic", "none"} else [],
-                ensure_ascii=False,
-            ),
-            created_at=now,
-            updated_at=now,
-        )
-        db.session.add(model)
-        db.session.flush()
-
-    prompts = []
-    for item in DEFAULT_PROMPTS:
-        prompt = PromptTemplate.query.filter_by(
-            prompt_key=item["prompt_key"],
-            prompt_version=item["prompt_version"],
-        ).first()
-        if prompt is None:
-            prompt = PromptTemplate(
-                prompt_key=item["prompt_key"],
-                prompt_version=item["prompt_version"],
-                task_type=item["task_type"],
-                language=item["language"],
-                template_text=item["template_text"],
-                json_schema=json.dumps(item["json_schema"], ensure_ascii=False),
-                is_active=True,
-                is_default=True,
-                created_by=owner_user_id or 0,
-                created_at=now,
-                updated_at=now,
-                notes=item.get("notes", ""),
-            )
-            db.session.add(prompt)
-            db.session.flush()
-        prompts.append(prompt)
-    return {"provider_config": provider, "model": model, "prompts": prompts}
+    result = ensure_legacy_provider_registry_seed(
+        db=db,
+        models=LegacyProviderRegistrySeedModels(
+            AIProviderConfig=AIProviderConfig,
+            AIModelRegistry=AIModelRegistry,
+            PromptTemplate=PromptTemplate,
+        ),
+        selection=env_provider_selection(os.environ),
+        default_prompts=DEFAULT_PROMPTS,
+        current_time_text=current_time_text,
+        model_version=os.environ.get("MODEL_VERSION", "local-mvp-v1"),
+        owner_user_id=owner_user_id,
+    )
+    return {
+        "provider_config": result.provider_config,
+        "model": result.model,
+        "prompts": list(result.prompts),
+    }
 
 
 def get_prompt_template(prompt_key, prompt_version=None, task_type=None):
@@ -13561,7 +13498,7 @@ register_legacy_provider_admin_observability_routes(
         serialize_ai_provider_config=serialize_ai_provider_config,
         summarize_ai_calls=summarize_ai_calls,
     ),
-    health_seed=ensure_ai_registry_seed,
+    registry_seed_service=ensure_ai_registry_seed,
 )
 
 

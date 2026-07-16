@@ -55,6 +55,50 @@ The legacy surface is not a simple alias of the 9C.4A-9C.4C formal provider gove
 
 This seed behavior is the main reason the legacy read-only views should be extracted separately from prompt mutation and healthcheck. A future cleanup can move seed initialization to startup, migration, or an explicit service, but 9C.4H does not change current behavior.
 
+## Task 9C.4J Seed Service Boundary
+
+Task 9C.4J moves the legacy provider registry seed implementation into `backend/services/legacy_provider_registry_seed.py`.
+
+The new service owns only the legacy get-or-create and `flush` behavior for:
+
+- `AIProviderConfig`
+- `AIModelRegistry`
+- `PromptTemplate`
+
+It does not import Flask, `backend.app`, or route modules. It does not read credentials, create HTTP responses, call provider transport, execute health probes, write `AuditRecord`, or call `commit`/`rollback`. Existing callers still decide transaction outcome.
+
+`backend/app.py` keeps a minimal compatibility wrapper named `ensure_ai_registry_seed(...)` so existing route and non-route callers keep their public call shape. The wrapper builds the environment provider selection and delegates to `ensure_legacy_provider_registry_seed(...)`.
+
+### Seed Transaction Matrix
+
+| Caller | Seed invoked | Flush | Caller commit | Caller rollback | Persistence after request |
+|---|---:|---:|---:|---:|---:|
+| `GET /api/admin/ai/providers` | yes | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | seed rows are visible in the response transaction but are not persisted without a later commit |
+| `GET /api/admin/ai/models` | yes | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | same as providers GET |
+| `GET /api/admin/ai/prompts` | yes | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | same as providers GET |
+| `GET /api/admin/ai/health` | yes, through `registry_seed_service` in the route module | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | same as providers GET |
+| `POST /api/admin/ai/prompts` | yes | yes, for missing seed rows | yes, after prompt mutation succeeds | caller/session rollback on failure | prompt changes and any missing seed rows are persisted only on the existing POST commit |
+| `POST /api/admin/ai/healthcheck` | yes | yes, for missing seed rows | yes, after health fields are updated | caller/session rollback on failure | provider health changes and any missing seed rows are persisted only on the existing POST commit |
+| `call_ai_task(...)` | yes | yes, for missing seed rows | owned by the caller path | owned by the caller path | unchanged from the historical helper |
+| `ai_selection_from_config(...)` fallback | yes | yes, for missing seed rows | owned by the caller path | owned by the caller path | unchanged from the historical helper |
+
+Characterization and service tests confirm:
+
+- first service call creates and flushes missing provider/model/prompt rows;
+- repeated calls in the same or later session do not create duplicate seed rows;
+- caller rollback removes uncommitted seed rows;
+- caller commit persists seed rows;
+- partial seed state is completed without duplicating existing provider/model/prompt natural keys;
+- service-level flush exceptions propagate to the caller and leave rollback ownership with the caller.
+
+Current uniqueness is mostly enforced by lookup-before-create natural keys rather than formal unique constraints:
+
+- provider: `provider_name`
+- model: `provider_name` + `model_name`
+- prompt: `prompt_key` + `prompt_version`
+
+This preserves compatibility but remains vulnerable to concurrent duplicate creation if two sessions seed the same missing row at the same time. A later production hardening task should move stable defaults into migration/startup seed with explicit uniqueness or conflict handling.
+
 ## Healthcheck Execution Matrix
 
 | Provider type | Credential present | `live_probe` | Transport called | Network risk | Result contract |

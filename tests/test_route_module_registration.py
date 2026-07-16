@@ -218,7 +218,7 @@ def legacy_provider_observability_dummy_dependencies(module):
             serialize_ai_provider_config=lambda config: {},
             summarize_ai_calls=lambda logs: {"total_calls": len(logs)},
         ),
-        "health_seed": lambda owner_user_id=0: None,
+        "registry_seed_service": lambda owner_user_id=0: None,
     }
 
 

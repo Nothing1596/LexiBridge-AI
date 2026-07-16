@@ -233,8 +233,8 @@ def test_admin_ai_get_handlers_include_registry_seed_boundary():
         assert "ensure_ai_registry_seed(owner_user_id=user.id)" in block
     module_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py").read_text(encoding="utf-8")
     assert "def admin_ai_health(" in module_source
-    assert "health_seed(owner_user_id=user.id)" in module_source
-    assert "health_seed=ensure_ai_registry_seed" in source
+    assert "registry_seed_service(owner_user_id=user.id)" in module_source
+    assert "registry_seed_service=ensure_ai_registry_seed" in source
 
 
 def test_admin_ai_healthcheck_local_path_writes_health_without_network_or_provider_usage(

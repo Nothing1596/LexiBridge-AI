@@ -380,7 +380,7 @@ Inventory result:
 - Unknown legacy provider admin route count: 0
 - All `/api/admin/ai/*` routes are admin-only and present in OpenAPI.
 - The frontend uses the six legacy GET views: providers, models, prompts, calls, usage, and health.
-- `GET /api/admin/ai/providers`, `/models`, `/prompts`, and `/health` call `ensure_ai_registry_seed(...)`; characterization shows the GET seed path flushes default registry/model/prompt rows for the response but does not persist them without a later commit.
+- `GET /api/admin/ai/providers`, `/models`, `/prompts`, and `/health` call the legacy registry seed path; after 9C.4J the implementation lives in `backend/services/legacy_provider_registry_seed.py` behind the `ensure_ai_registry_seed(...)` compatibility wrapper. Characterization shows the GET seed path flushes default registry/model/prompt rows for the response but does not persist them without a later commit.
 - `POST /api/admin/ai/prompts` is a mutation and commits `PromptTemplate` changes.
 - `POST /api/admin/ai/healthcheck` commits provider health fields and may also persist env-selected seed rows.
 - `POST /api/admin/ai/healthcheck` passes `live_probe=True` into provider health logic for an enabled live provider; `services.ai_health.healthcheck_provider(...)` calls the provider adapter only in live mode with non-placeholder credential and `live_probe=true`.
@@ -417,10 +417,45 @@ Post-9C.4I snapshot:
 - Extracted route modules: 10
 - Extracted routes: 27
 - `RouteCoreDependencies` fields: 9
-- `register_legacy_provider_admin_observability_routes(app, *, core, models, serializers, health_seed)` register parameter count: 5
+- `register_legacy_provider_admin_observability_routes(app, *, core, models, serializers, registry_seed_service)` register parameter count: 5
 - `LegacyProviderAdminObservabilityModels` fields: 2
 - `LegacyProviderAdminObservabilitySerializers` fields: 4
 
 The route module keeps the legacy endpoint names, admin-only permission, OpenAPI/frontend URLs, legacy `api_success` envelopes without `request_id`, id-desc limits, local health seed-flush behavior, and no view `AuditRecord`. It does not commit or roll back, does not execute live health probes, does not call provider transport, does not create verification runs, does not write provider usage, and does not mutate provider policy, provider preflight, prompts, cards, or credentials.
 
 Next recommended slice: audit and isolate seed-backed provider/model/prompt configuration GET behavior before extraction, or establish a dedicated healthcheck service boundary that separates local health summary from live transport probing. Do not move `POST /api/admin/ai/healthcheck` or `POST /api/alignment/run` as part of an observability route slice.
+
+## Task 9C.4J Seed Service Boundary
+
+Task 9C.4J does not extract any route. It moves the legacy provider registry seed implementation into `backend/services/legacy_provider_registry_seed.py` and keeps `backend/app.py::ensure_ai_registry_seed(...)` as a compatibility wrapper for existing app-local routes, non-route callers, and the extracted local health view dependency.
+
+The new service API is:
+
+- `LegacyProviderRegistrySeedModels(AIProviderConfig, AIModelRegistry, PromptTemplate)`
+- `LegacyProviderRegistrySeedResult(provider_config, model, prompts, created_provider, created_model, created_prompt_count, updated_provider)`
+- `ensure_legacy_provider_registry_seed(db, models, selection, default_prompts, current_time_text, model_version, owner_user_id)`
+
+The service owns only lookup/create/update-default and `flush` behavior. It does not import Flask, `backend.app`, or route modules; it does not read credentials, call provider transport, execute health probes, write `AuditRecord`, or call `commit`/`rollback`. Callers still own transaction outcome and response contracts.
+
+Seed transaction semantics remain unchanged:
+
+- `GET /api/admin/ai/providers`, `/models`, `/prompts`, and `/health` can flush missing provider/model/prompt rows for the response but do not explicitly commit.
+- `POST /api/admin/ai/prompts` keeps its existing prompt mutation commit ownership and can persist missing seed rows only through that existing commit.
+- `POST /api/admin/ai/healthcheck` keeps its existing provider health commit ownership and can persist missing seed rows only through that existing commit.
+- `call_ai_task(...)` and `ai_selection_from_config(...)` fallback keep their historical caller-owned transaction behavior.
+
+Natural-key idempotency remains lookup-before-create based on `provider_name`, `provider_name + model_name`, and `prompt_key + prompt_version`; there are still no new schema constraints. Concurrent duplicate creation remains a documented production-hardening risk.
+
+Post-9C.4J status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` line count: 16,005.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 135.
+- Extracted route modules: 10.
+- Extracted routes: 27.
+- `RouteCoreDependencies` fields: 9.
+- Provider/model/prompt configuration GET routes still remain in `backend/app.py`.
+- `POST /api/admin/ai/healthcheck`, `POST /api/admin/ai/prompts`, and legacy `/api/alignment/run` remain separate future tasks.
+
+Next recommended slice: if 9C.4J gates pass, migrate only the seed-backed provider/model/prompt GET views in a narrow task. Keep prompt mutation, healthcheck live transport, and legacy alignment execution out of that slice.

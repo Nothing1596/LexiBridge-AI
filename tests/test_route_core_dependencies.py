@@ -192,7 +192,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "serialize_alignment_run" in admin_alignment_runs_sig.parameters
     assert "models" in legacy_provider_observability_sig.parameters
     assert "serializers" in legacy_provider_observability_sig.parameters
-    assert "health_seed" in legacy_provider_observability_sig.parameters
+    assert "registry_seed_service" in legacy_provider_observability_sig.parameters
     assert "api_success" not in legacy_provider_observability_sig.parameters
     for name in {
         "db",

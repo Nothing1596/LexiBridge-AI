@@ -113,7 +113,7 @@ def test_observability_module_import_boundary_and_signature():
     assert "core" in signature.parameters
     assert "models" in signature.parameters
     assert "serializers" in signature.parameters
-    assert "health_seed" in signature.parameters
+    assert "registry_seed_service" in signature.parameters
 
 
 def test_observability_register_function_registers_expected_routes_and_is_idempotent():
@@ -135,7 +135,7 @@ def test_observability_register_function_registers_expected_routes_and_is_idempo
         core=dummy_core_dependencies(),
         models=models,
         serializers=serializers,
-        health_seed=lambda owner_user_id=0: None,
+        registry_seed_service=lambda owner_user_id=0: None,
     )
     first = {
         rule.rule: {
@@ -156,7 +156,7 @@ def test_observability_register_function_registers_expected_routes_and_is_idempo
         core=dummy_core_dependencies(),
         models=models,
         serializers=serializers,
-        health_seed=lambda owner_user_id=0: None,
+        registry_seed_service=lambda owner_user_id=0: None,
     )
     second = {
         rule.rule: {
