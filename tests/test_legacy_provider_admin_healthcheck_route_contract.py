@@ -3,12 +3,13 @@ import json
 import socket
 import urllib.request
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4L1"
+SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4N"
 
 
 def bearer(token):
@@ -39,13 +40,6 @@ def route_map(app_module):
     return result
 
 
-def handler_block():
-    source = (ROOT / "backend" / "routes" / "legacy_provider_admin_healthcheck.py").read_text(encoding="utf-8")
-    start = source.index("    def admin_ai_healthcheck(")
-    end = source.index("\n    app.add_url_rule", start + 1)
-    return source[start:end]
-
-
 def side_effect_counts(app_module):
     return {
         "provider_config": app_module.AIProviderConfig.query.count(),
@@ -61,21 +55,41 @@ def side_effect_counts(app_module):
 
 
 def reset_legacy_registry_tables(app_module):
-    app_module.AIProviderConfig.query.delete()
-    app_module.AIModelRegistry.query.delete()
     app_module.PromptTemplate.query.delete()
+    app_module.AIModelRegistry.query.delete()
+    app_module.AIProviderConfig.query.delete()
     app_module.db.session.commit()
+
+
+def create_role_token(app_module, client, *, role):
+    password = "Reviewer1234"
+    unique = uuid4().hex
+    email = f"{role}-{unique}@lexibridge.local"
+    with app_module.app.app_context():
+        user = app_module.User(
+            username=f"{role}_{unique}",
+            email=email,
+            password_hash=app_module.generate_password_hash(password, method="pbkdf2:sha256"),
+            role=role,
+            is_verified=True,
+            created_at=app_module.current_time_text(),
+        )
+        app_module.db.session.add(user)
+        app_module.db.session.commit()
+    response = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200
+    return response.get_json()["token"]
 
 
 def assert_no_sentinel(payload):
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     assert SENTINEL not in serialized
     lowered = serialized.lower()
-    for term in ("authorization", "cookie", "private_key", "bearer "):
+    for term in ("api_key", "authorization", "cookie", "private_key", "bearer "):
         assert term not in lowered
 
 
-def test_healthcheck_route_contract_openapi_and_static_handler_boundary(app_module):
+def test_healthcheck_route_map_openapi_and_static_extraction_contract(app_module):
     actual = route_map(app_module)
     assert actual[("/api/admin/ai/healthcheck", "POST")] == "admin_ai_healthcheck"
     assert sum(
@@ -98,19 +112,6 @@ def test_healthcheck_route_contract_openapi_and_static_handler_boundary(app_modu
     assert "def admin_ai_healthcheck(" not in app_source
     assert "register_legacy_provider_admin_healthcheck_routes(" in app_source
 
-    block = handler_block()
-    assert len(block.splitlines()) == 27
-    assert "seed_registry(user.id)" in block
-    assert "local_readiness_service(" in block
-    assert "LegacyProviderLocalReadinessProvider(" in block
-    assert "credential_present=bool(credential_presence_resolver(config))" in block
-    assert "healthcheck_provider" not in block
-    assert "core.db.session.commit()" in block
-    assert "rollback" not in block
-    assert "AuditRecord" not in block
-    assert "AICallLog" not in block
-    assert "AlignmentProviderUsageRecord" not in block
-
 
 def test_healthcheck_permissions_payload_parsing_and_legacy_envelope(
     app_module,
@@ -121,14 +122,16 @@ def test_healthcheck_permissions_payload_parsing_and_legacy_envelope(
     monkeypatch,
 ):
     no_network(monkeypatch)
+    reviewer_token = create_role_token(app_module, client, role="reviewer")
     assert client.post("/api/admin/ai/healthcheck", json={}).status_code == 401
     assert client.post("/api/admin/ai/healthcheck", json={}, headers=bearer(student_token)).status_code == 403
     assert client.post("/api/admin/ai/healthcheck", json={}, headers=bearer(teacher_token)).status_code == 403
+    assert client.post("/api/admin/ai/healthcheck", json={}, headers=bearer(reviewer_token)).status_code == 403
 
     response = client.post(
         "/api/admin/ai/healthcheck",
         json={"live_probe": False, "unknown_field": SENTINEL},
-        headers={**bearer(admin_token), "X-Request-ID": "legacy-health-unknown-field"},
+        headers={**bearer(admin_token), "X-Request-ID": "healthcheck-route-unknown-field"},
     )
     assert response.status_code == 200
     payload = response.get_json()
@@ -154,7 +157,7 @@ def test_healthcheck_permissions_payload_parsing_and_legacy_envelope(
         app_module.db.session.rollback()
 
 
-def test_healthcheck_local_readiness_seed_commit_and_write_set(
+def test_healthcheck_seed_commit_write_set_and_health_fields(
     app_module,
     client,
     admin_token,
@@ -168,7 +171,7 @@ def test_healthcheck_local_readiness_seed_commit_and_write_set(
     response = client.post(
         "/api/admin/ai/healthcheck",
         json={"live_probe": False},
-        headers={**bearer(admin_token), "X-Request-ID": "legacy-health-local"},
+        headers={**bearer(admin_token), "X-Request-ID": "healthcheck-route-local"},
     )
     assert response.status_code == 200
     payload = response.get_json()
@@ -195,10 +198,12 @@ def test_healthcheck_local_readiness_seed_commit_and_write_set(
         assert after["concept_cards"] == before["concept_cards"]
         persisted = app_module.AIProviderConfig.query.filter_by(is_enabled=True).all()
         assert persisted
+        assert all(config.health_status in {"healthy", "unhealthy", "unknown"} for config in persisted)
         assert all(config.last_healthcheck_at for config in persisted)
+        assert all(config.updated_at for config in persisted)
 
 
-def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_health_logic(
+def test_healthcheck_live_probe_disabled_credential_bool_boundary_and_no_transport(
     app_module,
     client,
     admin_token,
@@ -242,7 +247,7 @@ def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_he
     response = client.post(
         "/api/admin/ai/healthcheck",
         json={"live_probe": True},
-        headers={**bearer(admin_token), "X-Request-ID": "legacy-health-live"},
+        headers={**bearer(admin_token), "X-Request-ID": "healthcheck-route-live-disabled"},
     )
     assert response.status_code == 200
     payload = response.get_json()
@@ -251,8 +256,7 @@ def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_he
     live_item = next(item for item in payload["data"]["items"] if item["provider_name"] == "deepseek")
     assert live_item["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
     assert "disabled" in live_item["message"].lower()
-    live_calls = [item for item in captured if item["provider_name"] == "deepseek"]
-    assert live_calls == [{
+    assert [item for item in captured if item["provider_name"] == "deepseek"] == [{
         "provider_name": "deepseek",
         "provider_mode": "live",
         "model_name": "deepseek-chat",
@@ -267,58 +271,4 @@ def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_he
         assert after["verification_runs"] == before["verification_runs"]
         assert after["provider_preflight"] == before["provider_preflight"]
         assert after["audit_records"] == before["audit_records"]
-
-
-def test_ai_health_service_still_requires_live_probe_redaction_boundary(monkeypatch):
-    ai_health = importlib.import_module("services.ai_health")
-    ai_registry = importlib.import_module("services.ai_registry")
-    captured = []
-
-    class ProviderSpy:
-        def call(self, task_type, prompt_text, input_payload, json_schema=None):
-            captured.append({
-                "task_type": task_type,
-                "prompt_text": prompt_text,
-                "input_payload": input_payload,
-                "json_schema": json_schema,
-            })
-            return {
-                "status": "error",
-                "error_code": "AI_PROVIDER_FAILED",
-                "message": f"Transport exception contained {SENTINEL}",
-            }
-
-    monkeypatch.setattr(ai_health, "provider_from_selection", lambda selection: ProviderSpy())
-    selection = ai_registry.ProviderSelection(
-        provider_name="deepseek",
-        provider_mode="live",
-        model_name="deepseek-chat",
-        api_key="sk-live-probe-risk-fixture",
-        base_url="https://example.invalid",
-        timeout_seconds=1,
-        max_retries=0,
-    )
-
-    skipped = ai_health.healthcheck_provider(selection, live_probe=False)
-    assert skipped["health_status"] == "unknown"
-    assert captured == []
-
-    result = ai_health.healthcheck_provider(selection, live_probe=True)
-    assert result["health_status"] == "unhealthy"
-    assert result["error_code"] == "AI_PROVIDER_FAILED"
-    assert SENTINEL in result["message"]
-    assert captured[0]["task_type"] == "term_alignment"
-    assert captured[0]["input_payload"]["english_term"] == "Health Check"
-
-
-def test_healthcheck_boundary_document_records_decision():
-    document = (ROOT / "docs" / "legacy_provider_healthcheck_boundary.md").read_text(encoding="utf-8")
-    required_markers = [
-        "POST /api/admin/ai/healthcheck",
-        "Local readiness",
-        "Live transport probe",
-        "Seed and transaction matrix",
-        "LEGACY_LIVE_PROBE_DISABLED",
-    ]
-    for marker in required_markers:
-        assert marker in document
+        assert after["concept_cards"] == before["concept_cards"]

@@ -20,6 +20,7 @@ ALIGNMENT_VERIFICATION_MODULE_PATH = ROOT / "backend" / "routes" / "alignment_ve
 ADMIN_ALIGNMENT_RUNS_MODULE_PATH = ROOT / "backend" / "routes" / "admin_alignment_runs.py"
 LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
 LEGACY_PROVIDER_CONFIGURATION_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
+LEGACY_PROVIDER_HEALTHCHECK_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_healthcheck.py"
 
 
 def load_route_module(module_path, module_name):
@@ -269,6 +270,42 @@ def legacy_provider_configuration_dummy_dependencies(module):
     }
 
 
+def legacy_provider_healthcheck_dummy_dependencies(module):
+    class DummyQuery:
+        def filter_by(self, **kwargs):
+            return self
+
+        def all(self):
+            return []
+
+    class DummyAIProviderConfig:
+        query = DummyQuery()
+
+    return {
+        "core": dummy_core_dependencies(),
+        "models": module.LegacyProviderAdminHealthcheckModels(
+            AIProviderConfig=DummyAIProviderConfig,
+        ),
+        "serializers": module.LegacyProviderAdminHealthcheckSerializers(
+            api_success=lambda data=None, message="Operation completed.": data,
+        ),
+        "registry_seed_service": lambda **kwargs: None,
+        "seed_models": object(),
+        "provider_selection_factory": lambda: object(),
+        "default_prompts": [],
+        "model_version_factory": lambda: "local-mvp-v1",
+        "local_readiness_service": lambda **kwargs: type(
+            "Result",
+            (),
+            {
+                "health_updates": {"health_status": "healthy"},
+                "to_payload": lambda self: {"provider_name": "mock", "health_status": "healthy"},
+            },
+        )(),
+        "credential_presence_resolver": lambda config: False,
+    }
+
+
 def target_route_summary(app, prefix):
     return {
         rule.rule: {
@@ -351,6 +388,11 @@ def test_route_modules_import_without_backend_app_dependency():
         LEGACY_PROVIDER_CONFIGURATION_MODULE_PATH,
         "register_legacy_provider_admin_configuration_routes",
         "legacy_provider_admin_configuration_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        LEGACY_PROVIDER_HEALTHCHECK_MODULE_PATH,
+        "register_legacy_provider_admin_healthcheck_routes",
+        "legacy_provider_admin_healthcheck_routes",
     )
 
 
@@ -609,6 +651,23 @@ def test_legacy_provider_configuration_register_function_registers_expected_rout
     assert {path: data for path, data in second.items() if path in expected} == expected
 
 
+def test_legacy_provider_healthcheck_register_function_registers_expected_route_and_is_idempotent():
+    module = load_route_module(LEGACY_PROVIDER_HEALTHCHECK_MODULE_PATH, "legacy_provider_admin_healthcheck_routes")
+    app = Flask("legacy-provider-healthcheck-route-registration-test")
+    module.register_legacy_provider_admin_healthcheck_routes(app, **legacy_provider_healthcheck_dummy_dependencies(module))
+    first = target_route_summary(app, "/api/admin/ai")
+    expected = {
+        "/api/admin/ai/healthcheck": {
+            "endpoint": "admin_ai_healthcheck",
+            "methods": {"POST"},
+        },
+    }
+    assert {path: data for path, data in first.items() if path in expected} == expected
+    module.register_legacy_provider_admin_healthcheck_routes(app, **legacy_provider_healthcheck_dummy_dependencies(module))
+    second = target_route_summary(app, "/api/admin/ai")
+    assert {path: data for path, data in second.items() if path in expected} == expected
+
+
 def test_existing_app_has_no_duplicate_teacher_analytics_routes(app_module):
     summary = target_route_summary(app_module.app, "/api/teacher/learning-analytics")
     assert summary == {
@@ -784,6 +843,20 @@ def test_existing_app_has_single_legacy_provider_configuration_routes(app_module
         ) == 1
 
 
+def test_existing_app_has_single_legacy_provider_healthcheck_route(app_module):
+    actual = {}
+    for rule in app_module.app.url_map.iter_rules():
+        for method in rule.methods - {"HEAD", "OPTIONS"}:
+            if rule.rule == "/api/admin/ai/healthcheck":
+                actual[(rule.rule, method)] = rule.endpoint
+    assert actual == {("/api/admin/ai/healthcheck", "POST"): "admin_ai_healthcheck"}
+    assert sum(
+        1
+        for rule in app_module.app.url_map.iter_rules()
+        if rule.rule == "/api/admin/ai/healthcheck" and "POST" in rule.methods
+    ) == 1
+
+
 def test_app_startup_keeps_representative_legacy_routes(app_module, client, teacher_token):
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     for path in {
@@ -798,6 +871,7 @@ def test_app_startup_keeps_representative_legacy_routes(app_module, client, teac
         "/api/admin/ai/providers",
         "/api/admin/ai/models",
         "/api/admin/ai/prompts",
+        "/api/admin/ai/healthcheck",
         "/api/alignment/providers",
         "/api/teacher/learning-analytics",
     }:

@@ -569,4 +569,37 @@ Post-9C.4M status:
 - Extracted routes remain 30.
 - `RouteCoreDependencies` remains 9 fields.
 
-Next recommended slice: move the now-thin `POST /api/admin/ai/healthcheck` HTTP adapter into a route module. Keep `POST /api/admin/ai/prompts` and legacy `/api/alignment/run` separate.
+Next recommended slice after 9C.4M was moving the now-thin `POST /api/admin/ai/healthcheck` HTTP adapter into a route module. Keep `POST /api/admin/ai/prompts` and legacy `/api/alignment/run` separate.
+
+## Task 9C.4N Legacy Provider Healthcheck Route
+
+Task 9C.4N extracts only the thin legacy provider admin healthcheck HTTP adapter into `backend/routes/legacy_provider_admin_healthcheck.py`.
+
+Register signature:
+
+`register_legacy_provider_admin_healthcheck_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, local_readiness_service, credential_presence_resolver)`
+
+The module preserves:
+
+- URL/method/endpoint: `POST /api/admin/ai/healthcheck`, `admin_ai_healthcheck`;
+- admin-only permission;
+- optional JSON body behavior, including malformed/empty body behavior;
+- legacy `api_success` response envelope without success `request_id`;
+- no `AuditRecord` behavior;
+- seed service integration and flush semantics;
+- route-owned health-field writes and single commit;
+- `LEGACY_LIVE_PROBE_DISABLED` for `live_probe=true`;
+- credential boundary as `credential_presence_resolver(config) -> bool`;
+- no adapter, transport, provider call, usage, verification run, preflight run, card, or external network behavior.
+
+Post-9C.4N status:
+
+- New route module: `backend/routes/legacy_provider_admin_healthcheck.py`.
+- Migrated route in this slice: 1.
+- `backend/app.py` line count: 16,036.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 131.
+- Extracted route modules: 12.
+- Extracted routes: 31.
+- `RouteCoreDependencies` fields: 9.
+
+Next recommended slice: audit `POST /api/admin/ai/prompts` mutation, including its seed, validation, serializer, commit/rollback, OpenAPI/frontend, and shared `admin_ai_prompts` endpoint compatibility. Keep legacy `/api/alignment/run` as a separate execution-boundary audit, and do not re-enable legacy live probing without a new explicit service.

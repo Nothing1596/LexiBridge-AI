@@ -88,11 +88,7 @@ from services.ai_cost import (
     estimate_ai_cost,
     summarize_ai_calls,
 )
-from services.legacy_provider_local_readiness import (
-    LegacyProviderLocalReadinessProvider,
-    LegacyProviderLocalReadinessRequest,
-    evaluate_legacy_provider_local_readiness,
-)
+from services.legacy_provider_local_readiness import evaluate_legacy_provider_local_readiness
 from services.chunk_dedup import compute_content_hash, find_duplicate_chunk, mark_duplicate_chunk, normalize_chunk_text
 from services.knowledge_health import summarize_health as summarize_kb_health
 from services.knowledge_indexing import (
@@ -147,6 +143,11 @@ from routes.legacy_provider_admin_configuration import (
     LegacyProviderAdminConfigurationModels,
     LegacyProviderAdminConfigurationSerializers,
     register_legacy_provider_admin_configuration_routes,
+)
+from routes.legacy_provider_admin_healthcheck import (
+    LegacyProviderAdminHealthcheckModels,
+    LegacyProviderAdminHealthcheckSerializers,
+    register_legacy_provider_admin_healthcheck_routes,
 )
 from routes.provider_governance import ProviderGovernanceModels, register_provider_governance_routes
 from routes.provider_policy import ProviderPolicyModels, register_provider_policy_routes
@@ -6953,6 +6954,14 @@ def legacy_provider_credential_present(provider_name):
     return bool(value and not is_placeholder_secret(value))
 
 
+def legacy_provider_config_credential_present(config):
+    return legacy_provider_credential_present(getattr(config, "provider_name", ""))
+
+
+def legacy_provider_local_readiness_service(*, request, provider):
+    return evaluate_legacy_provider_local_readiness(request=request, provider=provider)
+
+
 def ensure_ai_registry_seed(owner_user_id=0):
     result = ensure_legacy_provider_registry_seed(
         db=db,
@@ -13629,34 +13638,27 @@ register_legacy_provider_admin_configuration_routes(
 )
 
 
-@app.route("/api/admin/ai/healthcheck", methods=["POST"])
-def admin_ai_healthcheck():
-    user, error_response = require_current_user({"admin"})
-    if error_response:
-        return error_response
-    ensure_ai_registry_seed(owner_user_id=user.id)
-    live_probe = bool((request.get_json() or {}).get("live_probe", False))
-    results = []
-    for config in AIProviderConfig.query.filter_by(is_enabled=True).all():
-        readiness = evaluate_legacy_provider_local_readiness(
-            request=LegacyProviderLocalReadinessRequest(live_probe_requested=live_probe),
-            provider=LegacyProviderLocalReadinessProvider(
-                provider_name=config.provider_name,
-                provider_mode=config.provider_mode,
-                model_name=config.default_model or "",
-                enabled=bool(config.is_enabled),
-                credential_present=legacy_provider_credential_present(config.provider_name),
-                adapter_available=True,
-                external_execution_enabled=False,
-            ),
-        )
-        result = readiness.to_payload()
-        config.health_status = readiness.health_updates["health_status"]
-        config.last_healthcheck_at = current_time_text()
-        config.updated_at = current_time_text()
-        results.append(result)
-    db.session.commit()
-    return api_success({"items": results})
+register_legacy_provider_admin_healthcheck_routes(
+    app,
+    core=route_core,
+    models=LegacyProviderAdminHealthcheckModels(
+        AIProviderConfig=AIProviderConfig,
+    ),
+    serializers=LegacyProviderAdminHealthcheckSerializers(
+        api_success=api_success,
+    ),
+    registry_seed_service=ensure_legacy_provider_registry_seed,
+    seed_models=LegacyProviderRegistrySeedModels(
+        AIProviderConfig=AIProviderConfig,
+        AIModelRegistry=AIModelRegistry,
+        PromptTemplate=PromptTemplate,
+    ),
+    provider_selection_factory=lambda: env_provider_selection(os.environ),
+    default_prompts=DEFAULT_PROMPTS,
+    model_version_factory=lambda: os.environ.get("MODEL_VERSION", "local-mvp-v1"),
+    local_readiness_service=legacy_provider_local_readiness_service,
+    credential_presence_resolver=legacy_provider_config_credential_present,
+)
 
 
 @app.route("/api/evaluation/sets", methods=["GET", "POST"])

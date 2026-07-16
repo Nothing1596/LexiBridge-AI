@@ -1,15 +1,15 @@
 # Legacy Provider Healthcheck Boundary
 
-Task: 9C.4L / 9C.4L.1 / 9C.4M
+Task: 9C.4L / 9C.4L.1 / 9C.4M / 9C.4N
 Baseline commit for audit: `3f9b6dfb7a3631032ccff07330d801106117ffd4`
-Status: `LIVE_PROBE_DISABLED`; `LOCAL_READINESS_SERVICE_ESTABLISHED`; `ROUTE_NOT_YET_EXTRACTED`.
+Status: `LIVE_PROBE_DISABLED`; `LOCAL_READINESS_SERVICE_ESTABLISHED`; `THIN_ROUTE_EXTRACTED`.
 
 ## HTTP Contract
 
 - URL: `POST /api/admin/ai/healthcheck`
 - Flask endpoint: `admin_ai_healthcheck`
-- Handler location: `backend/app.py`
-- Handler size after 9C.4M: 27 function body lines, 28 lines including the route decorator
+- Handler location after 9C.4N: `backend/routes/legacy_provider_admin_healthcheck.py`
+- Handler size after 9C.4N: 27 function body lines
 - Authentication: required
 - Allowed role: `admin`
 - Rejected roles: unauthenticated 401, student 403, teacher 403
@@ -32,16 +32,28 @@ Status: `LIVE_PROBE_DISABLED`; `LOCAL_READINESS_SERVICE_ESTABLISHED`; `ROUTE_NOT
 
 | Segment | Current owner | Reads DB | Writes DB | Network risk | Business rule |
 |---|---|---:|---:|---:|---:|
-| Authentication and role check | route | token/user | token last-used flush | no | yes |
+| Authentication and role check | route module | token/user | token last-used flush | no | yes |
 | Registry seed | `ensure_ai_registry_seed(...)` wrapper and seed service | provider/model/prompt | seed flush | no | yes |
-| JSON parsing | route | no | no | no | no |
-| Enabled provider loop | route | `AIProviderConfig` | health fields | no | yes |
+| JSON parsing | route module | no | no | no | no |
+| Enabled provider loop | route module | `AIProviderConfig` | health fields | no | yes |
 | Local readiness decision | `services.legacy_provider_local_readiness.evaluate_legacy_provider_local_readiness(...)` | no | no | no | yes |
 | Live transport probe | disabled at the legacy route boundary | no | health fields | no | yes |
-| Commit | route | no | provider health and possible seed rows | no | yes |
-| Response mapping | route | no | no | no | no |
+| Commit | route module | no | provider health and possible seed rows | no | yes |
+| Response mapping | route module | no | no | no | no |
 
-The route still owns transaction completion. The seed service and local readiness service do not commit or roll back.
+The route module still owns transaction completion. The seed service and local readiness service do not commit or roll back.
+
+## Route module
+
+Task 9C.4N moves the thin HTTP adapter into `backend/routes/legacy_provider_admin_healthcheck.py`.
+
+Register signature:
+
+`register_legacy_provider_admin_healthcheck_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, local_readiness_service, credential_presence_resolver)`
+
+The route module keeps the legacy endpoint name, admin-only permission, optional JSON parsing behavior, legacy `api_success` envelope without success `request_id`, and no-`AuditRecord` behavior. It does not import `backend.app`, provider adapter code, provider transport code, the old live healthcheck executor, credentials, or environment APIs.
+
+Healthcheck-specific dependencies are passed explicitly. `RouteCoreDependencies` remains common route infrastructure only and does not include seed services, local readiness services, provider models, credential resolvers, adapter/transport dependencies, or healthcheck execution helpers.
 
 ## Local readiness service
 
@@ -146,7 +158,7 @@ Characterization confirms it does not create or modify:
 
 ## Credential flow
 
-Credential source is not `AIProviderConfig`; that model has no API-key column. After 9C.4M, the legacy route no longer constructs a `ProviderSelection` for healthcheck local readiness. It computes `legacy_provider_credential_present(provider_name)` from the existing module-level provider configuration and passes only a boolean snapshot field to the local readiness service.
+Credential source is not `AIProviderConfig`; that model has no API-key column. After 9C.4M, the legacy endpoint no longer constructs a `ProviderSelection` for healthcheck local readiness. After 9C.4N, the route module receives a `credential_presence_resolver(config) -> bool` callback from `backend/app.py` and passes only a boolean snapshot field to the local readiness service.
 
 For `live_probe=true`, the service returns the disabled result before any adapter or transport code can be involved. The lower-level live health helper can still reflect adapter messages if called directly, so any future live-probe service must add a redaction boundary before being enabled.
 
@@ -183,7 +195,7 @@ Tests block `socket`, `urllib`, `requests`, and `httpx` on service and route pat
 
 | Metric | Value |
 |---|---:|
-| Handler lines including decorator | 28 |
+| Handler lines including decorator | n/a, registered with `app.add_url_rule` |
 | Function body lines | 27 |
 | Direct route model count | 1 |
 | Direct service/helper calls | 4: auth, seed, credential-present adapter, local readiness |
@@ -198,19 +210,19 @@ Tests block `socket`, `urllib`, `requests`, and `httpx` on service and route pat
 
 ## Final conclusion
 
-Primary conclusion after 9C.4M: `LOCAL_READINESS_SERVICE_ESTABLISHED`.
+Primary conclusion after 9C.4N: `THIN_ROUTE_EXTRACTED`.
 
 Reasoning:
 
 - Local readiness and live transport probe are logically separable.
 - The route is admin-only and no frontend call was found, but OpenAPI still exposes it.
-- The route commits provider health fields and possible seed rows.
+- The route module commits provider health fields and possible seed rows.
 - The legacy route now delegates local readiness calculation to a pure service and blocks live provider transport when `live_probe=true`.
 - Current lower-level health helper still echoes adapter error `message`; a sentinel in that helper result appears if it is called directly. That remains a future live-probe service risk, not a route-level active path.
 
 Next service plan:
 
 1. Keep the legacy `LEGACY_LIVE_PROBE_DISABLED` response in place.
-2. Move the now-thin `POST /api/admin/ai/healthcheck` HTTP adapter into a route module.
-3. Keep caller-owned transaction behavior during route migration.
-4. Create a separate future live-probe service only if real external probing becomes a requirement, with explicit timeout, redaction, transport spy tests, and no raw adapter message passthrough.
+2. Keep caller-owned transaction behavior in the extracted route module.
+3. Create a separate future live-probe service only if real external probing becomes a requirement, with explicit timeout, redaction, transport spy tests, and no raw adapter message passthrough.
+4. Audit `POST /api/admin/ai/prompts` before any prompt mutation extraction, and keep legacy `/api/alignment/run` as a later execution-boundary task.

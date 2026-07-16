@@ -463,11 +463,14 @@ def test_legacy_admin_ai_source_boundaries_are_static():
     assert "registry_seed_service(owner_user_id=user.id)" in module_source
     assert "healthcheck_provider" not in module_source
     assert "registry_seed_service=ensure_ai_registry_seed" in source
-    health_start = source.index("def admin_ai_healthcheck(")
-    health_end = source.find("\n\n@app.route", health_start + 1)
-    health_block = source[health_start:health_end]
-    assert "evaluate_legacy_provider_local_readiness(" in health_block
-    assert "LegacyProviderLocalReadinessProvider(" in health_block
-    assert "credential_present=legacy_provider_credential_present(config.provider_name)" in health_block
-    assert "db.session.commit()" in health_block
-    assert "healthcheck_provider" not in health_block
+    health_source = (
+        ROOT / "backend" / "routes" / "legacy_provider_admin_healthcheck.py"
+    ).read_text(encoding="utf-8")
+    assert "register_legacy_provider_admin_healthcheck_routes(" in source
+    assert "def admin_ai_healthcheck(" not in source
+    assert '@app.route("/api/admin/ai/healthcheck", methods=["POST"])' not in source
+    assert "local_readiness_service(" in health_source
+    assert "LegacyProviderLocalReadinessProvider(" in health_source
+    assert "credential_present=bool(credential_presence_resolver(config))" in health_source
+    assert "core.db.session.commit()" in health_source
+    assert "healthcheck_provider" not in health_source
