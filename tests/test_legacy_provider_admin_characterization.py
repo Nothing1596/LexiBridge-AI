@@ -323,7 +323,7 @@ def test_legacy_admin_ai_healthcheck_local_paths_write_health_only_without_netwo
         assert statuses["mock"] == "healthy"
 
 
-def test_legacy_admin_ai_healthcheck_live_probe_transport_intent_without_network(
+def test_legacy_admin_ai_healthcheck_live_probe_disabled_without_network(
     app_module,
     client,
     admin_token,
@@ -373,13 +373,10 @@ def test_legacy_admin_ai_healthcheck_live_probe_transport_intent_without_network
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["status"] == "success"
-    assert payload["data"]["items"][0]["health_status"] == "unknown"
-    assert {
-        "provider_name": "deepseek",
-        "provider_mode": "live",
-        "model_name": "deepseek-chat",
-        "live_probe": True,
-    } in captured_route_calls
+    live_item = next(item for item in payload["data"]["items"] if item["provider_name"] == "deepseek")
+    assert live_item["health_status"] == "unknown"
+    assert live_item["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
+    assert [item for item in captured_route_calls if item["provider_name"] == "deepseek"] == []
     assert_no_sentinel(payload)
 
     with app_module.app.app_context():
@@ -461,6 +458,7 @@ def test_legacy_admin_ai_source_boundaries_are_static():
     health_start = source.index("def admin_ai_healthcheck(")
     health_end = source.find("\n\n@app.route", health_start + 1)
     health_block = source[health_start:health_end]
-    assert "live_probe and selection.provider_mode == \"live\"" in health_block
+    assert '"error_code": "LEGACY_LIVE_PROBE_DISABLED"' in health_block
+    assert "provider transport was not attempted" in health_block
     assert "db.session.commit()" in health_block
-    assert "healthcheck_provider(selection" in health_block
+    assert "healthcheck_provider(selection, live_probe=False)" in health_block

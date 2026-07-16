@@ -314,7 +314,36 @@ assert response.status_code == 200, response.get_data(as_text=True)
 payload = response.get_json()["data"]
 assert payload["verification_status"] == "failed"
 assert payload["can_auto_approve"] is False
-print("disabled external provider produced failed run without network")
+with app_module.app.app_context():
+    live_config = app_module.AIProviderConfig(
+        provider_name="deepseek",
+        provider_mode="live",
+        base_url="https://example.invalid/readiness-live-probe",
+        default_model="deepseek-chat",
+        is_enabled=True,
+        is_default=True,
+        health_status="unknown",
+        created_at=app_module.current_time_text(),
+        updated_at=app_module.current_time_text(),
+    )
+    app_module.db.session.add(live_config)
+    app_module.db.session.commit()
+app_module.DEEPSEEK_API_KEY = "LEXIBRIDGE_READINESS_SENTINEL_SECRET"
+app_module.DEEPSEEK_BASE_URL = "https://example.invalid/readiness-live-probe"
+legacy_response = client.post(
+    "/api/admin/ai/healthcheck",
+    json={"live_probe": True},
+    headers={"Authorization": f"Bearer {token}", "X-Request-ID": "pilot-readiness-legacy-live-probe-disabled"},
+)
+assert legacy_response.status_code == 200, legacy_response.get_data(as_text=True)
+legacy_payload = legacy_response.get_json()
+serialized = str(legacy_payload)
+assert "LEXIBRIDGE_READINESS_SENTINEL_SECRET" not in serialized
+assert any(
+    item.get("error_code") == "LEGACY_LIVE_PROBE_DISABLED"
+    for item in legacy_payload["data"]["items"]
+), legacy_payload
+print("disabled external provider and legacy live probe produced safe results without network")
 """
 
 

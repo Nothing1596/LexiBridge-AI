@@ -313,7 +313,7 @@ Inventory result:
 - Unknown provider/admin route count: 0
 - `GET /api/admin/alignment-runs`: `READ_ONLY_ADMIN_LISTING`, direct extraction safe
 - legacy `/api/admin/ai/*`: active frontend/OpenAPI surface, overlaps formal provider governance but is not an alias; requires deprecation/compatibility or service-boundary work before extraction
-- `POST /api/admin/ai/healthcheck`: `HEALTH_EXTERNAL_RISK` because live provider mode plus `live_probe=true` can call provider transport
+- `POST /api/admin/ai/healthcheck`: `HEALTH_EXTERNAL_RISK` at audit time because live provider mode plus `live_probe=true` could call provider transport before 9C.4L.1 disabled that route path
 - `POST /api/alignment/run`: `SERVICE_BOUNDARY_REQUIRED` because it creates legacy `AlignmentRun`, background jobs/cards, usage, and commits
 - legacy `/api/alignment/runs*`: active frontend/OpenAPI read paths tied to the older `AlignmentRun` surface
 
@@ -383,7 +383,7 @@ Inventory result:
 - `GET /api/admin/ai/providers`, `/models`, `/prompts`, and `/health` call the legacy registry seed path; after 9C.4J the implementation lives in `backend/services/legacy_provider_registry_seed.py` behind the `ensure_ai_registry_seed(...)` compatibility wrapper. Characterization shows the GET seed path flushes default registry/model/prompt rows for the response but does not persist them without a later commit.
 - `POST /api/admin/ai/prompts` is a mutation and commits `PromptTemplate` changes.
 - `POST /api/admin/ai/healthcheck` commits provider health fields and may also persist env-selected seed rows.
-- `POST /api/admin/ai/healthcheck` passes `live_probe=True` into provider health logic for an enabled live provider; `services.ai_health.healthcheck_provider(...)` calls the provider adapter only in live mode with non-placeholder credential and `live_probe=true`.
+- Before 9C.4L.1, `POST /api/admin/ai/healthcheck` passed `live_probe=True` into provider health logic for an enabled live provider; `services.ai_health.healthcheck_provider(...)` called the provider adapter only in live mode with non-placeholder credential and `live_probe=true`.
 
 Primary conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
 
@@ -500,8 +500,8 @@ Findings:
 - The handler is 16 function body lines, 17 lines including the decorator.
 - It calls `ensure_ai_registry_seed(...)`, reads optional `live_probe`, checks all enabled `AIProviderConfig` rows, writes provider health fields, commits, and returns the legacy `api_success` envelope without `request_id`.
 - Local readiness paths do not call transport.
-- Live probe transport intent exists for enabled live providers with usable credential and `live_probe=true`.
-- The current live probe helper echoes adapter error `message`, so a sentinel in a transport-adjacent error message appears in the result.
+- Before 9C.4L.1, live probe transport intent existed for enabled live providers with usable credential and `live_probe=true`.
+- The lower-level live probe helper still echoes adapter error `message` if called directly, so any future live-probe service needs an explicit redaction boundary before being enabled.
 - No route module was added.
 - `backend/app.py` line count remains 16,007.
 - Direct `@app.route` handlers remaining in `backend/app.py`: 132.
@@ -512,3 +512,30 @@ Findings:
 Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
 
 Next recommended slice: before extracting `POST /api/admin/ai/healthcheck`, disable/deprecate live probe behavior or create a dedicated live-probe service with explicit redaction, timeout/error mapping, and transport spy tests. Then split local readiness into its own service and only afterwards move the thin route adapter. Keep `POST /api/admin/ai/prompts` and legacy `/api/alignment/run` separate.
+
+## Task 9C.4L.1 Legacy Live Probe Disable
+
+Task 9C.4L.1 keeps `POST /api/admin/ai/healthcheck` in `backend/app.py` and does not introduce a route module.
+
+Security behavior change:
+
+- URL/method/endpoint remain `POST /api/admin/ai/healthcheck` and `admin_ai_healthcheck`.
+- Admin-only permission and the legacy `api_success` envelope remain unchanged.
+- `live_probe` omitted and `live_probe=false` keep the local readiness path.
+- `live_probe=true` for enabled live providers returns `health_status=unknown` and `error_code=LEGACY_LIVE_PROBE_DISABLED`.
+- The disabled result uses a stable safe message and does not include raw adapter exceptions or credentials.
+- Provider adapter, provider transport, socket, requests, httpx, and urllib call counts remain zero through the legacy route.
+- Seed flush and route-owned commit behavior are preserved.
+- Write-set remains limited to local healthcheck seed/health fields; no provider usage, verification run, preflight run, provider call, card, or AuditRecord is created.
+- Readiness now includes a provider network-disabled smoke check that calls the legacy healthcheck with `live_probe=true` against an enabled live provider and asserts `LEGACY_LIVE_PROBE_DISABLED` without network.
+
+Post-9C.4L.1 status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` direct route count remains 132.
+- Extracted route modules remain 11.
+- Extracted routes remain 30.
+- `RouteCoreDependencies` remains 9 fields.
+
+Next recommended slice: extract local healthcheck readiness into a service while preserving the disabled live-probe response. After the route is a thin HTTP adapter, migrate it to a route module. Keep prompt mutation and legacy `/api/alignment/run` separate.

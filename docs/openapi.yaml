@@ -2126,7 +2126,7 @@ paths:
             schema:
               type: object
               properties:
-                live_probe: {type: boolean}
+                live_probe: {type: boolean, description: "Legacy parameter. Current pilot builds disable live provider transport probing and return a safe disabled result."}
       responses:
         "200": {description: Healthcheck result, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
         "403": {$ref: "#/components/responses/Error403"}

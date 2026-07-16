@@ -13622,8 +13622,18 @@ def admin_ai_healthcheck():
     live_probe = bool((request.get_json() or {}).get("live_probe", False))
     results = []
     for config in AIProviderConfig.query.filter_by(is_enabled=True).all():
-        selection = ai_selection_from_config(config=config)
-        result = healthcheck_provider(selection, live_probe=live_probe and selection.provider_mode == "live")
+        if live_probe and str(config.provider_mode or "").strip().lower() == "live":
+            result = {
+                "provider_name": config.provider_name,
+                "provider_mode": config.provider_mode,
+                "health_status": "unknown",
+                "latency_ms": 0,
+                "message": "Legacy live probe is disabled; provider transport was not attempted.",
+                "error_code": "LEGACY_LIVE_PROBE_DISABLED",
+            }
+        else:
+            selection = ai_selection_from_config(config=config)
+            result = healthcheck_provider(selection, live_probe=False)
         config.health_status = result.get("health_status", "unknown")
         config.last_healthcheck_at = current_time_text()
         config.updated_at = current_time_text()

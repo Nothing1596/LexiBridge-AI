@@ -22,7 +22,7 @@ Unknown legacy provider admin route count after scan: `0`.
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted as local health view, not live probe |
-| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 16 | `LEGACY_EXTERNAL_HEALTH_RISK` | admin only | yes | no direct frontend call found | yes | commits provider health and may persist env seed | yes when live provider plus `live_probe=true` | service boundary required before extraction |
+| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 26 | `LEGACY_LIVE_PROBE_DISABLED` | admin only | yes | no direct frontend call found | yes | commits provider health and may persist env seed | no through legacy endpoint; live probe returns disabled result | extract local readiness service before route migration |
 
 All routes keep the existing legacy response convention from `api_success`: top-level `status`, `message`, and `data`. None of these legacy admin AI routes returns `request_id` today.
 
@@ -108,9 +108,9 @@ This preserves compatibility but remains vulnerable to concurrent duplicate crea
 | `local_heuristic` | n/a | false/true | no | no | healthy, development-only message |
 | live provider, missing/placeholder credential | no | false/true | no | no | unhealthy, missing-key message |
 | live provider, usable credential | yes | false | no | no | unknown, live probe skipped |
-| live provider, usable credential | yes | true | yes, via `provider_from_selection(...).call(...)` | yes | healthy/unhealthy based on provider result |
+| live provider, usable credential | yes | true | no, disabled at legacy route boundary | no | unknown with `LEGACY_LIVE_PROBE_DISABLED` |
 
-The test suite verifies the route passes `live_probe=True` through to healthcheck logic for an enabled live provider, using a spy rather than a real network call. The service-level characterization verifies `healthcheck_provider(...)` calls the provider adapter only when `live_probe=True`, mode is `live`, and a non-placeholder credential is present.
+The 9C.4L.1 test suite verifies the route no longer passes `live_probe=True` through to healthcheck logic for an enabled live provider. It uses a spy and blocked socket/HTTP primitives to prove transport and adapter call counts stay at zero.
 
 ## Network And Secret Boundary
 
@@ -179,7 +179,7 @@ All `/api/admin/ai/*` routes are present in `docs/openapi.yaml`.
 | `/api/admin/ai/calls` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
 | `/api/admin/ai/usage` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
 | `/api/admin/ai/health` GET | `KEEP_AND_EXTRACT` as local health view only |
-| `/api/admin/ai/healthcheck` POST | `SERVICE_BOUNDARY_FIRST` because live probe can call transport |
+| `/api/admin/ai/healthcheck` POST | `SERVICE_BOUNDARY_FIRST`; legacy route live probe is disabled, but local readiness still needs a service boundary |
 
 ## Complexity Snapshot
 
@@ -192,7 +192,7 @@ All `/api/admin/ai/*` routes are present in `docs/openapi.yaml`.
 | `admin_ai_calls` | 6 | 1 | serializer | 1 | 0 | no | read-only extraction candidate |
 | `admin_ai_usage` | 6 | 1 | summary serializer | 1 | 0 | no | read-only extraction candidate |
 | `admin_ai_health` | 7 | 1 | seed, serializer | 1 | seed flush only | no | read-only extraction candidate |
-| `admin_ai_healthcheck` | 16 | 1 | seed, healthcheck service | 1 | commit health/seed | yes in live probe | service boundary first |
+| `admin_ai_healthcheck` | 26 | 1 | seed, healthcheck service | 1 | commit health/seed | no through legacy route after 9C.4L.1 | local readiness service boundary first |
 
 ## Final Conclusion
 
@@ -203,10 +203,10 @@ Reasoning:
 - The legacy admin AI GET views are active frontend/OpenAPI surface and are not drop-in aliases of formal provider governance APIs.
 - Several GET views have a seed-flush side effect but do not commit by themselves.
 - `POST /api/admin/ai/prompts` is a mutation sharing the same handler as prompt GET.
-- `POST /api/admin/ai/healthcheck` commits provider health fields and can call provider transport in live-probe mode.
+- `POST /api/admin/ai/healthcheck` commits provider health fields. After 9C.4L.1, live-probe mode returns `LEGACY_LIVE_PROBE_DISABLED` and does not call provider transport.
 - There are no unknown `/api/admin/ai/*` routes after scan.
 
-Next precise slice: split and extract only the safe legacy read-only provider admin views, while leaving prompt mutation and healthcheck in `backend/app.py`. A separate follow-up should then create a service boundary that separates local health summary from live transport probing before moving `/api/admin/ai/healthcheck`.
+Next precise slice: split local healthcheck readiness into a service while keeping the legacy `LEGACY_LIVE_PROBE_DISABLED` behavior. Do not re-enable live transport probing without a new explicit live-probe service.
 
 ## Task 9C.4I Update
 
@@ -228,7 +228,7 @@ Task 9C.4K extracts only the seed-backed legacy configuration GET views into `ba
 
 The module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency and preserves the legacy compatibility contract: admin-only access, endpoint names, OpenAPI/frontend URLs, `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, and seed flush/no-explicit-commit behavior. Legitimate prompt metadata remains part of the prompt GET contract, while credential-like provider/model metadata remains excluded from responses.
 
-`POST /api/admin/ai/prompts` still keeps its mutation logic in `backend/app.py` through an explicit `prompt_post_handler` callback because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. `POST /api/admin/ai/healthcheck`, live transport probing, prompt mutation service work, and `/api/alignment/run` remain separate future tasks.
+`POST /api/admin/ai/prompts` still keeps its mutation logic in `backend/app.py` through an explicit `prompt_post_handler` callback because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. `POST /api/admin/ai/healthcheck`, prompt mutation service work, and `/api/alignment/run` remain separate future tasks; legacy live transport probing is disabled.
 
 ## Task 9C.4L Healthcheck Boundary Audit
 
@@ -239,9 +239,9 @@ Additional findings:
 - The route remains admin-only, OpenAPI-listed, and not directly called by `frontend/index.html`.
 - The handler still calls `ensure_ai_registry_seed(...)`, reads optional `live_probe`, loops over enabled `AIProviderConfig` rows, writes health fields, commits, and returns the legacy `api_success` envelope without `request_id`.
 - Local readiness is separable from live probing: `none`, `mock`, `local_heuristic`, missing credential, and `live_probe=false` paths do not need provider transport.
-- Live probe starts only for an enabled live provider with a usable credential and `live_probe=true`.
-- The current health helper echoes adapter/provider error `message`; a sentinel in that message appears in the result. That makes live probe redaction insufficient for direct route extraction.
+- Before 9C.4L.1, live probe started for an enabled live provider with a usable credential and `live_probe=true`.
+- The lower-level health helper still echoes adapter/provider error `message` if called directly. 9C.4L.1 blocks that helper path from the legacy route, so the active route no longer exposes raw adapter messages.
 
 Primary conclusion after 9C.4L: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
 
-Next step should not be route extraction. First disable/deprecate the live probe behavior or add a live-probe service boundary with explicit redaction, timeout, transport, and transaction handling. Local readiness can then be split into a separate safe service before a thin route module is created.
+9C.4L.1 implements that safety step. `live_probe=true` now returns a safe disabled result for enabled live providers, with `error_code=LEGACY_LIVE_PROBE_DISABLED`, and does not call provider adapter or transport. Next step should split local readiness into a service before a thin route module is created.

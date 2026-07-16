@@ -8,7 +8,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4L"
+SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4L1"
 
 
 def bearer(token):
@@ -94,10 +94,11 @@ def test_healthcheck_route_contract_openapi_and_static_handler_boundary(app_modu
     assert "/api/admin/ai/healthcheck" not in frontend
 
     block = handler_block()
-    assert len(block.splitlines()) == 17
+    assert len(block.splitlines()) == 27
     assert "ensure_ai_registry_seed(owner_user_id=user.id)" in block
-    assert 'live_probe and selection.provider_mode == "live"' in block
-    assert "healthcheck_provider(selection" in block
+    assert '"error_code": "LEGACY_LIVE_PROBE_DISABLED"' in block
+    assert "provider transport was not attempted" in block
+    assert "healthcheck_provider(selection, live_probe=False)" in block
     assert "db.session.commit()" in block
     assert "AuditRecord" not in block
     assert "AICallLog" not in block
@@ -190,7 +191,7 @@ def test_healthcheck_local_readiness_seed_commit_and_write_set(
         assert all(config.last_healthcheck_at for config in persisted)
 
 
-def test_healthcheck_live_probe_route_passes_credential_to_health_logic_without_returning_it(
+def test_healthcheck_live_probe_route_returns_disabled_result_without_calling_health_logic(
     app_module,
     client,
     admin_token,
@@ -208,6 +209,8 @@ def test_healthcheck_live_probe_route_passes_credential_to_health_logic_without_
             "base_url": selection.base_url,
             "live_probe": live_probe,
         })
+        if live_probe:
+            raise AssertionError("legacy live probe should not call healthcheck provider")
         return {
             "provider_name": selection.provider_name,
             "provider_mode": selection.provider_mode,
@@ -246,14 +249,11 @@ def test_healthcheck_live_probe_route_passes_credential_to_health_logic_without_
     payload = response.get_json()
     assert payload["status"] == "success"
     assert_no_sentinel(payload)
-    assert {
-        "provider_name": "deepseek",
-        "provider_mode": "live",
-        "model_name": "deepseek-chat",
-        "api_key": SENTINEL,
-        "base_url": f"https://example.invalid/{SENTINEL}",
-        "live_probe": True,
-    } in captured
+    live_item = next(item for item in payload["data"]["items"] if item["provider_name"] == "deepseek")
+    assert live_item["error_code"] == "LEGACY_LIVE_PROBE_DISABLED"
+    assert "disabled" in live_item["message"].lower()
+    live_calls = [item for item in captured if item["provider_name"] == "deepseek"]
+    assert live_calls == []
 
     with app_module.app.app_context():
         after = side_effect_counts(app_module)
@@ -264,7 +264,7 @@ def test_healthcheck_live_probe_route_passes_credential_to_health_logic_without_
         assert after["audit_records"] == before["audit_records"]
 
 
-def test_ai_health_live_probe_currently_echoes_adapter_error_message(monkeypatch):
+def test_ai_health_service_still_requires_live_probe_redaction_boundary(monkeypatch):
     ai_health = importlib.import_module("services.ai_health")
     ai_registry = importlib.import_module("services.ai_registry")
     captured = []
@@ -313,7 +313,7 @@ def test_healthcheck_boundary_document_records_decision():
         "Local readiness",
         "Live transport probe",
         "Seed and transaction matrix",
-        "DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST",
+        "LEGACY_LIVE_PROBE_DISABLED",
     ]
     for marker in required_markers:
         assert marker in document

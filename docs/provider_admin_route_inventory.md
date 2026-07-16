@@ -28,7 +28,7 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | serialized call logs; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | mostly | admin only | yes | frontend active | seed flush only; no explicit commit | none | health/config summary only | extracted as local health view, not live probe |
-| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 16 | `HEALTH_EXTERNAL_RISK` | no | admin only | yes | tested | updates provider health fields, commits | live mode with `live_probe=true` can call provider transport | adapter error message can be echoed by current live probe | disable/deprecate live probe or add redaction/service boundary before extraction |
+| `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | 26 | `LEGACY_LIVE_PROBE_DISABLED` | no | admin only | yes | tested | updates provider health fields, commits | no through legacy endpoint; live mode returns disabled result | lower-level helper still needs redaction before future live probe | extract local readiness service before route migration |
 | `/api/alignment/run` | POST | `run_alignment` | 159 | `EXECUTION_OR_REPLAY` / `SERVICE_BOUNDARY_REQUIRED` | no | student, teacher, admin | yes | frontend active, scripts/tests | creates `AlignmentRun`, background job or cards, records personal usage, commits | current provider metadata and legacy execution path; no live probe in normal characterization | alignment/card payloads | service boundary first |
 | `/api/alignment/runs` | GET | `alignment_runs` | 29 | `LEGACY_ACTIVE` | yes | student, teacher, admin | yes | frontend active | none | none | serialized legacy `AlignmentRun` summaries | extract only after legacy alignment-run boundary decision |
 | `/api/alignment/runs/<int:run_id>` | GET | `alignment_run_detail` | 16 | `LEGACY_ACTIVE` | yes | student, teacher, admin with owner/course/admin checks | yes | README/docs/tests | none | none | serialized legacy run detail | extract only after legacy alignment-run boundary decision |
@@ -93,7 +93,7 @@ The `/api/admin/ai/*` group is active in `frontend/index.html` and OpenAPI. It i
 
 - `/api/admin/ai/providers`, `/models`, `/prompts`, and `/health` all call the shared legacy registry seed service. The extracted provider/model/prompt configuration route module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency; `backend/app.py` keeps `ensure_ai_registry_seed(...)` as a compatibility wrapper for app-local callers, including prompt mutation, healthcheck, and non-route helper paths.
 - `/api/admin/ai/prompts` still preserves the shared Flask endpoint `admin_ai_prompts`; GET is handled by the configuration route module and POST delegates to the app-owned prompt mutation callback.
-- `/api/admin/ai/healthcheck` mutates provider health fields and can reach external provider transport if a live provider is configured and `live_probe=true`.
+- `/api/admin/ai/healthcheck` mutates provider health fields. After 9C.4L.1, `live_probe=true` for an enabled live provider returns `LEGACY_LIVE_PROBE_DISABLED` and does not reach provider transport.
 - `/api/admin/ai/calls` and `/usage` are read-only over `AICallLog`, a legacy AI usage/cost surface distinct from `AlignmentProviderUsageRecord`.
 
 The remaining legacy provider admin write/high-risk routes should not be extracted as one group until their service boundaries are explicit.
@@ -139,9 +139,9 @@ There are overlapping concepts, but no safe drop-in alias was found.
 
 ## Network And Secret Boundary
 
-Characterization tests enforce no-network behavior for the read/list routes and for local `admin_ai_healthcheck` with `live_probe=false`.
+Characterization tests enforce no-network behavior for the read/list routes and for `admin_ai_healthcheck` with `live_probe=false` and `live_probe=true`.
 
-Network risk remains in `POST /api/admin/ai/healthcheck` because `services/ai_health.py` calls provider transport when `live_probe=true` and the selected provider mode is `live`. This task does not execute that path.
+Network risk is now blocked at the legacy route boundary. `services/ai_health.py` still contains provider transport logic for future use, but `POST /api/admin/ai/healthcheck` no longer calls it for `live_probe=true`.
 
 Sentinel secret: `LEXIBRIDGE_SENTINEL_SECRET_9C4F`
 
@@ -174,7 +174,7 @@ OpenAPI dependencies:
 | `admin_ai_calls` | 6 | 1 | serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` inside legacy group |
 | `admin_ai_usage` | 6 | 1 | summary serializer | 1 | 0 | no | `DIRECT_EXTRACTION_SAFE` inside legacy group |
 | `admin_ai_health` | 7 | 1 | seed, serializer | 1 | possible seed flush | no | `DEPRECATION_AUDIT_REQUIRED` |
-| `admin_ai_healthcheck` | 16 | 1 | seed, healthcheck service | 1 | yes | yes in live-probe mode | `DO_NOT_TOUCH_YET` |
+| `admin_ai_healthcheck` | 26 | 1 | seed, healthcheck service for local paths | 1 | yes | disabled in legacy live-probe mode | `LOCAL_READINESS_SERVICE_NEXT` |
 | `run_alignment` | 159 | many | course/auth/job/alignment/card/usage helpers | 14 | yes | provider-dependent | `SERVICE_BOUNDARY_REQUIRED` |
 | `alignment_runs` | 29 | 2 | course permission, serializer | 1 | 0 | no | `EXTRACTION_AFTER_LEGACY_BOUNDARY` |
 | `alignment_run_detail` | 16 | 2 | course permission, serializer | 4 | 0 | no | `EXTRACTION_AFTER_LEGACY_BOUNDARY` |
@@ -189,12 +189,12 @@ Additional findings:
 - `/api/admin/ai/providers`, `/models`, `/prompts` GET, and `/health` call the shared legacy registry seed service; GET paths flush seed rows for the response but do not persist them without a later commit.
 - `/api/admin/ai/prompts` POST is a prompt mutation route and must not be migrated with read-only views.
 - `/api/admin/ai/healthcheck` commits provider health state and may persist env-selected seed rows.
-- `/api/admin/ai/healthcheck` has a live transport risk when an enabled live provider with a usable credential is checked with `live_probe=true`.
-- `services.ai_health.healthcheck_provider(...)` calls the provider adapter only when `live_probe=true`, provider mode is `live`, and the credential is non-placeholder.
+- `/api/admin/ai/healthcheck` had a live transport risk before 9C.4L.1. It now returns `LEGACY_LIVE_PROBE_DISABLED` for live providers when `live_probe=true`.
+- `services.ai_health.healthcheck_provider(...)` still contains a live adapter path if called directly, so future live probing must be implemented as a separate explicit service with redaction.
 
 Task 9C.4H conclusion: `SPLIT_READONLY_AND_HEALTHCHECK_FIRST`.
 
-Next step should separate safe legacy read-only admin provider views from prompt mutation and healthcheck. Do not extract `/api/admin/ai/healthcheck` until local health summary and live transport probing have an explicit service boundary.
+Next step should extract local healthcheck readiness into a service while preserving disabled live probe behavior. Do not re-enable live transport probing without an explicit service boundary.
 
 ## Task 9C.4I Legacy Observability Extraction
 
@@ -239,12 +239,12 @@ Confirmed contract:
 - The route calls the shared seed wrapper, writes `AIProviderConfig` health fields, and commits.
 - The route does not write `AICallLog`, alignment provider usage, verification runs, preflight runs, cards, or `AuditRecord`.
 - Local readiness paths do not call transport.
-- Live probe transport intent exists only for enabled live providers with usable credential and `live_probe=true`.
-- Current live probe error handling can echo adapter/provider error `message`, including a sentinel supplied by a transport-adjacent test double.
+- Before 9C.4L.1, live probe transport intent existed only for enabled live providers with usable credential and `live_probe=true`.
+- Current lower-level live probe helper can echo adapter/provider error `message` if called directly, but 9C.4L.1 blocks that path from the legacy route.
 
 Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
 
-Do not extract `/api/admin/ai/healthcheck` until live probe behavior is disabled/deprecated or isolated behind a service with explicit redaction and timeout/error mapping. Prompt mutation and legacy `/api/alignment/run` remain separate tasks.
+Task 9C.4L.1 disables legacy live probe behavior. Do not extract `/api/admin/ai/healthcheck` until local readiness is moved behind a service. Prompt mutation and legacy `/api/alignment/run` remain separate tasks.
 
 ## Final Decision
 
