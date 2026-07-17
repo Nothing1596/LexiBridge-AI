@@ -18,6 +18,8 @@ from provider_admin_state_isolation import (
 ROOT = Path(__file__).resolve().parents[1]
 OPENAPI = ROOT / "docs" / "openapi.yaml"
 FRONTEND = ROOT / "frontend" / "index.html"
+DEPRECATION_ADR = ROOT / "docs" / "adr" / "ADR-legacy-alignment-run-deprecation.md"
+BOUNDARY_DOC = ROOT / "docs" / "legacy_alignment_run_boundary.md"
 SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4S"
 
 
@@ -207,6 +209,41 @@ def test_legacy_alignment_run_route_registration_frontend_and_openapi(app_module
     frontend = FRONTEND.read_text(encoding="utf-8")
     assert 'api("/api/alignment/run"' in frontend
     assert "runAlignmentForDocument" in frontend
+
+
+def test_legacy_alignment_run_deprecation_policy_matches_current_compatibility_state(app_module):
+    adr = DEPRECATION_ADR.read_text(encoding="utf-8")
+    boundary = BOUNDARY_DOC.read_text(encoding="utf-8")
+    app_source = Path("backend/app.py").read_text(encoding="utf-8")
+    frontend = FRONTEND.read_text(encoding="utf-8")
+    routes = route_map(app_module)
+
+    assert "Status: ACCEPTED_FOR_SMALL_PILOT" in adr
+    assert "Policy name: LEGACY_ALIGNMENT_RUN_DEPRECATION_V1" in adr
+    assert "Endpoint role: TEMPORARY_FRONTEND_COMPATIBILITY_ONLY" in adr
+    assert "LEGACY_EXTERNAL_EXECUTION_PROHIBITED" in adr
+    assert "LOCAL_OR_DETERMINISTIC_ONLY" in adr
+    assert "FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION" in adr
+    assert "NO_LEGACY_AND_FORMAL_DUAL_WRITE" in adr
+    assert "RETAIN_READ_ONLY_AFTER_CUTOVER" in adr
+    assert "REPLACEMENT_FIRST_THEN_CUTOVER" in adr
+    assert "LEGACY_ALIGNMENT_RUN_DEPRECATED" in adr
+    assert "Directly Extract The Existing Handler As A Service" in adr
+    assert "Transparent Forward To `/api/alignment/verify`" in adr
+
+    assert routes[("/api/alignment/run", "POST")] == ["run_alignment"]
+    assert "LEGACY_ALIGNMENT_RUN_DEPRECATED" not in app_source
+    assert "/api/alignment/run" in frontend
+    assert "runAlignmentForDocument" in frontend
+    assert "/api/alignment/run" in boundary
+    assert "Frontend Migration Checklist" in boundary
+    assert "Task 9C.4U" in adr
+    assert "Task 9C.5A" in adr
+    assert not any(
+        "document_alignment" in endpoint or "document-alignment" in rule
+        for (rule, _method), endpoints in routes.items()
+        for endpoint in endpoints
+    )
 
 
 def test_legacy_alignment_run_auth_roles_and_body_error_contract(

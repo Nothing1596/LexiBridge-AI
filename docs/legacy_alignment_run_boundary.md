@@ -4,6 +4,8 @@ Status: `CHARACTERIZED`
 Task: 9C.4S
 Baseline: `d82798012c263d54761a42c0ebff57ef9e78f8b2`
 Main conclusion: `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`
+Deprecation policy after Task 9C.4T:
+`LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`
 
 This document freezes the current behavior of `POST /api/alignment/run`. It
 does not describe a new implementation and does not claim the legacy route is
@@ -77,6 +79,35 @@ OpenAPI lists only a small request schema:
 Runtime also reads `course_name`, `courseware_sentence`, `chapter`, and the
 `sync` query parameter. OpenAPI does not describe the three distinct response
 shapes.
+
+### Frontend Migration Checklist
+
+Current frontend dependency:
+
+| Concern | Current dependency |
+|---|---|
+| File | `frontend/index.html` |
+| Function | `runAlignmentForDocument(documentId, courseId, scopeType)` |
+| UI entry | Teacher/admin document row action button |
+| Route | `POST /api/alignment/run` |
+| Payload | `document_id`, optional `course_id`, `scope_type` |
+| Success follow-up | `loadJobs()` and `loadAlignmentRuns()` |
+| Queued response | `payload.data.job_id` drives queued-job success message |
+| Non-queued response | `status=success` drives generic completed message |
+| Error display | API error message plus `Alignment failed.` |
+| Legacy list dependency | `/api/alignment/runs` remains loaded after run |
+| Job dependency | `/api/jobs` displays `job.alignment_run_id` |
+
+Cutover checklist:
+
+1. build the replacement backend workflow and contract tests;
+2. add replacement E2E coverage;
+3. switch the document action to the replacement endpoint;
+4. update job/result polling if the replacement no longer uses legacy
+   `AlignmentRun`;
+5. statically prove frontend references to `/api/alignment/run` are zero;
+6. dynamically prove E2E makes zero calls to `/api/alignment/run`;
+7. only then move the legacy endpoint to a disabled/deprecated response.
 
 ## Formal Verification Comparison
 
@@ -315,14 +346,27 @@ Rationale:
 
 ## Next Step
 
-Create a deprecation and compatibility policy before any extraction:
+Task 9C.4T accepts `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1` for the small pilot.
+The route is now formally classified as
+`TEMPORARY_FRONTEND_COMPATIBILITY_ONLY`.
 
-1. decide whether frontend document alignment should continue using the legacy
-   async `AlignmentRun`/`BackgroundJob` flow or move to a safer replacement;
-2. if retained temporarily, disable or gate sync execution and legacy live
-   transport separately;
-3. define a compatibility response for clients before changing the route;
-4. only after that decide whether remaining read-only `/api/alignment/runs*`
-   routes should be extracted or replaced.
+Lifecycle:
+
+1. `PHASE_0_CURRENT_AUDITED_STATE`: this document and the route remain the
+   baseline; new callers are not allowed.
+2. `PHASE_1_EXTERNAL_EXECUTION_CONTAINMENT`: keep the endpoint and frontend
+   contract, but block legacy live/external execution and credential flow.
+3. `PHASE_2_REPLACEMENT_WORKFLOW`: build
+   `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`; do not alias directly to
+   `/api/alignment/verify`.
+4. `PHASE_3_FRONTEND_CUTOVER`: move UI/E2E/scripts to the replacement and prove
+   zero legacy calls.
+5. `PHASE_4_DISABLE_LEGACY_ENDPOINT`: return HTTP 410 with
+   `LEGACY_ALIGNMENT_RUN_DEPRECATED` only after caller count is zero.
+6. `PHASE_5_REMOVE_DEAD_PATH`: remove the dead handler/helpers and archive or
+   document legacy records separately.
+
+The next implementation slice is external execution containment, not route
+extraction.
 
 Do not move the current handler into a service unchanged.

@@ -774,3 +774,36 @@ Next recommended slice: define a legacy `/api/alignment/run`
 deprecation/compatibility policy. Do not extract the current handler as an
 application service unchanged, and do not delete the endpoint before replacing
 or disabling the active frontend document-alignment flow.
+
+## Task 9C.4T Legacy Alignment Run Deprecation Policy
+
+Task 9C.4T does not modify production code, does not move the route, and does
+not change OpenAPI or frontend behavior. It accepts
+`LEGACY_ALIGNMENT_RUN_DEPRECATION_V1` in
+`docs/adr/ADR-legacy-alignment-run-deprecation.md`.
+
+Policy summary:
+
+- current role: `TEMPORARY_FRONTEND_COMPATIBILITY_ONLY`;
+- legacy external execution: `PROHIBITED`;
+- safe transition: `LOCAL_OR_DETERMINISTIC_ONLY`;
+- replacement: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`;
+- direct alias to `/api/alignment/verify`: `PROHIBITED`;
+- dual write: `PROHIBITED`;
+- post-cutover legacy data: retain read-only;
+- disable response after zero callers: HTTP 410 with
+  `LEGACY_ALIGNMENT_RUN_DEPRECATED`.
+
+Post-9C.4T status:
+
+- No new route module.
+- No additional extracted route.
+- `POST /api/alignment/run` remains in `backend/app.py`.
+- `backend/app.py` direct route count remains 131.
+- Extracted route modules remain 12.
+- Extracted routes remain 32.
+- `RouteCoreDependencies` remains 9 fields.
+
+Next recommended slice: disable legacy alignment external/live execution and
+credential flow while keeping the current frontend compatibility contract.
+Do not build the replacement document-alignment workflow in the same task.

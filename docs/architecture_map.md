@@ -106,6 +106,7 @@ This map describes the current implemented pilot architecture. It is not a futur
 - Task 9C.4O does not extract or modify `POST /api/admin/ai/prompts`. It characterizes the then app-owned prompt mutation callback in `docs/legacy_provider_prompt_mutation_boundary.md` and concludes `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`: at that point the POST route was an upsert keyed by `prompt_key` + `prompt_version`, committed directly, had no explicit rollback, and did not define uniqueness, optimistic locking, or active/default exclusivity policy.
 - Task 9C.4P still does not extract or modify `POST /api/admin/ai/prompts`. It accepts `LEGACY_PROMPT_MUTABLE_REVISION_V1` in `docs/adr/ADR-legacy-prompt-mutation-policy.md`: the current compatibility surface is a mutable key/version revision upsert, runtime required fields are `prompt_key` and `prompt_version`, small-pilot concurrency is single-writer last-commit-wins, active/default exclusivity is out of scope, and the next application service must own one commit plus explicit rollback.
 - Task 9C.4Q establishes `backend/services/legacy_provider_prompt_mutation.py`, which implements `LEGACY_PROMPT_MUTABLE_REVISION_V1`, owns seed integration, key/version lookup, mutable revision create/update, one commit, and explicit rollback. Task 9C.4R moves the remaining thin POST HTTP adapter into `backend/routes/legacy_provider_admin_configuration.py` while preserving the shared `admin_ai_prompts` endpoint.
+- Task 9C.4T accepts `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1` in `docs/adr/ADR-legacy-alignment-run-deprecation.md`. The legacy `POST /api/alignment/run` route is now classified as `TEMPORARY_FRONTEND_COMPATIBILITY_ONLY`; the next code slice is external execution containment, not direct service or route extraction.
 - The teacher analytics route module uses explicit `app.add_url_rule` registration to preserve the original endpoint names and URL/method contract. It does not introduce an app factory or Blueprint yet.
 - The student Concept Card route module also uses explicit `app.add_url_rule` registration. `services/student_concept_cards.py` still owns approved-only list/detail/state/feedback/export behavior, and `services/student_course_access.py` still owns membership and visibility gates.
 - The Concept Card review route module also uses explicit `app.add_url_rule` registration. `services/concept_card_review.py` still owns review queue serialization, state transitions, ReviewRecord creation, AuditRecord events, risk override handling, and reviewer assignment behavior. `services/course_review_policy.py` still owns CourseReviewPermission and CourseReviewPolicy gates, including two-step review.
@@ -202,8 +203,9 @@ Legacy alignment run:
 - It bypasses formal provider policy, provider preflight, request-id, audit,
   formal parser, and attach gates.
 - A live default legacy provider with a usable key can reach legacy transport
-  intent, so the next step is deprecation/compatibility policy, not direct
-  route extraction.
+  intent. Task 9C.4T now prohibits legacy external execution and requires
+  a replacement `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION` workflow before
+  frontend cutover, disabled response, and final removal.
 
 ## Permission Boundaries
 
