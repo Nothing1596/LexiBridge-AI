@@ -225,7 +225,9 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "provider_selection_factory" in legacy_provider_configuration_sig.parameters
     assert "default_prompts" in legacy_provider_configuration_sig.parameters
     assert "model_version_factory" in legacy_provider_configuration_sig.parameters
-    assert "prompt_post_handler" in legacy_provider_configuration_sig.parameters
+    assert "prompt_mutation_service" in legacy_provider_configuration_sig.parameters
+    assert "prompt_mutation_dependencies" in legacy_provider_configuration_sig.parameters
+    assert "prompt_post_handler" not in legacy_provider_configuration_sig.parameters
     assert "models" in legacy_provider_healthcheck_sig.parameters
     assert "serializers" in legacy_provider_healthcheck_sig.parameters
     assert "registry_seed_service" in legacy_provider_healthcheck_sig.parameters
@@ -439,6 +441,7 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
             (),
             {
                 "api_success": staticmethod(lambda data=None, message="Operation completed.": data),
+                "api_error": staticmethod(lambda error_code, message, status_code: ({"status": "error"}, status_code)),
                 "serialize_ai_provider_config": staticmethod(lambda provider: {}),
                 "serialize_ai_model_registry": staticmethod(lambda model: {}),
                 "serialize_prompt_template": staticmethod(lambda prompt: {}),
@@ -450,7 +453,17 @@ def test_route_core_can_be_reused_by_extracted_modules_without_duplicate_endpoin
         provider_selection_factory=lambda: object(),
         default_prompts=[],
         model_version_factory=lambda: "local-mvp-v1",
-        prompt_post_handler=lambda user: {},
+        prompt_mutation_service=lambda **kwargs: type(
+            "Result",
+            (),
+            {
+                "outcome": "created",
+                "prompt": object(),
+                "message": "Prompt saved.",
+                "error_code": None,
+            },
+        )(),
+        prompt_mutation_dependencies=object(),
     )
     register_legacy_provider_admin_healthcheck_routes(
         app,

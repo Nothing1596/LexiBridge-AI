@@ -246,11 +246,14 @@ def test_admin_ai_get_handlers_include_registry_seed_boundary():
     assert "seed_registry(user.id)" in configuration_source
     assert "registry_seed_service(" in configuration_source
     assert "ensure_ai_registry_seed" not in configuration_source
-    assert "prompt_post_handler(user)" in configuration_source
-    assert "def admin_ai_prompts_post_handler(user):" in source
+    assert "prompt_post_handler" not in configuration_source
+    assert "LegacyPromptMutationRequest.from_payload" in configuration_source
+    assert "prompt_mutation_service(" in configuration_source
+    assert "def admin_ai_prompts_post_handler(user):" not in source
     assert "register_legacy_provider_admin_configuration_routes(" in source
     assert "registry_seed_service=ensure_legacy_provider_registry_seed" in source
-    assert "prompt_post_handler=admin_ai_prompts_post_handler" in source
+    assert "prompt_mutation_service=execute_legacy_prompt_mutation" in source
+    assert "prompt_mutation_dependencies=legacy_prompt_mutation_dependencies()" in source
     module_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py").read_text(encoding="utf-8")
     assert "def admin_ai_health(" in module_source
     assert "registry_seed_service(owner_user_id=user.id)" in module_source

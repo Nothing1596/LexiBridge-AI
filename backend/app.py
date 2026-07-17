@@ -72,7 +72,6 @@ from services.legacy_provider_registry_seed import (
 )
 from services.legacy_provider_prompt_mutation import (
     LegacyPromptMutationDependencies,
-    LegacyPromptMutationRequest,
     execute_legacy_prompt_mutation,
 )
 from services.ai_provider import provider_from_selection
@@ -13617,20 +13616,6 @@ def admin_model_registry():
     })
 
 
-def admin_ai_prompts_post_handler(user):
-    data = request.get_json() or {}
-    mutation_request = LegacyPromptMutationRequest.from_payload(data, actor_user_id=user.id)
-    result = execute_legacy_prompt_mutation(
-        request=mutation_request,
-        dependencies=legacy_prompt_mutation_dependencies(),
-    )
-    if result.outcome == "validation_error":
-        return api_error(result.error_code, result.message, 400)
-    if result.outcome == "persistence_error":
-        return api_error(result.error_code, result.message, 500)
-    return api_success(serialize_prompt_template(result.prompt), result.message)
-
-
 register_legacy_provider_admin_configuration_routes(
     app,
     core=route_core,
@@ -13641,6 +13626,7 @@ register_legacy_provider_admin_configuration_routes(
     ),
     serializers=LegacyProviderAdminConfigurationSerializers(
         api_success=api_success,
+        api_error=api_error,
         serialize_ai_provider_config=serialize_ai_provider_config,
         serialize_ai_model_registry=serialize_ai_model_registry,
         serialize_prompt_template=serialize_prompt_template,
@@ -13655,7 +13641,8 @@ register_legacy_provider_admin_configuration_routes(
     provider_selection_factory=lambda: env_provider_selection(os.environ),
     default_prompts=DEFAULT_PROMPTS,
     model_version_factory=lambda: os.environ.get("MODEL_VERSION", "local-mvp-v1"),
-    prompt_post_handler=admin_ai_prompts_post_handler,
+    prompt_mutation_service=execute_legacy_prompt_mutation,
+    prompt_mutation_dependencies=legacy_prompt_mutation_dependencies(),
 )
 
 

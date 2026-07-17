@@ -468,11 +468,15 @@ Task 9C.4K extracts only the seed-backed legacy provider admin configuration GET
 - `GET /api/admin/ai/models`
 - `GET /api/admin/ai/prompts`
 
-The module registers the shared `/api/admin/ai/prompts` endpoint with `GET` and `POST` to preserve the Flask endpoint name `admin_ai_prompts`, but the POST mutation logic remains app-owned through the explicit `prompt_post_handler` callback. This keeps prompt mutation out of the route extraction slice while avoiding URL/method/endpoint drift.
+At the time of 9C.4K, the module registered the shared `/api/admin/ai/prompts` endpoint with `GET` and `POST` to preserve the Flask endpoint name `admin_ai_prompts`, while POST mutation logic remained app-owned through an explicit callback. Task 9C.4R later removed that callback and moved the thin POST adapter into the same route module.
 
 Register signature:
 
-`register_legacy_provider_admin_configuration_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, prompt_post_handler)`
+9C.4K register signature at extraction time used an app-owned POST mutation callback parameter. That transitional dependency is historical only; Task 9C.4R removed it and replaced it with explicit prompt mutation service dependencies in the same route module.
+
+Current post-9C.4R register signature shape:
+
+`register_legacy_provider_admin_configuration_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, prompt_mutation_service, prompt_mutation_dependencies)`
 
 The extracted GET views call `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency. They preserve admin-only access, OpenAPI/frontend URLs, legacy `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, seed flush/no-explicit-commit behavior, and no transport/live-probe behavior.
 
@@ -613,7 +617,7 @@ Confirmed registration:
 - `GET /api/admin/ai/prompts` and `POST /api/admin/ai/prompts` share one Flask rule.
 - The endpoint remains `admin_ai_prompts`.
 - GET is handled by `backend/routes/legacy_provider_admin_configuration.py`.
-- POST delegates through `prompt_post_handler(user)` to `backend/app.py::admin_ai_prompts_post_handler(user)`.
+- At audit time, POST delegated through an app-owned callback. Task 9C.4R later removed this callback.
 
 Prompt mutation snapshot at the time of the 9C.4O audit:
 
@@ -681,7 +685,7 @@ Boundary:
 - It does not import Flask, `backend.app`, route modules, provider adapter/transport, environment, credentials, or AuditRecord.
 - The app callback no longer directly queries, creates, updates, commits, or rolls back `PromptTemplate`.
 - GET `/api/admin/ai/prompts` remains handled by `backend/routes/legacy_provider_admin_configuration.py`.
-- POST `/api/admin/ai/prompts` still uses the shared `admin_ai_prompts` rule and app-owned callback; route extraction is still pending.
+- At the end of 9C.4Q, POST `/api/admin/ai/prompts` still used the shared `admin_ai_prompts` rule and app-owned callback; route extraction was still pending.
 
 Post-9C.4Q status:
 
@@ -693,4 +697,31 @@ Post-9C.4Q status:
 - Extracted routes remain 31.
 - `RouteCoreDependencies` remains 9 fields.
 
-Next recommended slice: extract only the now-thin `POST /api/admin/ai/prompts` HTTP adapter, remove the temporary configuration-module dependency on an app-owned callback, and preserve the shared `admin_ai_prompts` endpoint. Keep legacy `/api/alignment/run` separate.
+## Task 9C.4R Legacy Prompt Mutation POST Route
+
+Task 9C.4R moves the now-thin `POST /api/admin/ai/prompts` HTTP adapter into `backend/routes/legacy_provider_admin_configuration.py` and removes the temporary app-owned `admin_ai_prompts_post_handler` callback.
+
+Current registration:
+
+`register_legacy_provider_admin_configuration_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, prompt_mutation_service, prompt_mutation_dependencies)`
+
+Boundary:
+
+- GET and POST still share one Flask rule and endpoint: `/api/admin/ai/prompts`, `admin_ai_prompts`.
+- The POST branch constructs `LegacyPromptMutationRequest`, calls the injected prompt mutation service, and maps the typed result to the existing legacy response envelope.
+- The route module does not query or mutate `PromptTemplate` directly and does not commit or roll back.
+- `backend/services/legacy_provider_prompt_mutation.py` continues to own seed integration, key/version lookup, mutable revision upsert, one commit, and explicit rollback.
+- No schema, frontend, OpenAPI, policy, or service API change is included.
+
+Post-9C.4R status:
+
+- No new route module; the existing configuration route module now fully owns the shared prompt GET/POST HTTP adapter.
+- Newly fully extracted route in this slice: 1 (`POST /api/admin/ai/prompts`).
+- `backend/app.py` line count: 16,044.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 131.
+- Direct route count did not change because the POST method was already registered by the configuration route module as part of the shared GET/POST rule; this task removed the app-owned callback, not an `@app.route` decorator.
+- Extracted route modules remain 12.
+- Extracted routes: 32.
+- `RouteCoreDependencies` remains 9 fields.
+
+Next recommended slice: audit legacy `/api/alignment/run` as a separate execution-boundary task.

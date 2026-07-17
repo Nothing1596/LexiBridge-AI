@@ -99,23 +99,21 @@ def fetch_prompt(app_module, prompt_key, prompt_version="v1"):
     ).one()
 
 
-def test_prompt_mutation_service_integration_keeps_shared_route_and_thin_callback():
+def test_prompt_mutation_service_integration_keeps_shared_route_and_extracted_adapter():
     app_source = (ROOT / "backend" / "app.py").read_text(encoding="utf-8")
     route_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py").read_text(
         encoding="utf-8"
     )
-    callback_block = block_for_function(app_source, "admin_ai_prompts_post_handler")
-
-    assert "execute_legacy_prompt_mutation" in callback_block
-    assert "LegacyPromptMutationRequest.from_payload" in callback_block
-    assert "PromptTemplate.query" not in callback_block
-    assert "PromptTemplate(" not in callback_block
-    assert "db.session.commit" not in callback_block
-    assert "db.session.rollback" not in callback_block
-    assert len(callback_block.splitlines()) <= 50
+    with pytest.raises(AssertionError):
+        block_for_function(app_source, "admin_ai_prompts_post_handler")
 
     assert "if request.method == \"POST\":" in route_source
     post_index = route_source.index("if request.method == \"POST\":")
+    post_block = block_for_function(route_source, "admin_ai_prompts")
+    assert "LegacyPromptMutationRequest.from_payload" in post_block
+    assert "prompt_mutation_service(" in post_block
+    assert "db.session.commit" not in post_block
+    assert "db.session.rollback" not in post_block
     seed_index = route_source.index("seed_registry(user.id)", post_index)
     get_query_index = route_source.index("models.PromptTemplate.query.order_by", post_index)
     assert post_index < seed_index < get_query_index

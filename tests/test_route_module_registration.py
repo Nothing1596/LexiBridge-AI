@@ -256,6 +256,7 @@ def legacy_provider_configuration_dummy_dependencies(module):
         ),
         "serializers": module.LegacyProviderAdminConfigurationSerializers(
             api_success=lambda data=None, message="Operation completed.": data,
+            api_error=lambda error_code, message, status_code: ({"status": "error"}, status_code),
             serialize_ai_provider_config=lambda provider: {},
             serialize_ai_model_registry=lambda model: {},
             serialize_prompt_template=lambda prompt: {},
@@ -266,7 +267,17 @@ def legacy_provider_configuration_dummy_dependencies(module):
         "provider_selection_factory": lambda: object(),
         "default_prompts": [],
         "model_version_factory": lambda: "local-mvp-v1",
-        "prompt_post_handler": lambda user: {},
+        "prompt_mutation_service": lambda **kwargs: type(
+            "Result",
+            (),
+            {
+                "outcome": "created",
+                "prompt": object(),
+                "message": "Prompt saved.",
+                "error_code": None,
+            },
+        )(),
+        "prompt_mutation_dependencies": object(),
     }
 
 

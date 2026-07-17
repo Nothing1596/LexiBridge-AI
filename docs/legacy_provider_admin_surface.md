@@ -228,7 +228,7 @@ Task 9C.4K extracts only the seed-backed legacy configuration GET views into `ba
 
 The module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency and preserves the legacy compatibility contract: admin-only access, endpoint names, OpenAPI/frontend URLs, `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, and seed flush/no-explicit-commit behavior. Legitimate prompt metadata remains part of the prompt GET contract, while credential-like provider/model metadata remains excluded from responses.
 
-`POST /api/admin/ai/prompts` still keeps a thin `prompt_post_handler` callback in `backend/app.py` because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. Task 9C.4P defined the compatibility policy; Task 9C.4Q moved seed/upsert/commit/rollback into `backend/services/legacy_provider_prompt_mutation.py`. `/api/alignment/run` remains a separate future task, and legacy live transport probing is disabled.
+`POST /api/admin/ai/prompts` now uses the same `backend/routes/legacy_provider_admin_configuration.py` route module as the GET prompt listing. Task 9C.4P defined the compatibility policy, Task 9C.4Q moved seed/upsert/commit/rollback into `backend/services/legacy_provider_prompt_mutation.py`, and Task 9C.4R removed the temporary app-owned callback while preserving the shared `admin_ai_prompts` endpoint. `/api/alignment/run` remains a separate future task, and legacy live transport probing is disabled.
 
 ## Task 9C.4L Healthcheck Boundary Audit
 
@@ -253,9 +253,8 @@ Task 9C.4O does not migrate `POST /api/admin/ai/prompts` and does not change pro
 Confirmed contract:
 
 - GET and POST share the same Flask rule and endpoint: `/api/admin/ai/prompts`, `admin_ai_prompts`.
-- GET is implemented by `backend/routes/legacy_provider_admin_configuration.py`.
-- POST delegates through the explicit `prompt_post_handler(user)` callback to `backend/app.py::admin_ai_prompts_post_handler(user)`.
-- After 9C.4Q, the POST callback is a 12-line HTTP adapter that constructs `LegacyPromptMutationRequest`, calls `execute_legacy_prompt_mutation(...)`, and maps the typed result to the existing legacy envelope.
+- GET and POST are implemented by `backend/routes/legacy_provider_admin_configuration.py`.
+- After 9C.4R, the POST branch is a thin HTTP adapter that constructs `LegacyPromptMutationRequest`, calls the injected prompt mutation service, and maps the typed result to the existing legacy envelope.
 - The implementation requires only `prompt_key` and `prompt_version`; OpenAPI currently also marks `task_type` and `template_text` as required.
 - Success uses the legacy `api_success` envelope without `request_id`.
 - No prompt mutation `AuditRecord` is written.
@@ -268,4 +267,4 @@ Primary conclusion after 9C.4O: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRE
 
 Policy accepted after 9C.4P: `LEGACY_PROMPT_MUTABLE_REVISION_V1`, documented in `docs/adr/ADR-legacy-prompt-mutation-policy.md`.
 
-Task 9C.4Q extracted that prompt mutation application service. Next precise step: extract the thin POST route adapter while preserving the shared path/endpoint and removing the temporary configuration-module dependency on an app-owned callback.
+Task 9C.4Q extracted that prompt mutation application service. Task 9C.4R extracted the thin POST route adapter while preserving the shared path/endpoint and removing the temporary configuration-module dependency on an app-owned callback.

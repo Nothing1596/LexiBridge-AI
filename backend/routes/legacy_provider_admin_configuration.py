@@ -1,8 +1,7 @@
 """Legacy admin AI configuration route registration.
 
-This module moves the legacy seed-backed provider/model/prompt GET views. The
-prompt POST mutation remains an explicit app dependency so the shared legacy
-endpoint name stays stable without moving mutation behavior into this module.
+This module owns the shared legacy provider configuration rule, including the
+seed-backed GET views and the thin prompt mutation HTTP adapter.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from typing import Any, Callable, Iterable
 from flask import request
 
 from routes.shared import RouteCoreDependencies
+from services.legacy_provider_prompt_mutation import LegacyPromptMutationRequest
 
 
 ROUTE_MARKER = "legacy_provider_admin_configuration_routes"
@@ -46,6 +46,7 @@ class LegacyProviderAdminConfigurationSerializers:
     """Legacy response helpers passed explicitly from the Flask app."""
 
     api_success: Callable[..., Any]
+    api_error: Callable[[str, str, int], Any]
     serialize_ai_provider_config: Callable[[Any], dict[str, Any]]
     serialize_ai_model_registry: Callable[[Any], dict[str, Any]]
     serialize_prompt_template: Callable[[Any], dict[str, Any]]
@@ -63,7 +64,8 @@ def register_legacy_provider_admin_configuration_routes(
     provider_selection_factory: Callable[[], Any],
     default_prompts: Iterable[dict[str, Any]],
     model_version_factory: Callable[[], str],
-    prompt_post_handler: Callable[[Any], Any],
+    prompt_mutation_service: Callable[..., Any],
+    prompt_mutation_dependencies: Any,
 ) -> None:
     """Register legacy admin AI provider/model/prompt configuration routes."""
 
@@ -121,7 +123,20 @@ def register_legacy_provider_admin_configuration_routes(
         if error_response:
             return error_response
         if request.method == "POST":
-            return prompt_post_handler(user)
+            data = request.get_json() or {}
+            mutation_request = LegacyPromptMutationRequest.from_payload(data, actor_user_id=user.id)
+            result = prompt_mutation_service(
+                request=mutation_request,
+                dependencies=prompt_mutation_dependencies,
+            )
+            if result.outcome == "validation_error":
+                return serializers.api_error(result.error_code, result.message, 400)
+            if result.outcome == "persistence_error":
+                return serializers.api_error(result.error_code, result.message, 500)
+            return serializers.api_success(
+                serializers.serialize_prompt_template(result.prompt),
+                result.message,
+            )
         seed_registry(user.id)
         prompts = models.PromptTemplate.query.order_by(
             models.PromptTemplate.prompt_key.asc(),

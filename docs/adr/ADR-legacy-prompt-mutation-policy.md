@@ -6,11 +6,11 @@ Date: 2026-07-17
 
 Policy name: LEGACY_PROMPT_MUTABLE_REVISION_V1
 
-Implementation status after Task 9C.4Q: application service established in `backend/services/legacy_provider_prompt_mutation.py`; POST route extraction still pending.
+Implementation status after Task 9C.4R: application service established in `backend/services/legacy_provider_prompt_mutation.py`; POST route adapter extracted into `backend/routes/legacy_provider_admin_configuration.py`.
 
 ## Context
 
-`POST /api/admin/ai/prompts` is a legacy admin-only mutation endpoint. It shares the `/api/admin/ai/prompts` path and `admin_ai_prompts` Flask endpoint with the already extracted GET configuration view. The GET handler lives in `backend/routes/legacy_provider_admin_configuration.py`; the POST mutation is still implemented by the `admin_ai_prompts_post_handler(user)` callback in `backend/app.py`.
+`POST /api/admin/ai/prompts` is a legacy admin-only mutation endpoint. It shares the `/api/admin/ai/prompts` path and `admin_ai_prompts` Flask endpoint with the already extracted GET configuration view. Since Task 9C.4R, both GET and POST are handled by `backend/routes/legacy_provider_admin_configuration.py`; the POST adapter delegates to the prompt mutation application service.
 
 Task 9C.4O characterized the current behavior:
 
@@ -27,7 +27,7 @@ Task 9C.4O characterized the current behavior:
 
 Task 9C.4O.1 fixed provider-admin test state isolation before this policy was accepted, so the prompt mutation characterization can be run in different provider-admin test orders without sentinel state leaking between modules.
 
-Task 9C.4Q implements this ADR in a prompt mutation application service. The service preserves the legacy mutable-revision policy, owns one commit plus explicit rollback, and returns a typed result. It does not migrate the POST route, add immutable history, add uniqueness, add locking, change OpenAPI, or change frontend behavior.
+Task 9C.4Q implements this ADR in a prompt mutation application service. Task 9C.4R moves the thin POST adapter into the existing configuration route module. The service preserves the legacy mutable-revision policy, owns one commit plus explicit rollback, and returns a typed result. Neither task adds immutable history, uniqueness, locking, OpenAPI changes, or frontend changes.
 
 ## Decision
 
@@ -195,7 +195,7 @@ The prompt mutation application service implements this flow:
 8. rollback explicitly on any failure;
 9. return a typed result that lets the route preserve the legacy envelope and status.
 
-The seed service must not commit or roll back. The app callback no longer owns business commit/rollback after service extraction.
+The seed service must not commit or roll back. The route adapter does not own business commit/rollback after service extraction.
 
 The service must not:
 

@@ -1,9 +1,9 @@
 # Legacy Provider Prompt Mutation Boundary
 
-Task: 9C.4O through 9C.4Q
-Baseline commits: `6aabc47b3c9be79c7ea0e33efc6b2b52c1856878` for the boundary audit, `a8c4d1de12100fb128c3b54a25d5f218a122f012` for service extraction.
-Branches: `audit/legacy-provider-prompt-mutation-9c4o`, `refactor/legacy-prompt-mutation-service-9c4q`.
-Status: `POLICY_ACCEPTED`; `APPLICATION_SERVICE_ESTABLISHED`; `POST_ROUTE_NOT_YET_EXTRACTED`. The shared route, API contract, schema, frontend, and OpenAPI remain unchanged.
+Task: 9C.4O through 9C.4R
+Baseline commits: `6aabc47b3c9be79c7ea0e33efc6b2b52c1856878` for the boundary audit, `a8c4d1de12100fb128c3b54a25d5f218a122f012` for service extraction, and `98be550ac4783adb8c0a3d88f4f761a8441b926e` for route extraction.
+Branches: `audit/legacy-provider-prompt-mutation-9c4o`, `refactor/legacy-prompt-mutation-service-9c4q`, `refactor/legacy-prompt-mutation-route-9c4r`.
+Status: `POLICY_ACCEPTED`; `APPLICATION_SERVICE_ESTABLISHED`; `POST_ROUTE_EXTRACTED`. The shared route, API contract, schema, frontend, and OpenAPI remain unchanged.
 
 ## Scope
 
@@ -11,7 +11,7 @@ This audit covers only:
 
 - `POST /api/admin/ai/prompts`
 
-It does not migrate the route, extract a service, modify the shared prompt route module, or touch legacy `/api/alignment/run`.
+It does not change the approved policy, modify schema, modify OpenAPI, modify frontend behavior, or touch legacy `/api/alignment/run`.
 
 ## Registration Contract
 
@@ -22,10 +22,10 @@ It does not migrate the route, extract a service, modify the shared prompt route
 - Flask endpoint: `admin_ai_prompts`
 - Registration function: `register_legacy_provider_admin_configuration_routes(...)`
 - GET handler: local `admin_ai_prompts()` function in the configuration route module
-- POST handler: delegated to the explicit `prompt_post_handler(user)` callback
-- Callback implementation: `backend/app.py::admin_ai_prompts_post_handler(user)`
+- POST handler: local `admin_ai_prompts()` function in the configuration route module
+- POST service: `execute_legacy_prompt_mutation(...)`, passed explicitly as a route dependency
 
-`backend/app.py` no longer has an `@app.route("/api/admin/ai/prompts")` decorator. It still defines the POST mutation callback and passes it to the configuration route module to preserve the shared endpoint name.
+`backend/app.py` no longer has an `@app.route("/api/admin/ai/prompts")` decorator and no longer defines an `admin_ai_prompts_post_handler` callback. It registers the configuration route module with the prompt mutation service and frozen service dependencies so the shared endpoint name remains stable.
 
 ## HTTP Contract
 
@@ -55,20 +55,20 @@ The OpenAPI required field list is stricter than the implementation. The impleme
 
 ## Handler Location And Complexity
 
-Callback: `backend/app.py::admin_ai_prompts_post_handler(user)`.
+Adapter: `backend/routes/legacy_provider_admin_configuration.py::admin_ai_prompts()`.
 
-Current callback size after Task 9C.4Q: 12 lines.
+The POST branch remains a thin HTTP adapter inside the shared GET/POST route function.
 
-The callback is now a thin HTTP adapter:
+The adapter:
 
 - `request.get_json()`
 - `LegacyPromptMutationRequest.from_payload(...)`
-- `execute_legacy_prompt_mutation(...)`
-- `api_error(...)`
-- `api_success(...)`
-- `serialize_prompt_template(...)`
+- injected `prompt_mutation_service(...)`
+- injected `serializers.api_error(...)`
+- injected `serializers.api_success(...)`
+- injected `serializers.serialize_prompt_template(...)`
 
-The callback no longer queries, creates, updates, commits, or rolls back `PromptTemplate` directly.
+The route no longer depends on an app-owned callback and still does not query, create, update, commit, or roll back `PromptTemplate` directly.
 
 ## Mutation Operation Matrix
 
@@ -181,13 +181,13 @@ This preserves legacy behavior but leaves product policy undefined.
 
 ## Seed Behavior
 
-Task 9C.4Q moved POST seed ownership into the prompt mutation application service. The configuration route still runs seed for the GET prompt listing, but the POST branch delegates directly to the callback and the callback delegates to the service.
+Task 9C.4Q moved POST seed ownership into the prompt mutation application service. Task 9C.4R moved the thin POST HTTP adapter into the shared configuration route module. The configuration route still runs seed for GET prompt listing, while POST delegates directly to the mutation service.
 
 Current POST flow:
 
 1. Admin auth succeeds.
-2. `prompt_post_handler(user)` constructs `LegacyPromptMutationRequest`.
-3. `execute_legacy_prompt_mutation(...)` calls the seed dependency.
+2. The route constructs `LegacyPromptMutationRequest`.
+3. The injected `prompt_mutation_service(...)` calls the seed dependency.
 4. Missing provider/model/prompt defaults may be added and flushed.
 5. The service performs the prompt upsert.
 6. The service commits once.
@@ -369,7 +369,23 @@ The service implements:
 
 It must not implement immutable versions, unique constraints, OpenAPI-only required fields, active/default exclusivity, prompt mutation audit records, provider transport, or `/api/alignment/run` behavior.
 
-The POST route is still not extracted. It remains wired through the shared `admin_ai_prompts` route in `backend/routes/legacy_provider_admin_configuration.py` and the app callback in `backend/app.py`.
+## Task 9C.4R POST Route Extraction
+
+Task 9C.4R keeps the existing shared Flask rule in `backend/routes/legacy_provider_admin_configuration.py` and removes the temporary app callback.
+
+Current registration:
+
+`register_legacy_provider_admin_configuration_routes(app, *, core, models, serializers, registry_seed_service, seed_models, provider_selection_factory, default_prompts, model_version_factory, prompt_mutation_service, prompt_mutation_dependencies)`
+
+Current POST adapter responsibilities:
+
+1. admin authentication through `RouteCoreDependencies.require_current_user`;
+2. `request.get_json() or {}` with the existing malformed/empty body behavior;
+3. `LegacyPromptMutationRequest.from_payload(...)`;
+4. injected `prompt_mutation_service(request=..., dependencies=...)`;
+5. mapping typed service outcomes to the existing `api_error`/`api_success` envelopes.
+
+The route module still has no provider transport, credential resolver, prompt persistence logic, commit, rollback, or `AuditRecord` behavior.
 
 ## Final Conclusion
 
@@ -377,7 +393,9 @@ Task 9C.4O primary conclusion: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED
 
 Task 9C.4P policy conclusion: `LEGACY_PROMPT_MUTABLE_REVISION_V1` is accepted for the current local/small-pilot compatibility surface.
 
-Task 9C.4Q service conclusion: `APPLICATION_SERVICE_ESTABLISHED`; `POST_ROUTE_NOT_YET_EXTRACTED`.
+Task 9C.4Q service conclusion: `APPLICATION_SERVICE_ESTABLISHED`.
+
+Task 9C.4R route conclusion: `POST_ROUTE_EXTRACTED`.
 
 Reasoning:
 

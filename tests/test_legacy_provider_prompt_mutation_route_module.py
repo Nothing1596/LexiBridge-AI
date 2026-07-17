@@ -2,6 +2,7 @@ import ast
 import importlib.util
 import inspect
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from flask import Flask
@@ -11,6 +12,7 @@ from routes.shared import RouteCoreDependencies
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
+APP_PATH = ROOT / "backend" / "app.py"
 
 
 def load_module():
@@ -72,8 +74,9 @@ class DummyDb:
     session = object()
 
 
-def dummy_seed_service(**kwargs):
-    return object()
+@dataclass(frozen=True)
+class DummyMutationDependencies:
+    marker: str = "mutation-dependencies"
 
 
 def dummy_core_dependencies():
@@ -90,8 +93,41 @@ def dummy_core_dependencies():
     )
 
 
-def test_configuration_module_import_boundary_and_signature():
-    assert MODULE_PATH.exists()
+def dummy_serializers(module):
+    return module.LegacyProviderAdminConfigurationSerializers(
+        api_success=lambda data=None, message="Operation completed.": {
+            "status": "success",
+            "message": message,
+            "data": data or {},
+        },
+        api_error=lambda error_code, message, status_code: ({"status": "error", "error_code": error_code}, status_code),
+        serialize_ai_provider_config=lambda provider: {},
+        serialize_ai_model_registry=lambda model: {},
+        serialize_prompt_template=lambda prompt: {},
+        current_provider_metadata=lambda: {},
+    )
+
+
+def dummy_models(module):
+    return module.LegacyProviderAdminConfigurationModels(
+        AIProviderConfig=DummyAIProviderConfig,
+        AIModelRegistry=DummyAIModelRegistry,
+        PromptTemplate=DummyPromptTemplate,
+    )
+
+
+def target_route_summary(app):
+    return {
+        rule.rule: {
+            "endpoint": rule.endpoint,
+            "methods": {method for method in rule.methods if method not in {"HEAD", "OPTIONS"}},
+        }
+        for rule in app.url_map.iter_rules()
+        if rule.rule.startswith("/api/admin/ai/")
+    }
+
+
+def test_prompt_mutation_route_module_boundary_and_signature():
     imports = set(imports_for(MODULE_PATH))
     assert "backend.app" not in imports
     assert "app" not in imports
@@ -101,24 +137,22 @@ def test_configuration_module_import_boundary_and_signature():
     assert "requests" not in imports
     assert "httpx" not in imports
     assert not any("transport" in name for name in imports)
-    assert not any("ai_health" in name for name in imports)
-    assert not any("alignment_verification" in name for name in imports)
+    assert not any("adapter" in name for name in imports)
 
     source = MODULE_PATH.read_text(encoding="utf-8")
-    assert "ensure_ai_registry_seed" not in source
+    assert "prompt_post_handler" not in source
     assert "db.session.commit" not in source
     assert "db.session.rollback" not in source
-    assert "healthcheck_provider" not in source
-    assert "provider_from_selection" not in source
-    assert "AlignmentVerificationRun" not in source
-    assert "AlignmentProviderUsageRecord" not in source
-    assert "os.environ" not in source
+    assert "PromptTemplate(" not in source
+    assert "models.PromptTemplate.query.filter_by" not in source
+    assert "prompt_mutation_service(" in source
+    assert "LegacyPromptMutationRequest.from_payload" in source
+
+    app_source = APP_PATH.read_text(encoding="utf-8")
+    assert "def admin_ai_prompts_post_handler" not in app_source
+    assert "prompt_post_handler" not in app_source
 
     module = load_module()
-    assert hasattr(module, "register_legacy_provider_admin_configuration_routes")
-    assert hasattr(module, "LegacyProviderAdminConfigurationModels")
-    assert hasattr(module, "LegacyProviderAdminConfigurationSerializers")
-
     signature = inspect.signature(module.register_legacy_provider_admin_configuration_routes)
     assert "core" in signature.parameters
     assert "models" in signature.parameters
@@ -128,39 +162,19 @@ def test_configuration_module_import_boundary_and_signature():
     assert "prompt_mutation_dependencies" in signature.parameters
     assert "prompt_post_handler" not in signature.parameters
 
+    from routes.shared import RouteCoreDependencies as ImportedCoreDependencies
 
-def test_configuration_register_function_registers_expected_routes_and_is_idempotent():
+    assert len(ImportedCoreDependencies.__dataclass_fields__) == 9
+
+
+def test_prompt_mutation_route_module_registers_shared_get_post_rule_without_callback():
     module = load_module()
-    app = Flask("legacy-provider-admin-configuration-route-test")
-    models = module.LegacyProviderAdminConfigurationModels(
-        AIProviderConfig=DummyAIProviderConfig,
-        AIModelRegistry=DummyAIModelRegistry,
-        PromptTemplate=DummyPromptTemplate,
-    )
-    serializers = module.LegacyProviderAdminConfigurationSerializers(
-        api_success=lambda data=None, message="Operation completed.": {
-            "status": "success",
-            "message": message,
-            "data": data or {},
-        },
-        api_error=lambda error_code, message, status_code: ({"status": "error"}, status_code),
-        serialize_ai_provider_config=lambda provider: {},
-        serialize_ai_model_registry=lambda model: {},
-        serialize_prompt_template=lambda prompt: {},
-        current_provider_metadata=lambda: {},
-    )
+    app = Flask("legacy-prompt-mutation-route-module-test")
+    mutation_calls = []
 
-    module.register_legacy_provider_admin_configuration_routes(
-        app,
-        core=dummy_core_dependencies(),
-        models=models,
-        serializers=serializers,
-        registry_seed_service=dummy_seed_service,
-        seed_models=object(),
-        provider_selection_factory=lambda: object(),
-        default_prompts=[],
-        model_version_factory=lambda: "local-mvp-v1",
-        prompt_mutation_service=lambda **kwargs: type(
+    def mutation_service(*, request, dependencies):
+        mutation_calls.append((request, dependencies))
+        return type(
             "Result",
             (),
             {
@@ -169,17 +183,22 @@ def test_configuration_register_function_registers_expected_routes_and_is_idempo
                 "message": "Prompt saved.",
                 "error_code": None,
             },
-        )(),
-        prompt_mutation_dependencies=object(),
+        )()
+
+    module.register_legacy_provider_admin_configuration_routes(
+        app,
+        core=dummy_core_dependencies(),
+        models=dummy_models(module),
+        serializers=dummy_serializers(module),
+        registry_seed_service=lambda **kwargs: None,
+        seed_models=object(),
+        provider_selection_factory=lambda: object(),
+        default_prompts=[],
+        model_version_factory=lambda: "local-mvp-v1",
+        prompt_mutation_service=mutation_service,
+        prompt_mutation_dependencies=DummyMutationDependencies(),
     )
-    first = {
-        rule.rule: {
-            "endpoint": rule.endpoint,
-            "methods": {method for method in rule.methods if method not in {"HEAD", "OPTIONS"}},
-        }
-        for rule in app.url_map.iter_rules()
-        if rule.rule.startswith("/api/admin/ai/")
-    }
+    first = target_route_summary(app)
     assert first == {
         "/api/admin/ai/providers": {"endpoint": "admin_ai_providers", "methods": {"GET"}},
         "/api/admin/ai/models": {"endpoint": "admin_ai_models", "methods": {"GET"}},
@@ -189,31 +208,14 @@ def test_configuration_register_function_registers_expected_routes_and_is_idempo
     module.register_legacy_provider_admin_configuration_routes(
         app,
         core=dummy_core_dependencies(),
-        models=models,
-        serializers=serializers,
-        registry_seed_service=dummy_seed_service,
+        models=dummy_models(module),
+        serializers=dummy_serializers(module),
+        registry_seed_service=lambda **kwargs: None,
         seed_models=object(),
         provider_selection_factory=lambda: object(),
         default_prompts=[],
         model_version_factory=lambda: "local-mvp-v1",
-        prompt_mutation_service=lambda **kwargs: type(
-            "Result",
-            (),
-            {
-                "outcome": "created",
-                "prompt": object(),
-                "message": "Prompt saved.",
-                "error_code": None,
-            },
-        )(),
-        prompt_mutation_dependencies=object(),
+        prompt_mutation_service=mutation_service,
+        prompt_mutation_dependencies=DummyMutationDependencies(),
     )
-    second = {
-        rule.rule: {
-            "endpoint": rule.endpoint,
-            "methods": {method for method in rule.methods if method not in {"HEAD", "OPTIONS"}},
-        }
-        for rule in app.url_map.iter_rules()
-        if rule.rule.startswith("/api/admin/ai/")
-    }
-    assert second == first
+    assert target_route_summary(app) == first

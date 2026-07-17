@@ -142,7 +142,7 @@ def fetch_prompt(app_module, prompt_key, prompt_version):
     ).one()
 
 
-def test_prompt_mutation_registration_openapi_frontend_and_callback_contract(app_module):
+def test_prompt_mutation_registration_openapi_frontend_and_route_adapter_contract(app_module):
     actual = route_map(app_module)
     assert actual[(PROMPT_PATH, "GET")] == "admin_ai_prompts"
     assert actual[(PROMPT_PATH, "POST")] == "admin_ai_prompts"
@@ -158,11 +158,14 @@ def test_prompt_mutation_registration_openapi_frontend_and_callback_contract(app
     route_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py").read_text(
         encoding="utf-8"
     )
-    assert "def admin_ai_prompts_post_handler(user):" in app_source
-    assert "prompt_post_handler=admin_ai_prompts_post_handler" in app_source
+    assert "def admin_ai_prompts_post_handler(user):" not in app_source
+    assert "prompt_post_handler" not in app_source
     assert '@app.route("/api/admin/ai/prompts"' not in app_source
     assert "methods=[\"GET\", \"POST\"]" in route_source
-    assert "return prompt_post_handler(user)" in route_source
+    assert "prompt_post_handler" not in route_source
+    assert "LegacyPromptMutationRequest.from_payload" in route_source
+    assert "prompt_mutation_service(" in route_source
+    assert "prompt_mutation_dependencies" in route_source
 
     contract = yaml.safe_load((ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8"))
     prompt_contract = contract["paths"][PROMPT_PATH]
@@ -594,17 +597,22 @@ def test_prompt_mutation_commit_failure_explicitly_rolls_back_and_session_can_re
 
 def test_prompt_mutation_static_complexity_and_no_transport_boundary():
     app_source = (ROOT / "backend" / "app.py").read_text(encoding="utf-8")
+    route_source = (ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py").read_text(
+        encoding="utf-8"
+    )
     service_source = (ROOT / "backend" / "services" / "legacy_provider_prompt_mutation.py").read_text(
         encoding="utf-8"
     )
-    start = app_source.index("def admin_ai_prompts_post_handler(user):")
-    end = app_source.index("\n\nregister_legacy_provider_admin_configuration_routes(", start)
-    block = app_source[start:end]
-    assert len(block.splitlines()) == 12
+    assert "def admin_ai_prompts_post_handler" not in app_source
+    assert "prompt_post_handler" not in app_source
+    start = route_source.index("    def admin_ai_prompts():")
+    end = route_source.index("\n\n    app.add_url_rule(", start)
+    block = route_source[start:end]
+    assert len(block.splitlines()) <= 28
     assert "request.get_json() or {}" in block
     assert "LegacyPromptMutationRequest.from_payload" in block
-    assert "execute_legacy_prompt_mutation" in block
-    assert "PromptTemplate.query" not in block
+    assert "prompt_mutation_service(" in block
+    assert "models.PromptTemplate.query.filter_by" not in block
     assert "PromptTemplate(" not in block
     assert "db.session.commit()" not in block
     assert "db.session.rollback" not in block
