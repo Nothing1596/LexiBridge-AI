@@ -5,11 +5,25 @@ import urllib.request
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 import yaml
+
+from provider_admin_state_isolation import (
+    capture_provider_admin_state,
+    restore_provider_admin_state,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4N"
+
+
+@pytest.fixture(autouse=True)
+def isolate_provider_admin_state(app_module):
+    snapshot = capture_provider_admin_state(app_module)
+    restore_provider_admin_state(app_module, snapshot)
+    yield
+    restore_provider_admin_state(app_module, snapshot)
 
 
 def bearer(token):
