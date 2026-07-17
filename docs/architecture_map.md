@@ -192,6 +192,19 @@ Provider verification:
 - `mock_only`, `needs_review`, `failed`, or provider-specific failed statuses.
 - Mock/fake/replay/disabled runs never set production approval and never write `ConceptAlignmentCard.confidence_score`.
 
+Legacy alignment run:
+- `POST /api/alignment/run` is still an active frontend compatibility surface,
+  but Task 9C.4S characterizes it as a legacy execution path, not the formal
+  verification path.
+- It writes `AlignmentRun`, `BackgroundJob`, `TerminologyCard`, legacy
+  `UsageRecord`, and `AICallLog` paths rather than `AlignmentVerificationRun`
+  and `AlignmentProviderUsageRecord`.
+- It bypasses formal provider policy, provider preflight, request-id, audit,
+  formal parser, and attach gates.
+- A live default legacy provider with a usable key can reach legacy transport
+  intent, so the next step is deprecation/compatibility policy, not direct
+  route extraction.
+
 ## Permission Boundaries
 
 Student:

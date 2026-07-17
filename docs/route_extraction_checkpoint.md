@@ -724,4 +724,53 @@ Post-9C.4R status:
 - Extracted routes: 32.
 - `RouteCoreDependencies` remains 9 fields.
 
-Next recommended slice: audit legacy `/api/alignment/run` as a separate execution-boundary task.
+Next recommended slice: Task 9C.4S audits legacy `/api/alignment/run` as a separate execution-boundary task.
+
+## Task 9C.4S Legacy Alignment Run Boundary Audit
+
+Task 9C.4S does not extract a route and does not modify production behavior. It
+adds `tests/test_legacy_alignment_run_characterization.py` and
+`docs/legacy_alignment_run_boundary.md`.
+
+Findings:
+
+- `POST /api/alignment/run` remains in `backend/app.py`.
+- Route: `/api/alignment/run`
+- Method: `POST`
+- Endpoint: `run_alignment`
+- Handler location: `backend/app.py:10125` through `backend/app.py:10284`
+- Handler size: 160 lines including decorator, 159 function lines.
+- Active frontend caller: `frontend/index.html::runAlignmentForDocument`.
+- OpenAPI path exists, but does not describe the `sync` query parameter or all
+  three response shapes.
+- The legacy route writes `AlignmentRun`, `BackgroundJob`, `TerminologyCard`,
+  legacy `UsageRecord`, and `AICallLog` paths, not `AlignmentVerificationRun`.
+- The legacy route bypasses formal provider policy, provider preflight,
+  provider usage, request-id, audit, formal parser, and attach gates.
+- Async default requests queue an `AlignmentRun` and `BackgroundJob` without
+  immediate provider execution.
+- Sync direct/document requests use legacy evidence, prompt, card, and provider
+  helper paths.
+- A live default provider with a usable key can reach legacy `urllib` transport
+  intent before local fallback, so no real network is allowed in tests.
+- Repeated async requests are not idempotent and create distinct
+  `AlignmentRun`/`BackgroundJob` rows.
+- The handler contains commit points but no explicit rollback.
+
+Main conclusion:
+
+`DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`
+
+Post-9C.4S status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` direct route count remains 131.
+- Extracted route modules remain 12.
+- Extracted routes remain 32.
+- `RouteCoreDependencies` remains 9 fields.
+
+Next recommended slice: define a legacy `/api/alignment/run`
+deprecation/compatibility policy. Do not extract the current handler as an
+application service unchanged, and do not delete the endpoint before replacing
+or disabling the active frontend document-alignment flow.

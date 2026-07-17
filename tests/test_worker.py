@@ -1,4 +1,5 @@
 import json
+import uuid
 from io import BytesIO
 from pathlib import Path
 
@@ -43,13 +44,14 @@ def test_worker_processes_document_ingestion_job(client, app_module, teacher_tok
 
 
 def test_worker_processes_direct_alignment_job(client, app_module, teacher_token, test_course):
+    term = f"Worker Direct Alignment {uuid.uuid4().hex[:8]}"
     response = client.post(
         "/api/alignment/run",
         json={
             "scope_type": "course",
             "course_id": test_course.id,
-            "english_term": "Fourier Transform",
-            "courseware_sentence": "Fourier Transform converts a time-domain signal.",
+            "english_term": term,
+            "courseware_sentence": f"{term} converts a time-domain signal.",
         },
         headers=auth_header(teacher_token),
     )
