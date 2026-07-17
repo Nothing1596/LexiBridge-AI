@@ -70,6 +70,11 @@ from services.legacy_provider_registry_seed import (
     LegacyProviderRegistrySeedModels,
     ensure_legacy_provider_registry_seed,
 )
+from services.legacy_provider_prompt_mutation import (
+    LegacyPromptMutationDependencies,
+    LegacyPromptMutationRequest,
+    execute_legacy_prompt_mutation,
+)
 from services.ai_provider import provider_from_selection
 from services.prompt_registry import (
     DEFAULT_PROMPTS,
@@ -6983,6 +6988,32 @@ def ensure_ai_registry_seed(owner_user_id=0):
     }
 
 
+def legacy_prompt_mutation_seed_registry(owner_user_id=0):
+    return ensure_legacy_provider_registry_seed(
+        db=db,
+        models=LegacyProviderRegistrySeedModels(
+            AIProviderConfig=AIProviderConfig,
+            AIModelRegistry=AIModelRegistry,
+            PromptTemplate=PromptTemplate,
+        ),
+        selection=env_provider_selection(os.environ),
+        default_prompts=DEFAULT_PROMPTS,
+        current_time_text=current_time_text,
+        model_version=os.environ.get("MODEL_VERSION", "local-mvp-v1"),
+        owner_user_id=owner_user_id,
+    )
+
+
+def legacy_prompt_mutation_dependencies():
+    return LegacyPromptMutationDependencies(
+        db=db,
+        PromptTemplate=PromptTemplate,
+        current_time_text=current_time_text,
+        safe_json_loads=safe_json_loads,
+        seed_registry=legacy_prompt_mutation_seed_registry,
+    )
+
+
 def get_prompt_template(prompt_key, prompt_version=None, task_type=None):
     query = PromptTemplate.query.filter_by(prompt_key=prompt_key, is_active=True)
     if prompt_version:
@@ -13588,26 +13619,16 @@ def admin_model_registry():
 
 def admin_ai_prompts_post_handler(user):
     data = request.get_json() or {}
-    prompt_key = str(data.get("prompt_key", "")).strip()
-    prompt_version = str(data.get("prompt_version", "")).strip()
-    if not prompt_key or not prompt_version:
-        return api_error("VALIDATION_ERROR", "prompt_key and prompt_version are required.", 400)
-    prompt = PromptTemplate.query.filter_by(prompt_key=prompt_key, prompt_version=prompt_version).first()
-    if prompt is None:
-        prompt = PromptTemplate(prompt_key=prompt_key, prompt_version=prompt_version, created_at=current_time_text())
-        db.session.add(prompt)
-    prompt.task_type = str(data.get("task_type", prompt.task_type or prompt_key)).strip()
-    prompt.language = str(data.get("language", prompt.language or "bilingual")).strip()
-    prompt.template_text = str(data.get("template_text", prompt.template_text or "")).strip()
-    schema = data.get("json_schema", safe_json_loads(prompt.json_schema, {}))
-    prompt.json_schema = json.dumps(schema, ensure_ascii=False) if isinstance(schema, (dict, list)) else str(schema)
-    prompt.is_active = bool(data.get("is_active", prompt.is_active))
-    prompt.is_default = bool(data.get("is_default", prompt.is_default))
-    prompt.created_by = prompt.created_by or user.id
-    prompt.updated_at = current_time_text()
-    prompt.notes = str(data.get("notes", prompt.notes or "")).strip()
-    db.session.commit()
-    return api_success(serialize_prompt_template(prompt), "Prompt saved.")
+    mutation_request = LegacyPromptMutationRequest.from_payload(data, actor_user_id=user.id)
+    result = execute_legacy_prompt_mutation(
+        request=mutation_request,
+        dependencies=legacy_prompt_mutation_dependencies(),
+    )
+    if result.outcome == "validation_error":
+        return api_error(result.error_code, result.message, 400)
+    if result.outcome == "persistence_error":
+        return api_error(result.error_code, result.message, 500)
+    return api_success(serialize_prompt_template(result.prompt), result.message)
 
 
 register_legacy_provider_admin_configuration_routes(

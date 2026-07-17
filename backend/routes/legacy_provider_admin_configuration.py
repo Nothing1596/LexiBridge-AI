@@ -120,9 +120,9 @@ def register_legacy_provider_admin_configuration_routes(
         user, error_response = core.require_current_user({"admin"})
         if error_response:
             return error_response
-        seed_registry(user.id)
         if request.method == "POST":
             return prompt_post_handler(user)
+        seed_registry(user.id)
         prompts = models.PromptTemplate.query.order_by(
             models.PromptTemplate.prompt_key.asc(),
             models.PromptTemplate.id.desc(),

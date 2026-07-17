@@ -3,7 +3,7 @@
 Task: 9C.4H
 Baseline commit: `b9b5b0a53b5db6a89911bd659a9ec6c39b0c49dd`
 Branch: `audit/legacy-provider-admin-9c4h`
-Status: characterization and boundary audit. Task 9C.4I has since extracted only the legacy observability GET views: `/api/admin/ai/calls`, `/api/admin/ai/usage`, and `/api/admin/ai/health`. Task 9C.4K has since extracted the seed-backed legacy configuration GET views: `/api/admin/ai/providers`, `/api/admin/ai/models`, and `/api/admin/ai/prompts`. Task 9C.4N has since extracted the thin legacy healthcheck POST route while keeping live probe disabled. Task 9C.4O has since characterized prompt mutation and concluded `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`. Task 9C.4P accepts `LEGACY_PROMPT_MUTABLE_REVISION_V1` as the small-pilot compatibility policy for that mutation surface.
+Status: characterization and boundary audit. Task 9C.4I has since extracted only the legacy observability GET views: `/api/admin/ai/calls`, `/api/admin/ai/usage`, and `/api/admin/ai/health`. Task 9C.4K has since extracted the seed-backed legacy configuration GET views: `/api/admin/ai/providers`, `/api/admin/ai/models`, and `/api/admin/ai/prompts`. Task 9C.4N has since extracted the thin legacy healthcheck POST route while keeping live probe disabled. Task 9C.4O has since characterized prompt mutation and concluded `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`. Task 9C.4P accepts `LEGACY_PROMPT_MUTABLE_REVISION_V1` as the small-pilot compatibility policy for that mutation surface. Task 9C.4Q establishes the prompt mutation application service while leaving POST route extraction for a later task.
 
 ## Scope
 
@@ -18,7 +18,7 @@ Unknown legacy provider admin route count after scan: `0`.
 | `/api/admin/ai/providers` | GET | `admin_ai_providers` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted in `backend/routes/legacy_provider_admin_configuration.py` |
 | `/api/admin/ai/models` | GET | `admin_ai_models` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted in `backend/routes/legacy_provider_admin_configuration.py` |
 | `/api/admin/ai/prompts` | GET | `admin_ai_prompts` | module | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted in `backend/routes/legacy_provider_admin_configuration.py`; POST still app-owned mutation callback |
-| `/api/admin/ai/prompts` | POST | `admin_ai_prompts` | 22 callback lines | `LEGACY_MUTATION` | admin only | yes | no direct frontend call found | yes | upserts `PromptTemplate`, commits, can persist seed rows | no | implement service next using `LEGACY_PROMPT_MUTABLE_REVISION_V1` |
+| `/api/admin/ai/prompts` | POST | `admin_ai_prompts` | 12-line callback plus application service | `LEGACY_MUTATION_SERVICE_BACKED` | admin only | yes | no direct frontend call found | yes | service upserts `PromptTemplate`, owns seed + one commit + explicit rollback | no | route extraction next; policy remains `LEGACY_PROMPT_MUTABLE_REVISION_V1` |
 | `/api/admin/ai/calls` | GET | `admin_ai_calls` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | no | none | no | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | admin only | yes | yes | yes | seed flush only; no commit | no | extracted as local health view, not live probe |
@@ -77,7 +77,7 @@ It does not import Flask, `backend.app`, or route modules. It does not read cred
 | `GET /api/admin/ai/models` | yes | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | same as providers GET |
 | `GET /api/admin/ai/prompts` | yes | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | same as providers GET |
 | `GET /api/admin/ai/health` | yes, through `registry_seed_service` in the route module | yes, for missing seed rows | no explicit commit | request teardown/session cleanup | same as providers GET |
-| `POST /api/admin/ai/prompts` | yes | yes, for missing seed rows | yes, after prompt mutation succeeds | caller/session rollback on failure | prompt changes and any missing seed rows are persisted only on the existing POST commit |
+| `POST /api/admin/ai/prompts` | yes | yes, for missing seed rows | yes, through prompt mutation service | explicit service rollback on failure | prompt changes and any missing seed rows are persisted only on the service commit |
 | `POST /api/admin/ai/healthcheck` | yes | yes, for missing seed rows | yes, after health fields are updated | caller/session rollback on failure | provider health changes and any missing seed rows are persisted only on the existing POST commit |
 | `call_ai_task(...)` | yes | yes, for missing seed rows | owned by the caller path | owned by the caller path | unchanged from the historical helper |
 | `ai_selection_from_config(...)` fallback | yes | yes, for missing seed rows | owned by the caller path | owned by the caller path | unchanged from the historical helper |
@@ -175,7 +175,7 @@ All `/api/admin/ai/*` routes are present in `docs/openapi.yaml`.
 | `/api/admin/ai/providers` GET | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW`; keep legacy shim/API contract |
 | `/api/admin/ai/models` GET | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW`; keep legacy shim/API contract |
 | `/api/admin/ai/prompts` GET | `EXTRACTED_SEED_BACKED_CONFIGURATION_VIEW`; shared endpoint preserved while POST mutation remains separate |
-| `/api/admin/ai/prompts` POST | `LEGACY_PROMPT_MUTABLE_REVISION_V1` accepted after 9C.4P; service extraction is next, route extraction still later |
+| `/api/admin/ai/prompts` POST | `LEGACY_PROMPT_MUTABLE_REVISION_V1`; application service established after 9C.4Q; route extraction still later |
 | `/api/admin/ai/calls` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
 | `/api/admin/ai/usage` GET | `KEEP_AND_EXTRACT` inside legacy read-only view group |
 | `/api/admin/ai/health` GET | `KEEP_AND_EXTRACT` as local health view only |
@@ -188,7 +188,7 @@ All `/api/admin/ai/*` routes are present in `docs/openapi.yaml`.
 | `admin_ai_providers` | module | 1 | seed service, metadata, serializer | 1 | seed flush only | no | extracted seed-backed configuration view |
 | `admin_ai_models` | module | 1 | seed service, serializer | 1 | seed flush only | no | extracted seed-backed configuration view |
 | `admin_ai_prompts` GET | module | 1 | seed service, serializer | 1 | seed flush only | no | extracted seed-backed configuration view; POST callback remains app-owned |
-| `admin_ai_prompts` POST | 22 callback lines | 1 | seed callback, validation, serializer | 2 | commit | no | version/default/concurrency policy boundary first |
+| `admin_ai_prompts` POST | 12 callback lines plus service | 1 | prompt mutation service, serializer | 1 | service commit + explicit rollback | no | route extraction next; no immutable versioning or active/default workflow |
 | `admin_ai_calls` | 6 | 1 | serializer | 1 | 0 | no | read-only extraction candidate |
 | `admin_ai_usage` | 6 | 1 | summary serializer | 1 | 0 | no | read-only extraction candidate |
 | `admin_ai_health` | 7 | 1 | seed, serializer | 1 | seed flush only | no | read-only extraction candidate |
@@ -228,7 +228,7 @@ Task 9C.4K extracts only the seed-backed legacy configuration GET views into `ba
 
 The module calls `ensure_legacy_provider_registry_seed(...)` directly as an explicit domain dependency and preserves the legacy compatibility contract: admin-only access, endpoint names, OpenAPI/frontend URLs, `api_success` envelopes without `request_id`, no view `AuditRecord`, provider/model/prompt ordering, and seed flush/no-explicit-commit behavior. Legitimate prompt metadata remains part of the prompt GET contract, while credential-like provider/model metadata remains excluded from responses.
 
-`POST /api/admin/ai/prompts` still keeps its mutation logic in `backend/app.py` through an explicit `prompt_post_handler` callback because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. Task 9C.4P has defined the compatibility policy for the next service extraction: mutable key/version revision upsert, runtime-compatible validation, single-writer last-commit-wins, and future service-owned commit/explicit rollback. `/api/alignment/run` remains a separate future task, and legacy live transport probing is disabled.
+`POST /api/admin/ai/prompts` still keeps a thin `prompt_post_handler` callback in `backend/app.py` because Flask requires the shared `admin_ai_prompts` endpoint to remain stable for both methods. Task 9C.4P defined the compatibility policy; Task 9C.4Q moved seed/upsert/commit/rollback into `backend/services/legacy_provider_prompt_mutation.py`. `/api/alignment/run` remains a separate future task, and legacy live transport probing is disabled.
 
 ## Task 9C.4L Healthcheck Boundary Audit
 
@@ -255,11 +255,11 @@ Confirmed contract:
 - GET and POST share the same Flask rule and endpoint: `/api/admin/ai/prompts`, `admin_ai_prompts`.
 - GET is implemented by `backend/routes/legacy_provider_admin_configuration.py`.
 - POST delegates through the explicit `prompt_post_handler(user)` callback to `backend/app.py::admin_ai_prompts_post_handler(user)`.
-- The POST callback is a 22-line upsert over `PromptTemplate` keyed by `prompt_key` and `prompt_version`.
+- After 9C.4Q, the POST callback is a 12-line HTTP adapter that constructs `LegacyPromptMutationRequest`, calls `execute_legacy_prompt_mutation(...)`, and maps the typed result to the existing legacy envelope.
 - The implementation requires only `prompt_key` and `prompt_version`; OpenAPI currently also marks `task_type` and `template_text` as required.
 - Success uses the legacy `api_success` envelope without `request_id`.
 - No prompt mutation `AuditRecord` is written.
-- The callback has one explicit `db.session.commit()` and no explicit rollback.
+- The application service owns one commit and explicitly rolls back validation, seed, persistence, and commit failures.
 - A successful mutation can persist missing registry seed rows that were flushed earlier by the shared route module.
 - Legal prompt template content is stored as business data; unknown credential-like metadata is ignored and not persisted.
 - Versioning, active/default exclusivity, uniqueness, optimistic locking, and conflict behavior are not fully defined.
@@ -268,4 +268,4 @@ Primary conclusion after 9C.4O: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRE
 
 Policy accepted after 9C.4P: `LEGACY_PROMPT_MUTABLE_REVISION_V1`, documented in `docs/adr/ADR-legacy-prompt-mutation-policy.md`.
 
-Next precise step: extract a prompt mutation application service that preserves the accepted compatibility policy, moves transaction ownership out of the route callback, and adds explicit rollback. Do not migrate the POST route until that service exists.
+Task 9C.4Q extracted that prompt mutation application service. Next precise step: extract the thin POST route adapter while preserving the shared path/endpoint and removing the temporary configuration-module dependency on an app-owned callback.

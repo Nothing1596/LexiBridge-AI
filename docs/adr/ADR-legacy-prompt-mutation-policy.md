@@ -6,6 +6,8 @@ Date: 2026-07-17
 
 Policy name: LEGACY_PROMPT_MUTABLE_REVISION_V1
 
+Implementation status after Task 9C.4Q: application service established in `backend/services/legacy_provider_prompt_mutation.py`; POST route extraction still pending.
+
 ## Context
 
 `POST /api/admin/ai/prompts` is a legacy admin-only mutation endpoint. It shares the `/api/admin/ai/prompts` path and `admin_ai_prompts` Flask endpoint with the already extracted GET configuration view. The GET handler lives in `backend/routes/legacy_provider_admin_configuration.py`; the POST mutation is still implemented by the `admin_ai_prompts_post_handler(user)` callback in `backend/app.py`.
@@ -24,6 +26,8 @@ Task 9C.4O characterized the current behavior:
 - OpenAPI marks `task_type` and `template_text` as required even though runtime only requires `prompt_key` and `prompt_version`.
 
 Task 9C.4O.1 fixed provider-admin test state isolation before this policy was accepted, so the prompt mutation characterization can be run in different provider-admin test orders without sentinel state leaking between modules.
+
+Task 9C.4Q implements this ADR in a prompt mutation application service. The service preserves the legacy mutable-revision policy, owns one commit plus explicit rollback, and returns a typed result. It does not migrate the POST route, add immutable history, add uniqueness, add locking, change OpenAPI, or change frontend behavior.
 
 ## Decision
 
@@ -135,7 +139,7 @@ Rejected for service extraction. The current endpoint only assigns target-row fl
 
 ## Consequences
 
-The next service can be small and precise: it implements runtime-compatible validation, seed integration, key/version lookup, mutable revision upsert, one commit, explicit rollback, and a typed result.
+The application service created in Task 9C.4Q is small and precise: it implements runtime-compatible validation, seed integration, key/version lookup, mutable revision upsert, one commit, explicit rollback, and a typed result.
 
 The policy also keeps visible limitations:
 
@@ -179,7 +183,7 @@ These changes must not be bundled into the compatibility service extraction.
 
 ## Service Extraction Requirements
 
-The next prompt mutation application service must implement this flow:
+The prompt mutation application service implements this flow:
 
 1. seed registry defaults through the existing seed service;
 2. validate runtime-compatible required fields;
@@ -191,7 +195,7 @@ The next prompt mutation application service must implement this flow:
 8. rollback explicitly on any failure;
 9. return a typed result that lets the route preserve the legacy envelope and status.
 
-The seed service must not commit or roll back. The route must no longer own business commit/rollback after service extraction.
+The seed service must not commit or roll back. The app callback no longer owns business commit/rollback after service extraction.
 
 The service must not:
 
@@ -205,7 +209,7 @@ The service must not:
 
 ## Route Extraction Requirements
 
-The POST route must remain where it is until the application service exists and is covered by characterization tests.
+The POST route remains in the shared configuration route registration until the thin adapter is extracted in a later task.
 
 When the route is later moved:
 

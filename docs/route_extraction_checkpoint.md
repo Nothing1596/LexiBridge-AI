@@ -615,7 +615,7 @@ Confirmed registration:
 - GET is handled by `backend/routes/legacy_provider_admin_configuration.py`.
 - POST delegates through `prompt_post_handler(user)` to `backend/app.py::admin_ai_prompts_post_handler(user)`.
 
-Prompt mutation snapshot:
+Prompt mutation snapshot at the time of the 9C.4O audit:
 
 - The callback is 22 lines.
 - It performs one upsert operation on `PromptTemplate`.
@@ -638,3 +638,59 @@ Post-9C.4O status:
 Primary conclusion: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`.
 
 Next recommended slice: define prompt mutation policy before service extraction. The policy must cover validation, legal prompt template handling, version creation versus in-place update, active/default exclusivity, duplicate key/version handling, optimistic locking or accepted last-write-wins behavior, and explicit transaction rollback semantics. Only after that should a prompt mutation application service and route extraction be attempted. Keep legacy `/api/alignment/run` separate.
+
+## Task 9C.4P Legacy Prompt Mutation Policy
+
+Task 9C.4P does not extract a route and does not change production behavior. It adds `docs/adr/ADR-legacy-prompt-mutation-policy.md` and accepts `LEGACY_PROMPT_MUTABLE_REVISION_V1` for the current small pilot.
+
+Policy summary:
+
+- Identity remains `(prompt_key, prompt_version)`.
+- Missing key/version creates one `PromptTemplate`.
+- Existing key/version updates the first matching row in place.
+- `prompt_version` is client-provided and opaque.
+- No immutable history, uniqueness guarantee, optimistic locking, conflict status, or active/default exclusivity is provided.
+- Runtime contract remains the compatibility source; OpenAPI still overstates required fields.
+- The next service must own one commit and explicit rollback.
+
+Post-9C.4P status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` direct route count remains 131.
+- Extracted route modules remain 12.
+- Extracted routes remain 31.
+- `RouteCoreDependencies` remains 9 fields.
+
+## Task 9C.4Q Legacy Prompt Mutation Service
+
+Task 9C.4Q adds `backend/services/legacy_provider_prompt_mutation.py` and keeps `POST /api/admin/ai/prompts` in the existing shared route/callback registration.
+
+Service API:
+
+- `LEGACY_PROMPT_MUTATION_POLICY`
+- `LegacyPromptMutationRequest`
+- `LegacyPromptMutationDependencies`
+- `LegacyPromptMutationResult`
+- `execute_legacy_prompt_mutation(request=..., dependencies=...)`
+
+Boundary:
+
+- The service implements `LEGACY_PROMPT_MUTABLE_REVISION_V1`.
+- It owns runtime-compatible validation, seed integration, `(prompt_key, prompt_version)` lookup, mutable revision create/update, one commit, and explicit rollback.
+- It does not import Flask, `backend.app`, route modules, provider adapter/transport, environment, credentials, or AuditRecord.
+- The app callback no longer directly queries, creates, updates, commits, or rolls back `PromptTemplate`.
+- GET `/api/admin/ai/prompts` remains handled by `backend/routes/legacy_provider_admin_configuration.py`.
+- POST `/api/admin/ai/prompts` still uses the shared `admin_ai_prompts` rule and app-owned callback; route extraction is still pending.
+
+Post-9C.4Q status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` line count: 16,057.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 131.
+- Extracted route modules remain 12.
+- Extracted routes remain 31.
+- `RouteCoreDependencies` remains 9 fields.
+
+Next recommended slice: extract only the now-thin `POST /api/admin/ai/prompts` HTTP adapter, remove the temporary configuration-module dependency on an app-owned callback, and preserve the shared `admin_ai_prompts` endpoint. Keep legacy `/api/alignment/run` separate.

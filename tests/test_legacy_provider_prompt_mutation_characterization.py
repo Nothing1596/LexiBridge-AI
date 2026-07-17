@@ -9,10 +9,25 @@ from uuid import uuid4
 import pytest
 import yaml
 
+from provider_admin_state_isolation import (
+    assert_provider_admin_state_clean,
+    capture_provider_admin_state,
+    restore_provider_admin_state,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SENTINEL = "LEXIBRIDGE_SENTINEL_SECRET_9C4O"
 PROMPT_PATH = "/api/admin/ai/prompts"
+
+
+@pytest.fixture(autouse=True)
+def isolate_provider_admin_state(app_module):
+    snapshot = capture_provider_admin_state(app_module)
+    restore_provider_admin_state(app_module, snapshot)
+    yield
+    restore_provider_admin_state(app_module, snapshot)
+    assert_provider_admin_state_clean(app_module)
 
 
 def bearer(token):
@@ -535,7 +550,7 @@ def test_prompt_mutation_updates_same_version_in_place_and_does_not_manage_defau
         assert len([prompt for prompt in defaults if prompt.prompt_key in {prompt_key, f"{prompt_key}_other"}]) == 2
 
 
-def test_prompt_mutation_commit_failure_has_no_explicit_rollback_and_session_can_recover(
+def test_prompt_mutation_commit_failure_explicitly_rolls_back_and_session_can_recover(
     app_module,
     client,
     admin_token,
@@ -555,10 +570,14 @@ def test_prompt_mutation_commit_failure_has_no_explicit_rollback_and_session_can
         patched.setattr(app_module.db.session, "commit", fail_commit)
         patched.setattr(app_module.db.session, "rollback", track_rollback)
         with no_exception_propagation(app_module):
-            response = client.post(PROMPT_PATH, json=prompt_payload(prompt_key), headers=bearer(admin_token))
+                response = client.post(PROMPT_PATH, json=prompt_payload(prompt_key), headers=bearer(admin_token))
 
     assert response.status_code == 500
-    assert rollback_calls == []
+    body = response.get_json()
+    assert body["status"] == "error"
+    assert body["error_code"] == "INTERNAL_ERROR"
+    assert body["message"] == "Internal server error."
+    assert rollback_calls == ["rollback"]
 
     # Recover the scoped session after the intentionally blocked commit.
     with app_module.app.app_context():
@@ -575,16 +594,28 @@ def test_prompt_mutation_commit_failure_has_no_explicit_rollback_and_session_can
 
 def test_prompt_mutation_static_complexity_and_no_transport_boundary():
     app_source = (ROOT / "backend" / "app.py").read_text(encoding="utf-8")
+    service_source = (ROOT / "backend" / "services" / "legacy_provider_prompt_mutation.py").read_text(
+        encoding="utf-8"
+    )
     start = app_source.index("def admin_ai_prompts_post_handler(user):")
     end = app_source.index("\n\nregister_legacy_provider_admin_configuration_routes(", start)
     block = app_source[start:end]
-    assert len(block.splitlines()) == 22
+    assert len(block.splitlines()) == 12
     assert "request.get_json() or {}" in block
-    assert "PromptTemplate.query.filter_by(prompt_key=prompt_key, prompt_version=prompt_version).first()" in block
-    assert "db.session.add(prompt)" in block
-    assert "db.session.commit()" in block
+    assert "LegacyPromptMutationRequest.from_payload" in block
+    assert "execute_legacy_prompt_mutation" in block
+    assert "PromptTemplate.query" not in block
+    assert "PromptTemplate(" not in block
+    assert "db.session.commit()" not in block
     assert "db.session.rollback" not in block
     assert "AuditRecord" not in block
     assert "healthcheck_provider" not in block
     assert ".call(" not in block
     assert "provider_from_selection" not in block
+
+    assert "PromptTemplate.query.filter_by(" in service_source
+    assert "dependencies.db.session.commit()" in service_source
+    assert "dependencies.db.session.rollback()" in service_source
+    assert "AuditRecord" not in service_source
+    assert "healthcheck_provider" not in service_source
+    assert "provider_from_selection" not in service_source

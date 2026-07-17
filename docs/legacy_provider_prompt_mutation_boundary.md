@@ -1,9 +1,9 @@
 # Legacy Provider Prompt Mutation Boundary
 
-Task: 9C.4O
-Baseline commit: `6aabc47b3c9be79c7ea0e33efc6b2b52c1856878`
-Branch: `audit/legacy-provider-prompt-mutation-9c4o`
-Status: characterization and boundary audit only. No production route, service, schema, frontend, or OpenAPI behavior was changed.
+Task: 9C.4O through 9C.4Q
+Baseline commits: `6aabc47b3c9be79c7ea0e33efc6b2b52c1856878` for the boundary audit, `a8c4d1de12100fb128c3b54a25d5f218a122f012` for service extraction.
+Branches: `audit/legacy-provider-prompt-mutation-9c4o`, `refactor/legacy-prompt-mutation-service-9c4q`.
+Status: `POLICY_ACCEPTED`; `APPLICATION_SERVICE_ESTABLISHED`; `POST_ROUTE_NOT_YET_EXTRACTED`. The shared route, API contract, schema, frontend, and OpenAPI remain unchanged.
 
 ## Scope
 
@@ -57,26 +57,18 @@ The OpenAPI required field list is stricter than the implementation. The impleme
 
 Callback: `backend/app.py::admin_ai_prompts_post_handler(user)`.
 
-Current callback size: 22 lines.
+Current callback size after Task 9C.4Q: 12 lines.
 
-Direct model access:
-
-- `PromptTemplate`
-
-Direct helper/service calls:
+The callback is now a thin HTTP adapter:
 
 - `request.get_json()`
+- `LegacyPromptMutationRequest.from_payload(...)`
+- `execute_legacy_prompt_mutation(...)`
 - `api_error(...)`
-- `PromptTemplate.query.filter_by(...)`
-- `current_time_text()`
-- `safe_json_loads(...)`
-- `json.dumps(...)`
-- `db.session.add(...)`
-- `db.session.commit()`
 - `api_success(...)`
 - `serialize_prompt_template(...)`
 
-The callback contains one explicit commit and no explicit rollback.
+The callback no longer queries, creates, updates, commits, or rolls back `PromptTemplate` directly.
 
 ## Mutation Operation Matrix
 
@@ -120,7 +112,7 @@ The effective natural key is `prompt_key` + `prompt_version`, enforced by lookup
 
 ## Validation
 
-Current validation is route-callback local and minimal:
+Current validation is service-owned and intentionally minimal:
 
 - `prompt_key` is stringified, stripped, and required.
 - `prompt_version` is stringified, stripped, and required.
@@ -189,15 +181,18 @@ This preserves legacy behavior but leaves product policy undefined.
 
 ## Seed Behavior
 
-The shared configuration route runs the registry seed before delegating POST to the app callback:
+Task 9C.4Q moved POST seed ownership into the prompt mutation application service. The configuration route still runs seed for the GET prompt listing, but the POST branch delegates directly to the callback and the callback delegates to the service.
+
+Current POST flow:
 
 1. Admin auth succeeds.
-2. `ensure_legacy_provider_registry_seed(...)` is called by the route module.
-3. Missing provider/model/prompt defaults may be added and flushed.
-4. `prompt_post_handler(user)` performs the prompt upsert.
-5. The callback commits.
+2. `prompt_post_handler(user)` constructs `LegacyPromptMutationRequest`.
+3. `execute_legacy_prompt_mutation(...)` calls the seed dependency.
+4. Missing provider/model/prompt defaults may be added and flushed.
+5. The service performs the prompt upsert.
+6. The service commits once.
 
-The seed service does not own commit or rollback. A successful prompt mutation commit can also persist missing seed rows flushed earlier in the same request.
+The seed service still does not own commit or rollback. The prompt mutation service owns the one mutation commit and explicit rollback for validation, seed, persistence, and commit failures.
 
 ## Transaction Matrix
 
@@ -205,14 +200,14 @@ The seed service does not own commit or rollback. A successful prompt mutation c
 |---|---:|---:|---:|---:|---|
 | unauthorized | no | no | no | no | none |
 | non-admin | no | no | no | no | none |
-| malformed JSON | possible after admin auth | no | no | no | uncommitted seed cleanup remains owned by request/session lifecycle |
-| empty JSON object | possible after admin auth | no | no | no | uncommitted seed cleanup remains owned by request/session lifecycle |
-| non-object JSON | possible after admin auth | no stable mutation | no | no | current error path returns 500 under no-propagation testing |
-| create | yes | create one `PromptTemplate` if missing | yes | no | seed plus prompt can persist |
-| update same key/version | yes | update existing `PromptTemplate` in place | yes | no | seed plus prompt update can persist |
-| commit failure | yes | pending prompt mutation may exist in session | attempted | no | no handler-level rollback; caller/test must recover scoped session |
+| malformed JSON | no service call | no | no | no | Flask JSON parsing returns the existing 400 behavior |
+| empty JSON object | no | no | no | yes | no seed or prompt persistence |
+| non-object JSON | no stable mutation | no | no | no service rollback | current error path returns 500 under no-propagation testing before a typed request exists |
+| create | yes | create one `PromptTemplate` if missing | yes | yes on failure | seed plus prompt persist only on service commit |
+| update same key/version | yes | update existing `PromptTemplate` in place | yes | yes on failure | seed plus prompt update persist only on service commit |
+| commit failure | yes | pending prompt mutation is rolled back | attempted | yes | no prompt row remains; scoped session can recover |
 
-The absence of explicit rollback is current legacy behavior and must not be copied into future service design without deliberate policy.
+The service now implements the Task 9C.4P transaction requirement: one commit on success and explicit rollback on failure.
 
 ## Write-set
 
@@ -304,7 +299,7 @@ Current risks:
 - Duplicate active prompts can exist.
 - There is no optimistic locking or version precondition.
 - Seed lookup-before-create has the same race profile documented for the seed service.
-- Commit failure has no local rollback in the callback.
+- Commit failure now rolls back in the application service, but duplicate/concurrency risks remain.
 
 These risks do not block characterization, but they do block treating this as a simple route-move task.
 
@@ -317,8 +312,8 @@ Future work should separate:
 | HTTP adapter | auth, JSON parsing, legacy response envelope |
 | Prompt validation | required fields, data coercion, JSON schema/template validation |
 | Prompt version/default policy | create/update/version semantics, active/default exclusivity if required |
-| Prompt mutation service | seed integration, lookup, mutation plan, persistence orchestration |
-| Transaction owner | explicit commit/rollback behavior |
+| Prompt mutation service | established in `backend/services/legacy_provider_prompt_mutation.py`; owns seed integration, lookup, mutation plan, persistence orchestration |
+| Transaction owner | application service now owns one commit and explicit rollback |
 | Response mapping | legacy envelope and serializer compatibility |
 
 ## Task 9C.4P Policy Decision
@@ -345,26 +340,36 @@ The policy explicitly treats `POST /api/admin/ai/prompts` as a legacy mutable re
 | Active/default | Direct row assignment is preserved if fields are supplied. Active/default exclusivity, archive, activate, and deactivate workflows are out of scope. | Define active/default product semantics and enforce with constraints or transactional updates if required. |
 | Validation | Runtime compatibility source: `prompt_key` and `prompt_version` are required; other fields follow current fallback/coercion behavior; unknown fields are ignored. | Versioned API contract with stricter validation, length limits, schema validation, and documented error codes. |
 | OpenAPI | Runtime contract wins for compatibility. OpenAPI currently overstates required fields by requiring `task_type` and `template_text`; this task does not change OpenAPI. | Align OpenAPI with the chosen production API in a separate contract task. |
-| Transaction | Current callback owns one direct commit. Next service must own the transaction instead of the route. | Application service with explicit transaction boundaries and well-defined retry/conflict behavior. |
-| Rollback | Current callback has no explicit rollback. Next service must add explicit rollback while preserving external success/error contracts. | Standardized rollback and error mapping across mutation services. |
+| Transaction | Application service owns one commit for seed plus prompt mutation; the callback no longer commits. | Application service with explicit transaction boundaries and well-defined retry/conflict behavior. |
+| Rollback | Application service explicitly rolls back validation, seed, persistence, and commit failures while preserving external error contracts. | Standardized rollback and error mapping across mutation services. |
 | Audit | No `AuditRecord` is written today. | Add safe prompt mutation audit events only through a separate audit contract task. |
 | Migration | No schema change; SQLite/additive migration limitations remain. | Formal migration framework before adding uniqueness, immutable history, locking tokens, or active/default constraints. |
 
-## Service Extraction Input
+## Task 9C.4Q Application Service
 
-The next safe implementation task is `Task 9C.4Q: Legacy Prompt Mutation Application Service`.
+Task 9C.4Q establishes `backend/services/legacy_provider_prompt_mutation.py`.
 
-That service should implement:
+Public API:
 
-1. registry seed through the existing seed service;
-2. runtime-compatible validation for `prompt_key` and `prompt_version`;
+- `LEGACY_PROMPT_MUTATION_POLICY = "LEGACY_PROMPT_MUTABLE_REVISION_V1"`
+- `LegacyPromptMutationRequest.from_payload(payload, actor_user_id=...)`
+- `LegacyPromptMutationDependencies(db, PromptTemplate, current_time_text, safe_json_loads, seed_registry)`
+- `LegacyPromptMutationResult(...)`
+- `execute_legacy_prompt_mutation(request=..., dependencies=...)`
+
+The service implements:
+
+1. runtime-compatible validation for `prompt_key` and `prompt_version`;
+2. registry seed through the injected seed callable;
 3. lookup by `(prompt_key, prompt_version)`;
 4. mutable revision create/update;
 5. exactly one commit on success;
-6. explicit rollback on failure;
-7. a typed result that lets the route preserve the legacy envelope.
+6. explicit rollback on validation, seed, persistence, or commit failure;
+7. a typed result that lets the callback preserve the legacy envelope.
 
 It must not implement immutable versions, unique constraints, OpenAPI-only required fields, active/default exclusivity, prompt mutation audit records, provider transport, or `/api/alignment/run` behavior.
+
+The POST route is still not extracted. It remains wired through the shared `admin_ai_prompts` route in `backend/routes/legacy_provider_admin_configuration.py` and the app callback in `backend/app.py`.
 
 ## Final Conclusion
 
@@ -372,13 +377,15 @@ Task 9C.4O primary conclusion: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED
 
 Task 9C.4P policy conclusion: `LEGACY_PROMPT_MUTABLE_REVISION_V1` is accepted for the current local/small-pilot compatibility surface.
 
+Task 9C.4Q service conclusion: `APPLICATION_SERVICE_ESTABLISHED`; `POST_ROUTE_NOT_YET_EXTRACTED`.
+
 Reasoning:
 
 - The current operation is an upsert, not a fully specified create/update/version workflow.
 - Versioning is client-supplied and updates are in-place.
 - Default and active flags are not globally managed.
 - No uniqueness or optimistic locking policy is present for prompt key/version updates.
-- Commit failure has no handler-level rollback.
+- Commit failure now has service-level rollback.
 - OpenAPI required fields are stricter than the actual implementation.
 
-The next safe step is not route extraction. The next task should extract an application service that implements the accepted mutable-revision policy exactly, including explicit rollback, without adding production-only versioning or concurrency features.
+The next safe step is route extraction of the now-thin POST HTTP adapter. That task must preserve the shared `/api/admin/ai/prompts` path and `admin_ai_prompts` endpoint while removing the configuration route module's temporary dependency on an app-owned mutation callback.
