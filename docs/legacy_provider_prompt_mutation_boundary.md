@@ -124,6 +124,7 @@ Current validation is route-callback local and minimal:
 
 - `prompt_key` is stringified, stripped, and required.
 - `prompt_version` is stringified, stripped, and required.
+- JSON `null` is stringified to `"None"` and accepted for `prompt_key` or `prompt_version`; this is a legacy runtime quirk, not a recommended production validation rule.
 - `task_type` is stringified and stripped; fallback is existing `task_type` or `prompt_key`.
 - `language` is stringified and stripped; fallback is existing `language` or `bilingual`.
 - `template_text` is stringified and stripped; fallback is existing template text or empty string.
@@ -320,9 +321,56 @@ Future work should separate:
 | Transaction owner | explicit commit/rollback behavior |
 | Response mapping | legacy envelope and serializer compatibility |
 
+## Task 9C.4P Policy Decision
+
+Task 9C.4P accepts `docs/adr/ADR-legacy-prompt-mutation-policy.md` as the compatibility policy for the current small pilot.
+
+Policy name: `LEGACY_PROMPT_MUTABLE_REVISION_V1`.
+
+Status: `ACCEPTED_FOR_SMALL_PILOT`.
+
+The policy explicitly treats `POST /api/admin/ai/prompts` as a legacy mutable revision upsert, not as production-grade immutable prompt version control.
+
+## Compatibility Policy Matrix
+
+| Concern | Current compatibility policy | Future production policy |
+|---|---|---|
+| Identity | `(prompt_key, prompt_version)` after runtime stringification and stripping. Matching is case-sensitive. Provider, model, task type, language, active, and default are not part of identity. | Formalize identity in migration-backed schema, likely with a unique constraint or dedicated prompt identity/version tables. |
+| Version mutability | `LEGACY_MUTABLE_REVISION`: the client supplies an opaque non-empty `prompt_version`; same key/version can be updated in place. | Immutable versions or explicit revision records, with content changes requiring a new version or an explicit revision operation. |
+| Upsert | Missing key/version creates one `PromptTemplate`; existing key/version updates the first matching row in place. | Separate create/update/new-version operations with explicit conflict behavior. |
+| History | No immutable history is generated; overwritten content is not queryable through this endpoint. | Historical version query semantics and retained immutable revision rows. |
+| Duplicate prevention | Sequential repeated requests should not create a second row, but true concurrent creation is not protected by schema. Existing duplicate logical rows are resolved by the current first-row lookup behavior. | `unique(prompt_key, prompt_version)` or equivalent conflict-safe identity enforcement. |
+| Concurrency | `SINGLE_WRITER_LAST_COMMIT_WINS`; operationally assumes one admin editor in the small pilot. | Multi-admin concurrency policy with row-version tokens, ETag/If-Match, or equivalent optimistic locking. |
+| Lost update | Lost updates are possible; the last successful commit determines stored content. | Detect stale writes and return a conflict response such as HTTP 409. |
+| Active/default | Direct row assignment is preserved if fields are supplied. Active/default exclusivity, archive, activate, and deactivate workflows are out of scope. | Define active/default product semantics and enforce with constraints or transactional updates if required. |
+| Validation | Runtime compatibility source: `prompt_key` and `prompt_version` are required; other fields follow current fallback/coercion behavior; unknown fields are ignored. | Versioned API contract with stricter validation, length limits, schema validation, and documented error codes. |
+| OpenAPI | Runtime contract wins for compatibility. OpenAPI currently overstates required fields by requiring `task_type` and `template_text`; this task does not change OpenAPI. | Align OpenAPI with the chosen production API in a separate contract task. |
+| Transaction | Current callback owns one direct commit. Next service must own the transaction instead of the route. | Application service with explicit transaction boundaries and well-defined retry/conflict behavior. |
+| Rollback | Current callback has no explicit rollback. Next service must add explicit rollback while preserving external success/error contracts. | Standardized rollback and error mapping across mutation services. |
+| Audit | No `AuditRecord` is written today. | Add safe prompt mutation audit events only through a separate audit contract task. |
+| Migration | No schema change; SQLite/additive migration limitations remain. | Formal migration framework before adding uniqueness, immutable history, locking tokens, or active/default constraints. |
+
+## Service Extraction Input
+
+The next safe implementation task is `Task 9C.4Q: Legacy Prompt Mutation Application Service`.
+
+That service should implement:
+
+1. registry seed through the existing seed service;
+2. runtime-compatible validation for `prompt_key` and `prompt_version`;
+3. lookup by `(prompt_key, prompt_version)`;
+4. mutable revision create/update;
+5. exactly one commit on success;
+6. explicit rollback on failure;
+7. a typed result that lets the route preserve the legacy envelope.
+
+It must not implement immutable versions, unique constraints, OpenAPI-only required fields, active/default exclusivity, prompt mutation audit records, provider transport, or `/api/alignment/run` behavior.
+
 ## Final Conclusion
 
-Primary conclusion: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`.
+Task 9C.4O primary conclusion: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`.
+
+Task 9C.4P policy conclusion: `LEGACY_PROMPT_MUTABLE_REVISION_V1` is accepted for the current local/small-pilot compatibility surface.
 
 Reasoning:
 
@@ -333,4 +381,4 @@ Reasoning:
 - Commit failure has no handler-level rollback.
 - OpenAPI required fields are stricter than the actual implementation.
 
-The next safe step is not route extraction. The next task should define the prompt mutation policy boundary for validation, version/default behavior, concurrency/conflict handling, and transaction ownership, then extract an application service that preserves the legacy HTTP contract.
+The next safe step is not route extraction. The next task should extract an application service that implements the accepted mutable-revision policy exactly, including explicit rollback, without adding production-only versioning or concurrency features.

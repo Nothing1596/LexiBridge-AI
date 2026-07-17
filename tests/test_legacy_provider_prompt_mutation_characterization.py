@@ -310,6 +310,163 @@ def test_prompt_mutation_upsert_write_set_template_and_secret_boundary(
             assert after[key] == before[key]
 
 
+def test_prompt_mutation_policy_runtime_required_identity_and_mutable_revision(
+    app_module,
+    client,
+    admin_token,
+    monkeypatch,
+):
+    no_network(monkeypatch)
+    prompt_key = f"legacy_admin_9c4p_identity_{uuid4().hex}"
+    prompt_version = f"release/{uuid4().hex[:8]}"
+
+    with app_module.app.app_context():
+        app_module.PromptTemplate.query.filter_by(prompt_key=prompt_key).delete()
+        app_module.db.session.commit()
+        before_audit_count = app_module.AuditRecord.query.count()
+
+    minimal_create = client.post(
+        PROMPT_PATH,
+        json={
+            "prompt_key": f"  {prompt_key}  ",
+            "prompt_version": f"  {prompt_version}  ",
+        },
+        headers=bearer(admin_token),
+    )
+    assert minimal_create.status_code == 200
+    create_body = minimal_create.get_json()
+    assert set(create_body) == {"status", "message", "data"}
+    assert "request_id" not in create_body
+    assert create_body["data"]["prompt_key"] == prompt_key
+    assert create_body["data"]["prompt_version"] == prompt_version
+
+    with app_module.app.app_context():
+        created_prompt = fetch_prompt(app_module, prompt_key, prompt_version)
+        created_id = created_prompt.id
+        assert created_prompt.task_type == prompt_key
+        assert created_prompt.template_text == ""
+        assert created_prompt.prompt_version == prompt_version
+        assert app_module.PromptTemplate.query.filter_by(
+            prompt_key=prompt_key,
+            prompt_version=prompt_version,
+        ).count() == 1
+        assert app_module.AuditRecord.query.count() == before_audit_count
+
+    identical_repeat = client.post(
+        PROMPT_PATH,
+        json={
+            "prompt_key": prompt_key,
+            "prompt_version": prompt_version,
+        },
+        headers=bearer(admin_token),
+    )
+    assert identical_repeat.status_code == 200
+
+    overwrite = client.post(
+        PROMPT_PATH,
+        json=prompt_payload(
+            prompt_key,
+            version=prompt_version,
+            task_type="policy_overwrite",
+            template_text="Last write replaces the mutable legacy revision.",
+            notes="overwritten",
+        ),
+        headers=bearer(admin_token),
+    )
+    assert overwrite.status_code == 200
+
+    with app_module.app.app_context():
+        updated_prompt = fetch_prompt(app_module, prompt_key, prompt_version)
+        assert updated_prompt.id == created_id
+        assert updated_prompt.task_type == "policy_overwrite"
+        assert updated_prompt.template_text == "Last write replaces the mutable legacy revision."
+        assert updated_prompt.notes == "overwritten"
+        assert app_module.PromptTemplate.query.filter_by(
+            prompt_key=prompt_key,
+            prompt_version=prompt_version,
+        ).count() == 1
+        assert app_module.AuditRecord.query.count() == before_audit_count
+
+    case_variant = client.post(
+        PROMPT_PATH,
+        json=prompt_payload(prompt_key.upper(), version=prompt_version, template_text="case variant"),
+        headers=bearer(admin_token),
+    )
+    assert case_variant.status_code == 200
+    with app_module.app.app_context():
+        assert app_module.PromptTemplate.query.filter_by(prompt_key=prompt_key.upper()).count() == 1
+        assert app_module.PromptTemplate.query.filter_by(prompt_key=prompt_key).count() == 1
+
+    null_key_version = f"null-key-{uuid4().hex}"
+    null_key_response = client.post(
+        PROMPT_PATH,
+        json={"prompt_key": None, "prompt_version": null_key_version},
+        headers=bearer(admin_token),
+    )
+    assert null_key_response.status_code == 200
+    with app_module.app.app_context():
+        null_key_prompt = fetch_prompt(app_module, "None", null_key_version)
+        assert null_key_prompt.prompt_key == "None"
+
+    null_version_key = f"null-version-{uuid4().hex}"
+    null_version_response = client.post(
+        PROMPT_PATH,
+        json={"prompt_key": null_version_key, "prompt_version": None},
+        headers=bearer(admin_token),
+    )
+    assert null_version_response.status_code == 200
+    with app_module.app.app_context():
+        null_version_prompt = fetch_prompt(app_module, null_version_key, "None")
+        assert null_version_prompt.prompt_version == "None"
+
+
+def test_prompt_mutation_last_commit_wins_characterized(
+    app_module,
+    client,
+    admin_token,
+    monkeypatch,
+):
+    no_network(monkeypatch)
+    prompt_key = f"legacy_admin_9c4p_last_commit_{uuid4().hex}"
+    prompt_version = "opaque-client-version"
+
+    create = client.post(
+        PROMPT_PATH,
+        json=prompt_payload(prompt_key, version=prompt_version, template_text="base"),
+        headers=bearer(admin_token),
+    )
+    assert create.status_code == 200
+
+    first_client = app_module.app.test_client()
+    second_client = app_module.app.test_client()
+
+    first_write = first_client.post(
+        PROMPT_PATH,
+        json=prompt_payload(prompt_key, version=prompt_version, template_text="first admin write"),
+        headers=bearer(admin_token),
+    )
+    second_write = second_client.post(
+        PROMPT_PATH,
+        json=prompt_payload(prompt_key, version=prompt_version, template_text="second admin write"),
+        headers=bearer(admin_token),
+    )
+
+    assert first_write.status_code == 200
+    assert second_write.status_code == 200
+    assert first_write.status_code != 409
+    assert second_write.status_code != 409
+    assert "ETag" not in first_write.headers
+    assert "ETag" not in second_write.headers
+
+    with app_module.app.app_context():
+        prompts = app_module.PromptTemplate.query.filter_by(
+            prompt_key=prompt_key,
+            prompt_version=prompt_version,
+        ).all()
+        assert len(prompts) == 1
+        assert prompts[0].template_text == "second admin write"
+
+
 def test_prompt_mutation_updates_same_version_in_place_and_does_not_manage_defaults(
     app_module,
     client,
