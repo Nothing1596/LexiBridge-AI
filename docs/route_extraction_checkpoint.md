@@ -603,3 +603,38 @@ Post-9C.4N status:
 - `RouteCoreDependencies` fields: 9.
 
 Next recommended slice: audit `POST /api/admin/ai/prompts` mutation, including its seed, validation, serializer, commit/rollback, OpenAPI/frontend, and shared `admin_ai_prompts` endpoint compatibility. Keep legacy `/api/alignment/run` as a separate execution-boundary audit, and do not re-enable legacy live probing without a new explicit service.
+
+## Task 9C.4O Legacy Provider Prompt Mutation Audit
+
+Task 9C.4O does not extract a route and does not change production behavior. It adds characterization for `POST /api/admin/ai/prompts` and records the detailed boundary in `docs/legacy_provider_prompt_mutation_boundary.md`.
+
+Confirmed registration:
+
+- `GET /api/admin/ai/prompts` and `POST /api/admin/ai/prompts` share one Flask rule.
+- The endpoint remains `admin_ai_prompts`.
+- GET is handled by `backend/routes/legacy_provider_admin_configuration.py`.
+- POST delegates through `prompt_post_handler(user)` to `backend/app.py::admin_ai_prompts_post_handler(user)`.
+
+Prompt mutation snapshot:
+
+- The callback is 22 lines.
+- It performs one upsert operation on `PromptTemplate`.
+- The target key is `prompt_key` + `prompt_version`.
+- The implementation requires only `prompt_key` and `prompt_version`, while OpenAPI also marks `task_type` and `template_text` required.
+- It commits directly and has no explicit rollback.
+- It writes no `AuditRecord`.
+- It performs no network, provider adapter, provider transport, usage, verification run, preflight, or card writes.
+
+Post-9C.4O status:
+
+- No new route module.
+- No additional extracted route.
+- `backend/app.py` line count remains 16,036.
+- Direct `@app.route` handlers remaining in `backend/app.py`: 131.
+- Extracted route modules remain 12.
+- Extracted routes remain 31.
+- `RouteCoreDependencies` remains 9 fields.
+
+Primary conclusion: `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`.
+
+Next recommended slice: define prompt mutation policy before service extraction. The policy must cover validation, legal prompt template handling, version creation versus in-place update, active/default exclusivity, duplicate key/version handling, optimistic locking or accepted last-write-wins behavior, and explicit transaction rollback semantics. Only after that should a prompt mutation application service and route extraction be attempted. Keep legacy `/api/alignment/run` separate.
