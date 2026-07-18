@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -113,7 +113,7 @@ class FormalJobExecutionLease:
     job_type: str
     worker_id: str
     execution_attempt: int
-    lease_token: str
+    lease_token: str = field(repr=False)
     claimed_at: datetime
     heartbeat_at: datetime
     lease_expires_at: datetime
@@ -131,6 +131,27 @@ class FormalJobExecutionLease:
         object.__setattr__(self, "claimed_at", _as_utc(self.claimed_at))
         object.__setattr__(self, "heartbeat_at", _as_utc(self.heartbeat_at))
         object.__setattr__(self, "lease_expires_at", _as_utc(self.lease_expires_at))
+
+
+@dataclass(frozen=True)
+class FormalJobExecutionFence:
+    """Minimal attempt identity used to fence a caller-owned transaction."""
+
+    job_uid: str
+    worker_id: str
+    execution_attempt: int
+    lease_token: str = field(repr=False)
+    job_type: str = FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE
+
+    def __post_init__(self):
+        object.__setattr__(self, "job_uid", _required_text(self.job_uid, "job_uid", 64))
+        object.__setattr__(self, "worker_id", _required_text(self.worker_id, "worker_id", 120))
+        object.__setattr__(self, "lease_token", _required_text(self.lease_token, "lease_token", 128))
+        object.__setattr__(self, "job_type", _required_text(self.job_type, "job_type", 80))
+        attempt = int(self.execution_attempt or 0)
+        if attempt <= 0:
+            raise ValueError("execution_attempt must be positive.")
+        object.__setattr__(self, "execution_attempt", attempt)
 
 
 @dataclass(frozen=True)
@@ -421,6 +442,49 @@ def validate_active_formal_job_lease(
             lease_expires_at=lease.lease_expires_at,
         )
     return _rejection_result(lease, dependencies, now)
+
+
+def fence_active_formal_job_lease_in_transaction(
+    lease: FormalJobExecutionLease,
+    dependencies: FormalBackgroundJobExecutionDependencies,
+    *,
+    lease_extension_seconds: int | None = None,
+) -> FormalJobLeaseOperationResult:
+    """Fence business writes without owning the surrounding transaction."""
+
+    now = _as_utc(dependencies.current_time_factory())
+    extension = dependencies.lease_seconds if lease_extension_seconds is None else int(lease_extension_seconds)
+    if extension <= 0:
+        raise ValueError("lease_extension_seconds must be positive.")
+    expiry = now + timedelta(seconds=extension)
+    model = dependencies.job_model
+    try:
+        result = dependencies.session.execute(
+            update(model)
+            .where(_active_predicate(model, lease, _time_text(now)))
+            .values(
+                heartbeat_at=_time_text(now),
+                lease_expires_at=_time_text(expiry),
+                updated_at=_time_text(now),
+            )
+        )
+        if result.rowcount != 1:
+            return _rejection_result(lease, dependencies, now)
+    except Exception:
+        return FormalJobLeaseOperationResult(
+            outcome=LEASE_OUTCOME_PERSISTENCE_ERROR,
+            job_uid=lease.job_uid,
+            execution_attempt=lease.execution_attempt,
+            error_code=ERROR_PERSISTENCE,
+            error_message="Formal job transaction fence could not be acquired.",
+        )
+    return FormalJobLeaseOperationResult(
+        outcome=LEASE_OUTCOME_ACCEPTED,
+        job_uid=lease.job_uid,
+        execution_attempt=lease.execution_attempt,
+        status="running",
+        lease_expires_at=expiry,
+    )
 
 
 def heartbeat_formal_background_job(

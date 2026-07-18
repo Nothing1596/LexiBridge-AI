@@ -9,14 +9,16 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current processing-planning conclusion:
-SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
+FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
 
-Implementation status after Task 9C.4Z:
+Implementation status after Task 9C.5A:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
 - `PROCESSING_BOUNDARY_CHARACTERIZED`
-- `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`
+- `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
+- `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
+- `VERIFICATION_TRANSACTION_ADAPTER_NOT_IMPLEMENTED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
@@ -56,9 +58,12 @@ Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
 heartbeat, stale-running reclaim, attempt fencing, terminal immutability, and
 formal/legacy worker isolation for the local SQLite pilot. This is
 `AT_LEAST_ONCE_TRANSPORT` plus `ATTEMPT_FENCED_OWNERSHIP`, not exactly-once or a
-formal processing worker. The existing text-level term extractor still lacks
-governed chunk scope, and draft/preflight/verification/attach collaborators
-still have independent commit defaults.
+formal processing worker. Task 9C.5A adds pure, governed chunk-scoped candidate
+generation and an attempt-fenced, idempotent WorkflowItem bootstrap. It
+processes each chunk independently, preserves chunk UID provenance, applies
+`item-key-v1`, and persists item/root changes in the same short transaction as
+a conditional BackgroundJob lease fence. Draft/preflight/verification/attach
+collaborators still have independent commit defaults.
 
 ## Decision
 
@@ -634,11 +639,17 @@ business state truth.
 Historical Task 9C.4Y conclusion:
 `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`.
 
-Task 9C.4Z satisfies that local-pilot ownership prerequisite. The next unique
-conclusion is `SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST`, because the
-current extractor cannot produce a stable governed chunk scope for
-`item-key-v1`. Transaction-neutral draft/verification adapters remain a later
-prerequisite before provider-backed orchestration.
+Task 9C.4Z satisfies that local-pilot ownership prerequisite. Task 9C.5A then
+satisfies the chunk-scoped candidate and item persistence prerequisite:
+
+```text
+FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
+```
+
+The next blocker is a transaction-neutral draft/preflight/verification/attach
+adapter. Provider-backed processing orchestration must not start before that
+adapter defines partial commits, retries, usage/audit idempotency, and attach
+ownership.
 
 ## Rejected Alternatives
 
@@ -657,13 +668,13 @@ prerequisite before provider-backed orchestration.
 
 ## Consequences
 
-The model, admission, and formal BackgroundJob ownership prerequisites are
-implemented for the local pilot. The next work is not the processing
-orchestrator. It is the chunk-scoped candidate and idempotent item bootstrap
-boundary:
+The model, admission, formal BackgroundJob ownership, and chunk-scoped item
+bootstrap prerequisites are implemented for the local pilot. The next work is
+not the processing orchestrator. It is the transaction-neutral formal
+verification composition boundary:
 
 ```text
-SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
+NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still

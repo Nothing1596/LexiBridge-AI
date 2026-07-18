@@ -6,7 +6,9 @@ Status:
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
 - `PROCESSING_BOUNDARY_CHARACTERIZED`
-- `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`
+- `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
+- `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
+- `VERIFICATION_TRANSACTION_ADAPTER_NOT_IMPLEMENTED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `FORMAL_WORKER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
@@ -16,9 +18,9 @@ Status:
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.4Z
-Implementation update: formal BackgroundJob CAS/lease ownership established; processing remains absent
-Baseline: `7eb8c1440ca192383ff817c4d3c55c7240ebd173`
+Task: 9C.5A
+Implementation update: chunk-scoped candidates and lease-fenced item bootstrap established; downstream processing remains absent
+Baseline: `3a82e7a8aa7c80b80af291c322159baeaa306170`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -1252,7 +1254,7 @@ processing never writes legacy UsageRecord or AICallLog.
 |---|---|---|
 | admission | DocumentAlignmentWorkflowRun, BackgroundJob, AuditRecord | none |
 | claim | BackgroundJob, BackgroundJobEvent, DocumentAlignmentWorkflowRun, AuditRecord | none |
-| bootstrap | DocumentAlignmentWorkflowItem, DocumentAlignmentWorkflowRun, AuditRecord | none |
+| bootstrap | DocumentAlignmentWorkflowItem, DocumentAlignmentWorkflowRun, BackgroundJob lease heartbeat/expiry | none |
 | evidence/candidates | none | none |
 | draft | ConceptAlignmentCard, AuditRecord, WorkflowItem references | none |
 | preflight | AlignmentProviderPreflightRun, AuditRecord | none |
@@ -1324,19 +1326,19 @@ students. Frontend polling targets WorkflowRun status, not BackgroundJob.
 
 Historical 9C.4Y conclusion: `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`.
 
-Task 9C.4Z conclusion: `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`.
+Task 9C.4Z conclusion:
+`FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`.
 
-The processing orchestrator still cannot be implemented directly. The existing
-term extractor has no governed chunk-scoped candidate contract, so the immediate
-next blocker is:
+Task 9C.5A establishes the governed chunk-scoped candidate contract and
+attempt-fenced, idempotent WorkflowItem bootstrap:
 
 ```text
-SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
+FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
 ```
 
-The next task must establish a formal chunk-scoped candidate DTO and idempotent
-WorkflowItem bootstrap. Draft/verification transaction adapters remain a
-separate later slice before provider-backed orchestration.
+The processing orchestrator still cannot be implemented directly. The next
+task must establish transaction-neutral draft/preflight/verification/attach
+composition before provider-backed orchestration.
 
 ## Task 9C.4Z Formal Job Ownership Update
 
@@ -1352,3 +1354,76 @@ The implemented contract is documented in
 `CANCELLATION_OUT_OF_SCOPE_FOR_9C4Z`. The additive schema remains
 `PILOT_CREATE_ALL_ONLY`; `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION` and
 `POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED` remain explicit conditions.
+
+## Task 9C.5A Chunk-Scoped Candidate And Item Bootstrap
+
+### Candidate Contract
+
+`backend/services/document_alignment_term_candidates.py` is a pure module with
+frozen governed-chunk, canonical-candidate, and extraction-result DTOs. Its
+fixed version is `formal-chunk-term-extraction-v1`. It calls the injected
+deterministic extractor once per chunk in stable `(chunk_index, chunk_uid)`
+order and never concatenates a whole document.
+
+Normalization is Unicode NFKC, trim, whitespace collapse, and casefold for
+identity while retaining the earliest stable display form. Equal normalized
+terms aggregate unique sorted chunk refs, occurrence count, and earliest chunk
+index. Non-contiguous indexes add `MULTI_CONTEXT_TERM_CANDIDATE`. Semantic
+sense clustering is not implemented. V1 limits are 50 canonical items and 100
+unique chunk refs per candidate; excess returns an explicit error with no
+silent truncation and no item writes.
+
+### Bootstrap And Transaction Fence
+
+`bootstrap_document_alignment_workflow_items(command, dependencies)` uses
+frozen typed DTOs. The command contains only workflow/job/worker/attempt/token
+identity, with the token excluded from repr. Dependencies are explicit and do
+not include Flask, routes, provider, evidence, card, verification, worker
+dispatch, or legacy services.
+
+The read/compute phase loads root/source/chunks, captures source, parse,
+version, and chunk membership signatures, rolls back the read transaction, and
+computes candidates. The short persistence phase first calls
+`fence_active_formal_job_lease_in_transaction`, a conditional UPDATE checking
+job UID, formal type, running status, worker, attempt, opaque token, and
+unexpired lease. It reloads root/source/chunks, rejects drift, creates or reuses
+items, updates root status/counts, and commits once. Fence heartbeat/expiry and
+all item/root writes use the same session, transaction, and commit.
+
+Queued and validating roots can bootstrap. A processing root is reusable only
+when its existing item count equals `total_items`; a missing or partial set is
+invalid. Terminal roots are immutable. Success sets status `processing`, stage
+`evidence_retrieval`, and `total_items` to the canonical count. No-candidate
+and hard-limit results block the root under an active fence without items.
+Extraction failures are retryable and roll back the fence, leaving root state
+unchanged.
+
+Every item uses existing `item-key-v1` and database uniqueness on
+`(workflow_run_id, item_key)`. Repeated runs reuse field-identical items without
+resetting downstream status or card/verification refs. Field conflict returns
+`DOCUMENT_ALIGNMENT_ITEM_IDEMPOTENCY_CONFLICT`. Only the named item-key unique
+conflict is eligible for rollback, fence reacquisition, and consistent-row
+recovery; other integrity errors are persistence failures.
+
+### Write Set And Proof Boundary
+
+Bootstrap writes only WorkflowItem, WorkflowRun, and the formal BackgroundJob
+lease heartbeat/expiry. It writes no card, verification, preflight, usage,
+audit, or legacy record and performs no network call.
+`BOOTSTRAP_AUDIT_DEFERRED_UNTIL_EVENT_IDEMPOTENCY_CONTRACT` is explicit.
+
+SQLite integration uses two independent SQLAlchemy sessions/connections. Five
+concurrent rounds each produced exactly one `created` and one `reused`, two
+final items, no double winner, no `database locked`, and no rerun. A real stale
+reclaim prevented the old attempt from writing items or root state. This is a
+local-pilot transaction fence, not distributed exactly-once. PostgreSQL
+locking, provider-call idempotency, and Usage/Audit event idempotency remain
+unverified.
+
+Unique conclusion:
+
+```text
+FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
+```
+
+Next permitted slice: `NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER`.

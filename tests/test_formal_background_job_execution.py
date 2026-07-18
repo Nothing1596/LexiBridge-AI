@@ -17,11 +17,13 @@ from services.formal_background_job_execution import (
     LEASE_OUTCOME_TERMINAL_IMMUTABLE,
     ClaimFormalJobResult,
     FormalBackgroundJobExecutionDependencies,
+    FormalJobExecutionFence,
     FormalJobExecutionLease,
     FormalJobLeaseOperationResult,
     claim_next_formal_background_job,
     complete_formal_background_job,
     fail_formal_background_job,
+    fence_active_formal_job_lease_in_transaction,
     heartbeat_formal_background_job,
     requeue_formal_background_job,
     validate_active_formal_job_lease,
@@ -30,6 +32,26 @@ from services.formal_background_job_execution import (
 
 NOW = datetime(2026, 7, 18, 8, 0, 0)
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _FailCommitOnce:
+    def __init__(self, session):
+        self._session = session
+        self.failed = False
+        self.rollback_count = 0
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+    def commit(self):
+        if not self.failed:
+            self.failed = True
+            raise RuntimeError("commit unavailable")
+        return self._session.commit()
+
+    def rollback(self):
+        self.rollback_count += 1
+        return self._session.rollback()
 
 
 def _formal_job(app_module, **overrides):
@@ -78,6 +100,26 @@ def test_module_boundary_dtos_and_lease_policy_are_explicit():
         assert forbidden not in source.lower()
     assert FORMAL_JOB_DEFAULT_LEASE_SECONDS == 30
 
+    lease = FormalJobExecutionLease(
+        job_uid="job-repr",
+        job_type=FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
+        worker_id="worker-a",
+        execution_attempt=1,
+        lease_token="LEXIBRIDGE_SENTINEL_SECRET_9C5A",
+        claimed_at=NOW,
+        heartbeat_at=NOW,
+        lease_expires_at=NOW + timedelta(seconds=30),
+        status="running",
+    )
+    assert "LEXIBRIDGE_SENTINEL_SECRET_9C5A" not in repr(lease)
+    fence = FormalJobExecutionFence(
+        job_uid=lease.job_uid,
+        worker_id=lease.worker_id,
+        execution_attempt=lease.execution_attempt,
+        lease_token=lease.lease_token,
+    )
+    assert "LEXIBRIDGE_SENTINEL_SECRET_9C5A" not in repr(fence)
+
     for value in (
         FormalJobExecutionLease(
             job_uid="job-1",
@@ -115,31 +157,6 @@ def test_formal_job_schema_has_stable_uid_and_attempt_owned_lease_fields(app_mod
 def test_claim_is_formal_only_and_populates_attempt_owned_lease(app_module):
     with app_module.app.app_context():
         _cleanup(app_module)
-
-
-@pytest.mark.parametrize("terminal_status", ["completed", "failed", "canceled"])
-def test_terminal_formal_job_is_never_claimed_or_mutated(app_module, terminal_status):
-    with app_module.app.app_context():
-        _cleanup(app_module)
-        job = _formal_job(
-            app_module,
-            status=terminal_status,
-            execution_attempt=4,
-            attempt_count=4,
-            finished_at="2026-07-18 07:59:30",
-        )
-        app_module.db.session.add(job)
-        app_module.db.session.commit()
-
-        result = claim_next_formal_background_job("worker-a", _dependencies(app_module))
-        app_module.db.session.expire_all()
-        stored = app_module.db.session.get(app_module.BackgroundJob, job.id)
-
-        assert result.outcome == CLAIM_OUTCOME_NO_JOB_AVAILABLE
-        assert stored.status == terminal_status
-        assert stored.execution_attempt == 4
-        assert stored.attempt_count == 4
-        _cleanup(app_module)
         formal = _formal_job(app_module)
         legacy = _formal_job(app_module, job_type="document_ingestion")
         app_module.db.session.add_all([formal, legacy])
@@ -168,6 +185,96 @@ def test_terminal_formal_job_is_never_claimed_or_mutated(app_module, terminal_st
 
         none_left = claim_next_formal_background_job("worker-b", _dependencies(app_module, token="other"))
         assert none_left.outcome == CLAIM_OUTCOME_NO_JOB_AVAILABLE
+        _cleanup(app_module)
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed", "canceled"])
+def test_terminal_formal_job_is_never_claimed_or_mutated(app_module, terminal_status):
+    with app_module.app.app_context():
+        _cleanup(app_module)
+        job = _formal_job(
+            app_module,
+            status=terminal_status,
+            execution_attempt=4,
+            attempt_count=4,
+            finished_at="2026-07-18 07:59:30",
+        )
+        app_module.db.session.add(job)
+        app_module.db.session.commit()
+
+        result = claim_next_formal_background_job("worker-a", _dependencies(app_module))
+        app_module.db.session.expire_all()
+        stored = app_module.db.session.get(app_module.BackgroundJob, job.id)
+
+        assert result.outcome == CLAIM_OUTCOME_NO_JOB_AVAILABLE
+        assert stored.status == terminal_status
+        assert stored.execution_attempt == 4
+        assert stored.attempt_count == 4
+        _cleanup(app_module)
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed", "canceled"])
+@pytest.mark.parametrize("operation", ["heartbeat", "complete", "fail", "requeue"])
+def test_every_terminal_status_rejects_every_ownership_operation(app_module, terminal_status, operation):
+    with app_module.app.app_context():
+        _cleanup(app_module)
+        job = _formal_job(app_module)
+        app_module.db.session.add(job)
+        app_module.db.session.commit()
+        lease = claim_next_formal_background_job("worker-a", _dependencies(app_module)).lease
+        job.status = terminal_status
+        job.finished_at = "2026-07-18 08:00:01"
+        app_module.db.session.commit()
+
+        operations = {
+            "heartbeat": lambda: heartbeat_formal_background_job(lease, _dependencies(app_module)),
+            "complete": lambda: complete_formal_background_job(lease, _dependencies(app_module)),
+            "fail": lambda: fail_formal_background_job(lease, _dependencies(app_module), "SAFE", "safe"),
+            "requeue": lambda: requeue_formal_background_job(lease, _dependencies(app_module), "SAFE", "safe"),
+        }
+        result = operations[operation]()
+        app_module.db.session.expire_all()
+        stored = app_module.BackgroundJob.query.filter_by(job_uid=lease.job_uid).one()
+        assert result.outcome == LEASE_OUTCOME_TERMINAL_IMMUTABLE
+        assert stored.status == terminal_status
+        _cleanup(app_module)
+
+
+def test_transaction_fence_is_conditional_and_transaction_neutral(app_module):
+    class CountTransactions:
+        def __init__(self, session):
+            self._session = session
+            self.commit_count = 0
+            self.rollback_count = 0
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        def commit(self):
+            self.commit_count += 1
+            return self._session.commit()
+
+        def rollback(self):
+            self.rollback_count += 1
+            return self._session.rollback()
+
+    with app_module.app.app_context():
+        _cleanup(app_module)
+        app_module.db.session.add(_formal_job(app_module))
+        app_module.db.session.commit()
+        lease = claim_next_formal_background_job("worker-a", _dependencies(app_module)).lease
+        wrapped = CountTransactions(app_module.db.session)
+
+        result = fence_active_formal_job_lease_in_transaction(
+            lease,
+            _dependencies(app_module, now=NOW + timedelta(seconds=5), session=wrapped),
+            lease_extension_seconds=30,
+        )
+
+        assert result.outcome == LEASE_OUTCOME_ACCEPTED
+        assert wrapped.commit_count == 0
+        assert wrapped.rollback_count == 0
+        app_module.db.session.rollback()
         _cleanup(app_module)
 
 
@@ -319,31 +426,12 @@ def test_formal_ownership_operations_do_not_write_business_records(app_module):
 
 
 def test_claim_commit_failure_rolls_back_and_session_remains_reusable(app_module):
-    class FailCommitOnce:
-        def __init__(self, session):
-            self._session = session
-            self.failed = False
-            self.rollback_count = 0
-
-        def __getattr__(self, name):
-            return getattr(self._session, name)
-
-        def commit(self):
-            if not self.failed:
-                self.failed = True
-                raise RuntimeError("commit unavailable")
-            return self._session.commit()
-
-        def rollback(self):
-            self.rollback_count += 1
-            return self._session.rollback()
-
     with app_module.app.app_context():
         _cleanup(app_module)
         job = _formal_job(app_module)
         app_module.db.session.add(job)
         app_module.db.session.commit()
-        wrapped = FailCommitOnce(app_module.db.session)
+        wrapped = _FailCommitOnce(app_module.db.session)
 
         result = claim_next_formal_background_job(
             "worker-a",
@@ -356,6 +444,38 @@ def test_claim_commit_failure_rolls_back_and_session_remains_reusable(app_module
         stored = app_module.db.session.get(app_module.BackgroundJob, job.id)
         assert stored.status == "queued"
         assert stored.execution_attempt == 0
+        assert app_module.BackgroundJob.query.count() >= 1
+        _cleanup(app_module)
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "complete", "requeue"])
+def test_lease_mutation_commit_failure_rolls_back_and_session_remains_reusable(app_module, operation):
+    with app_module.app.app_context():
+        _cleanup(app_module)
+        app_module.db.session.add(_formal_job(app_module))
+        app_module.db.session.commit()
+        lease = claim_next_formal_background_job("worker-a", _dependencies(app_module)).lease
+        wrapped = _FailCommitOnce(app_module.db.session)
+        dependencies = _dependencies(
+            app_module,
+            now=NOW + timedelta(seconds=1),
+            session=wrapped,
+        )
+        operations = {
+            "heartbeat": lambda: heartbeat_formal_background_job(lease, dependencies),
+            "complete": lambda: complete_formal_background_job(lease, dependencies),
+            "requeue": lambda: requeue_formal_background_job(lease, dependencies, "TRANSIENT", "safe retry"),
+        }
+
+        result = operations[operation]()
+        app_module.db.session.expire_all()
+        stored = app_module.BackgroundJob.query.filter_by(job_uid=lease.job_uid).one()
+
+        assert result.outcome == "persistence_error"
+        assert wrapped.rollback_count == 1
+        assert stored.status == "running"
+        assert stored.execution_attempt == lease.execution_attempt
+        assert stored.lease_token == lease.lease_token
         assert app_module.BackgroundJob.query.count() >= 1
         _cleanup(app_module)
 
@@ -382,7 +502,8 @@ def test_execution_ownership_docs_freeze_guarantees_limits_and_next_blocker():
         "FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION",
         "CANCELLATION_OUT_OF_SCOPE_FOR_9C4Z",
         "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
-        "SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST",
+        "FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED",
+        "NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER",
     ):
         assert term in combined
     assert "exactly-once execution is guaranteed" not in combined.lower()

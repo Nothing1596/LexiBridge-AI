@@ -6,7 +6,7 @@ Task: 9C.4Z
 
 Baseline: `7eb8c1440ca192383ff817c4d3c55c7240ebd173`
 
-Primary conclusion: `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`
+Primary conclusion: `FORMAL_BACKGROUND_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
 
 The formal queue contract is:
 
@@ -272,12 +272,28 @@ draft/verification composition remains necessary, but the existing term
 extractor still accepts whole text and emits no governed chunk scope. Therefore
 stable item bootstrap cannot yet be built.
 
-The next unique blocker is:
+Task 9C.5A satisfies the former blocker with:
 
 ```text
-SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
+FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
 ```
 
-The next task must establish a formal chunk-scoped term candidate DTO and an
-idempotent WorkflowItem bootstrap service. It must not implement provider-backed
-processing, verification composition, a worker handler, routes, or frontend.
+## Transaction-Neutral Business Write Fence
+
+Task 9C.5A adds `fence_active_formal_job_lease_in_transaction`. It performs a
+conditional UPDATE and requires one affected row while checking job UID,
+formal job type, running status, worker ID, execution attempt, opaque lease
+token, and `lease_expires_at > now`. It may extend heartbeat and expiry but does
+not commit or roll back; the caller owns the transaction.
+
+`document_alignment_item_bootstrap.py` uses this primitive in the same
+SQLAlchemy session and transaction as WorkflowItem creation/reuse and
+WorkflowRun status/count updates. A failed fence causes zero business writes;
+commit failure rolls back the fence update and business changes. Lease tokens
+are excluded from DTO repr.
+
+This closes the SELECT-guard TOCTOU gap only for the tested local SQLite
+bootstrap transaction. It does not fence provider calls outside a transaction,
+provide provider exactly-once behavior, or prove PostgreSQL semantics. The next
+task is `NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER`; it must not register the
+worker, routes, or frontend.
