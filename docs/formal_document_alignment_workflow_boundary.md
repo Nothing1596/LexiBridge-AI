@@ -4,7 +4,8 @@ Status:
 - `CONTRACT_PROPOSED`
 - `ACCEPTED_FOR_SMALL_PILOT`
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
-- `APPLICATION_SERVICE_NOT_IMPLEMENTED`
+- `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
+- `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `ROUTES_NOT_IMPLEMENTED`
 - `WORKER_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
@@ -14,7 +15,7 @@ Status:
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
 Task: 9C.4V
-Implementation update: 9C.4W
+Implementation update: 9C.4X
 Baseline: `fad02b9f5e52e3ec71c9f309669c729a410cd542`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
@@ -23,8 +24,9 @@ Data policy: `NO_LEGACY_AND_FORMAL_DUAL_WRITE`
 Background job policy: `BACKGROUND_JOB_AS_TRANSPORT_ONLY`
 
 This document defines the formal document-alignment workflow contract and the
-Task 9C.4W model boundary. It does not implement routes, services, worker
-orchestration, frontend changes, OpenAPI changes, or a production migration
+implemented Task 9C.4W model boundary plus the Task 9C.4X admission/start
+service boundary. It does not implement routes, worker orchestration, document
+processing, frontend changes, OpenAPI changes, or a production migration
 framework. Legacy `POST /api/alignment/run` remains temporary frontend
 compatibility with external execution disabled.
 
@@ -44,6 +46,7 @@ compatibility with external execution disabled.
 | Queue transport | `BackgroundJob` | transport envelope only | job progress/events | job infrastructure |
 | Workflow root | `DocumentAlignmentWorkflowRun` | established in 9C.4W | formal root status/progress | future workflow service |
 | Workflow item | `DocumentAlignmentWorkflowItem` | established in 9C.4W | item state/references | future workflow service |
+| Workflow admission | `services/document_alignment_workflow_application.py` | established in 9C.4X | root, BackgroundJob, AuditRecord | admission application service |
 | Legacy run | `AlignmentRun`, `TerminologyCard`, `AICallLog`, legacy `UsageRecord` | do not reuse | legacy only while compatibility remains | legacy route/worker |
 
 ## Data Flow
@@ -261,6 +264,219 @@ schema intentionally stores only stable references, counts, safe summaries,
 status, stage, and safe error fields. Future serializers must not expose
 database integer IDs, idempotency fingerprints, full evidence, raw prompts, raw
 provider output, credentials, or raw exceptions.
+
+## Admission Service Boundary
+
+Task 9C.4X adds:
+
+```text
+backend/services/document_alignment_workflow_application.py
+```
+
+Public entry point:
+
+```text
+start_document_alignment_workflow(command, dependencies)
+```
+
+Command:
+
+```text
+StartDocumentAlignmentWorkflowCommand(
+    source_uid,
+    requested_by,
+    request_id,
+    idempotency_key,
+)
+```
+
+The command is frozen and does not accept provider, model, prompt, credential,
+base URL, arbitrary options, raw document, raw evidence, visibility, or
+auto-approval fields. Workflow version is server-controlled.
+
+Dependencies:
+
+```text
+DocumentAlignmentWorkflowApplicationDependencies(
+    session,
+    workflow_run_model,
+    background_job_model,
+    audit_record_model,
+    source_loader,
+    authorization_checker,
+    source_admission_checker,
+    current_time_factory,
+    uid_factory,
+    workflow_version,
+    audit_recorder,
+)
+```
+
+Dependencies are explicit collaborators, not a service locator. The service
+does not import Flask, `backend.app`, route modules, worker code, provider
+adapter/transport, `urllib`, `requests`, `httpx`, or `socket`.
+
+Source snapshot:
+
+```text
+GovernedKnowledgeSourceSnapshot(
+    source_uid,
+    parse_uid,
+    source_version,
+    course,
+    chapter,
+    owner_user_id,
+    visibility,
+    source_status,
+    source_trust_level,
+    parse_status,
+    parse_quality,
+    usable_chunk_count,
+)
+```
+
+The snapshot contains no raw document, chunk body, evidence, prompt, credential,
+or source metadata blob.
+
+Decision DTOs:
+
+- `DocumentAlignmentWorkflowAuthorizationDecision`
+- `DocumentAlignmentSourceAdmissionDecision`
+
+Failure decisions are read-only: they create no workflow root, no job, and no
+audit record. Safe error codes include:
+
+- `DOCUMENT_ALIGNMENT_SOURCE_NOT_AVAILABLE`
+- `DOCUMENT_ALIGNMENT_SOURCE_NOT_GOVERNED`
+- `DOCUMENT_ALIGNMENT_PARSE_BLOCKED`
+- `DOCUMENT_ALIGNMENT_NO_USABLE_CHUNKS`
+- `DOCUMENT_ALIGNMENT_IDEMPOTENCY_CONFLICT`
+- `DOCUMENT_ALIGNMENT_PERSISTENCE_ERROR`
+
+Result:
+
+```text
+StartDocumentAlignmentWorkflowResult(
+    outcome,
+    run_uid,
+    job_uid,
+    status,
+    stage,
+    request_id,
+    reused,
+    error_code,
+    error_message,
+)
+```
+
+The result is not an HTTP response and contains no ORM object, raw exception,
+database ID, credential, full payload, or route envelope.
+
+## Admission Transaction
+
+Created path:
+
+```text
+validate command
+-> load governed source snapshot
+-> authorization decision
+-> source admission decision
+-> idempotency query
+-> create DocumentAlignmentWorkflowRun
+-> create BackgroundJob
+-> create document_alignment_requested AuditRecord
+-> flush
+-> one commit
+```
+
+The service owns the transaction for admission. Successful creation commits
+once. Persistence failures, audit creation failures, job construction failures,
+flush failures, commit failures, and idempotency unique races all call explicit
+rollback before returning a safe typed result.
+
+Read-only paths do not commit:
+
+- source not found;
+- permission denied;
+- source not governed;
+- parse blocked;
+- no usable chunks;
+- idempotency replay;
+- idempotency conflict.
+
+The service creates only:
+
+- `DocumentAlignmentWorkflowRun`;
+- `BackgroundJob`;
+- `AuditRecord` with event type `document_alignment_requested`.
+
+It does not create `DocumentAlignmentWorkflowItem`, `AlignmentVerificationRun`,
+`ConceptAlignmentCard`, provider usage, preflight, legacy `AlignmentRun`,
+legacy `TerminologyCard`, legacy `UsageRecord`, or `AICallLog`.
+
+## BackgroundJob Payload
+
+9C.4X uses a distinct formal job type:
+
+```text
+formal_document_alignment_workflow_v1
+```
+
+The BackgroundJob payload is intentionally minimal:
+
+```json
+{
+  "workflow_run_uid": "...",
+  "workflow_version": "formal-document-alignment-v1"
+}
+```
+
+The payload does not contain raw documents, chunks, evidence, prompts,
+provider selections, credentials, base URLs, cookies, Authorization headers, or
+card payloads. BackgroundJob remains transport-only and is not the business
+root.
+
+## Fingerprints And Item Keys
+
+Admission fingerprint:
+
+- stable JSON with `sort_keys=True` and fixed separators;
+- SHA-256 hex digest;
+- includes `source_uid`, `parse_uid`, `source_version`, `course`, `chapter`,
+  and `workflow_version`;
+- excludes `request_id`, `idempotency_key`, timestamps, generated UIDs,
+  credentials, raw source content, chunks, and actor session data.
+
+Item key:
+
+```text
+item-key-v1:<sha256>
+```
+
+`item-key-v1` normalizes term identity with Unicode NFKC, trimming, whitespace
+folding, and casefolding. It normalizes source chunk IDs by trimming, removing
+empty values, deduplicating, and sorting. It rejects empty term or empty chunk
+scope and never includes raw terms or chunk IDs in the key string.
+
+## Idempotency Implementation
+
+The model scope remains:
+
+```text
+requested_by + source_uid + workflow_version + idempotency_key
+```
+
+Behavior:
+
+| Condition | Result | Writes |
+|---|---|---|
+| no existing scoped run | `created` | one root, one job, one audit |
+| same scope and same fingerprint | `reused` | none |
+| same scope and different fingerprint | `idempotency_conflict` | none |
+| unique race resolves to same fingerprint | `reused` after rollback | none beyond winning request |
+| unique race resolves to different fingerprint | `idempotency_conflict` after rollback | none |
+
+`request_id` is trace-only and never participates in idempotency.
 
 ## Partial Failure
 

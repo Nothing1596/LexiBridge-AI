@@ -14,6 +14,7 @@ This map describes the current implemented pilot architecture. It is not a futur
 - `AlignmentVerificationRun`: alignment verification run record for mock/fake/replay/disabled providers. It stores structured input/output summaries, provider metadata, parser/schema versions, risk labels, status, and confidence. It is not a production approval record.
 - `DocumentAlignmentWorkflowRun`: formal document-alignment workflow root added in Task 9C.4W. It represents document-level status, source identity, parse provenance, idempotency, progress, request ID, safe errors, and terminal outcomes without overloading `BackgroundJob` or legacy `AlignmentRun`.
 - `DocumentAlignmentWorkflowItem`: formal document-alignment workflow item added in Task 9C.4W. It represents per-concept item key, evidence references, draft card UID, verification run UID, risk summary, retry count, and blocked/failed/needs-review state.
+- `backend/services/document_alignment_workflow_application.py`: formal document-alignment admission/start service added in Task 9C.4X. It is HTTP-neutral, validates explicit governed-source/permission/admission decisions, resolves idempotency, creates `DocumentAlignmentWorkflowRun`, queues a transport-only `BackgroundJob`, writes `document_alignment_requested` audit, commits once, and rolls back persistence failures. It does not process terms, evidence, cards, verification, providers, workers, routes, or frontend state.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.
@@ -214,8 +215,10 @@ Legacy alignment run:
   with canonical `GOVERNED_KNOWLEDGE_SOURCE` input, `Idempotency-Key`, formal
   root/item models, formal provider policy/preflight/verification, and
   `NO_LEGACY_AND_FORMAL_DUAL_WRITE`. Task 9C.4W adds the formal root/item
-  models and constants. No replacement application service, route, worker,
-  frontend cutover, or OpenAPI entry exists yet.
+  models and constants. Task 9C.4X adds only the admission/start application
+  service for root creation, idempotency, BackgroundJob transport, and initial
+  audit. No processing orchestrator, route, worker, frontend cutover, or
+  OpenAPI entry exists yet.
 
 ## Permission Boundaries
 

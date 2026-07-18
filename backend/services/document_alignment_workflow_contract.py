@@ -1,15 +1,22 @@
-"""Formal document alignment workflow model contract constants.
+"""Formal document alignment workflow contract constants and pure keys.
 
 This module is deliberately free of Flask, database sessions, environment
 configuration, provider clients, and execution logic. It is the single source
 for workflow root/item status and stage strings used by the model layer.
 """
 
+import hashlib
+import json
+import re
+import unicodedata
+
 WORKFLOW_NAME = "FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION"
 CANONICAL_INPUT = "GOVERNED_KNOWLEDGE_SOURCE"
 EXECUTION_MODEL = "ASYNC_JOB_ORCHESTRATION"
 DATA_POLICY = "NO_LEGACY_AND_FORMAL_DUAL_WRITE"
 WORKFLOW_VERSION_V1 = "formal-document-alignment-v1"
+FORMAL_DOCUMENT_ALIGNMENT_WORKFLOW_VERSION = WORKFLOW_VERSION_V1
+FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE = "formal_document_alignment_workflow_v1"
 
 ROOT_STATUS_QUEUED = "queued"
 ROOT_STATUS_VALIDATING = "validating"
@@ -80,3 +87,41 @@ DOCUMENT_ALIGNMENT_ITEM_STAGES = frozenset({
     ITEM_STAGE_VERIFICATION,
     ITEM_STAGE_TERMINAL,
 })
+
+DOCUMENT_ALIGNMENT_ITEM_KEY_VERSION = "item-key-v1"
+
+
+def _normalize_item_key_term(normalized_term):
+    text = unicodedata.normalize("NFKC", str(normalized_term or "")).strip()
+    text = re.sub(r"\s+", " ", text).casefold()
+    if not text:
+        raise ValueError("normalized_term is required.")
+    return text
+
+
+def _normalize_chunk_ids(source_chunk_ids):
+    chunk_ids = []
+    for value in source_chunk_ids or []:
+        text = str(value or "").strip()
+        if text:
+            chunk_ids.append(text)
+    chunk_ids = sorted(set(chunk_ids))
+    if not chunk_ids:
+        raise ValueError("source_chunk_ids are required.")
+    return chunk_ids
+
+
+def build_document_alignment_item_key(normalized_term, source_chunk_ids):
+    """Build a deterministic, scope-aware workflow item key.
+
+    The key intentionally stores only a version prefix and digest. Raw terms,
+    raw chunk text, and ordered chunk lists do not appear in the key.
+    """
+    payload = {
+        "version": DOCUMENT_ALIGNMENT_ITEM_KEY_VERSION,
+        "normalized_term": _normalize_item_key_term(normalized_term),
+        "source_chunk_ids": _normalize_chunk_ids(source_chunk_ids),
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"{DOCUMENT_ALIGNMENT_ITEM_KEY_VERSION}:{digest}"

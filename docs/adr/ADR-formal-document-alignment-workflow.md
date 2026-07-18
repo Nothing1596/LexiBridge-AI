@@ -8,10 +8,11 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 
 Main conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
-Implementation status after Task 9C.4W:
+Implementation status after Task 9C.4X:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
-- `APPLICATION_SERVICE_NOT_IMPLEMENTED`
+- `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
+- `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `ROUTES_NOT_IMPLEMENTED`
 - `WORKER_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
@@ -38,7 +39,11 @@ drafts, formal provider governance, policy, preflight, alignment verification,
 UsageRecord, AuditRecord, teacher review, and student approved-only access.
 Task 9C.4W establishes the document-level orchestration root and item-level
 progress models needed to connect those components without reusing the legacy
-execution path. The application service, route, worker, and frontend cutover
+execution path. Task 9C.4X establishes the first application slice:
+workflow admission and start. That service validates a governed source through
+explicit loaders/decisions, resolves idempotency, creates the workflow root,
+creates a transport-only BackgroundJob, records `document_alignment_requested`,
+and commits once. Processing orchestration, route, worker, and frontend cutover
 are still not implemented.
 
 ## Decision
@@ -123,6 +128,12 @@ The workflow uses `ASYNC_JOB_ORCHESTRATION`.
 The start route validates request and permission, creates a workflow root,
 creates a BackgroundJob envelope, commits, and returns quickly with HTTP 202.
 It does not process the whole document in the HTTP request.
+
+Task 9C.4X implements the HTTP-neutral equivalent of that start operation as
+`start_document_alignment_workflow(...)`. No route calls it yet. The command is
+limited to `source_uid`, `requested_by`, `request_id`, and `idempotency_key`;
+workflow version is server-controlled. The service creates only
+`DocumentAlignmentWorkflowRun`, `BackgroundJob`, and `AuditRecord`.
 
 BackgroundJob is a queue/worker transport record. It is not the source of
 business truth. Domain status, progress counts, item state, idempotency, and
@@ -297,6 +308,23 @@ Rules:
   HTTP request ID;
 - small-pilot retention is 30 days for active idempotency records or until the
   workflow root is archived by a later policy.
+
+Task 9C.4X implements the backing service behavior for this policy:
+
+- fingerprint is stable SHA-256 over source UID, parse UID, source version,
+  course, chapter, and workflow version;
+- request ID, idempotency key, timestamps, generated UIDs, credentials, and raw
+  source content are excluded from the fingerprint;
+- same scope and same fingerprint returns the existing run without creating a
+  second job or audit record;
+- same scope and different fingerprint returns
+  `DOCUMENT_ALIGNMENT_IDEMPOTENCY_CONFLICT`;
+- idempotency unique-constraint races are rolled back and re-resolved by
+  querying the persisted run.
+
+Task 9C.4X also defines `item-key-v1`: normalize the term using Unicode NFKC,
+trim and fold whitespace, casefold, normalize chunk references by trimming,
+deduplicating, and sorting, then store only `item-key-v1:<sha256>`.
 
 ## Provider Governance
 

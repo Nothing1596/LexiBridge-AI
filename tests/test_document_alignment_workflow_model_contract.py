@@ -139,11 +139,12 @@ def test_formal_workflow_docs_record_models_and_pilot_migration_limits():
     combined = adr + "\n" + boundary
 
     for term in [
-        "ACCEPTED_FOR_SMALL_PILOT",
-        "FORMAL_WORKFLOW_MODELS_ESTABLISHED",
-        "APPLICATION_SERVICE_NOT_IMPLEMENTED",
-        "ROUTES_NOT_IMPLEMENTED",
-        "WORKER_NOT_IMPLEMENTED",
+            "ACCEPTED_FOR_SMALL_PILOT",
+            "FORMAL_WORKFLOW_MODELS_ESTABLISHED",
+            "WORKFLOW_ADMISSION_SERVICE_ESTABLISHED",
+            "PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED",
+            "ROUTES_NOT_IMPLEMENTED",
+            "WORKER_NOT_IMPLEMENTED",
         "FRONTEND_NOT_MIGRATED",
         "PILOT_CREATE_ALL_ONLY",
         "FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION",
