@@ -15,6 +15,7 @@ This map describes the current implemented pilot architecture. It is not a futur
 - `DocumentAlignmentWorkflowRun`: formal document-alignment workflow root added in Task 9C.4W. It represents document-level status, source identity, parse provenance, idempotency, progress, request ID, safe errors, and terminal outcomes without overloading `BackgroundJob` or legacy `AlignmentRun`.
 - `DocumentAlignmentWorkflowItem`: formal document-alignment workflow item added in Task 9C.4W. It represents per-concept item key, evidence references, draft card UID, verification run UID, risk summary, retry count, and blocked/failed/needs-review state.
 - `backend/services/document_alignment_workflow_application.py`: formal document-alignment admission/start service added in Task 9C.4X. It is HTTP-neutral, validates explicit governed-source/permission/admission decisions, resolves idempotency, creates `DocumentAlignmentWorkflowRun`, queues a transport-only `BackgroundJob`, writes `document_alignment_requested` audit, commits once, and rolls back persistence failures. It does not process terms, evidence, cards, verification, providers, workers, routes, or frontend state.
+- Task 9C.4Y characterizes the formal processing boundary without adding production code. The existing BackgroundJob claim is single-worker query-then-update with no atomic compare-and-set, lease expiry, heartbeat, stale-running recovery, or attempt ownership, so the current conclusion is `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`. WorkflowRun and WorkflowItem remain business state; BackgroundJob remains transport-only.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.
@@ -217,7 +218,9 @@ Legacy alignment run:
   `NO_LEGACY_AND_FORMAL_DUAL_WRITE`. Task 9C.4W adds the formal root/item
   models and constants. Task 9C.4X adds only the admission/start application
   service for root creation, idempotency, BackgroundJob transport, and initial
-  audit. No processing orchestrator, route, worker, frontend cutover, or
+  audit. Task 9C.4Y freezes processing, state, partial-failure, retry, audit,
+  usage, and query contracts, and identifies atomic claim/lease as the next
+  prerequisite. No processing orchestrator, route, worker, frontend cutover, or
   OpenAPI entry exists yet.
 
 ## Permission Boundaries

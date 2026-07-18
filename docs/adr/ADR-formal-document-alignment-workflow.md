@@ -6,15 +6,19 @@ Date: 2026-07-18
 
 Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 
-Main conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
+Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
-Implementation status after Task 9C.4X:
+Current processing-planning conclusion:
+WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST
+
+Implementation status after Task 9C.4Y:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
+- `PROCESSING_BOUNDARY_CHARACTERIZED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
-- `ROUTES_NOT_IMPLEMENTED`
-- `WORKER_NOT_IMPLEMENTED`
+- `FORMAL_WORKER_NOT_IMPLEMENTED`
+- `FORMAL_ROUTES_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
@@ -45,6 +49,16 @@ explicit loaders/decisions, resolves idempotency, creates the workflow root,
 creates a transport-only BackgroundJob, records `document_alignment_requested`,
 and commits once. Processing orchestration, route, worker, and frontend cutover
 are still not implemented.
+
+Task 9C.4Y characterizes the processing boundary without implementing it. The
+current BackgroundJob queue is sufficient only for a controlled single-worker
+compatibility pilot: claim is query-then-update, with no atomic compare-and-set,
+lease expiry, heartbeat, stale-running recovery, or attempt-scoped ownership.
+The existing text-level term extractor also lacks governed chunk scope, and
+the draft/preflight/verification/attach collaborators have independent commit
+defaults. Those later processing concerns remain separate slices, but the
+queue ownership gap is the first blocking boundary because duplicate workers
+could duplicate provider and business writes.
 
 ## Decision
 
@@ -596,6 +610,34 @@ Main conclusion:
 FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 ```
 
+This is the historical Task 9C.4V model prerequisite, satisfied by Task
+9C.4W. It is not the current processing-planning conclusion.
+
+## Processing Boundary Decision
+
+Task 9C.4Y freezes the command/result contracts, grouped collaborators,
+root/item state machines, candidate and item bootstrap rules, governed
+evidence and Chinese candidate policies, approved-card protection,
+formal-only verification sequence, short transaction boundaries, partial
+failure aggregation, retry/resume behavior, safe errors, audit/usage rules,
+worker adapter, and paginated query boundary in
+`docs/formal_document_alignment_workflow_boundary.md`.
+
+The formal processing worker must not be registered until BackgroundJob has an
+atomic claim and attempt-owned lease contract. A claim must identify its
+worker/attempt, support heartbeat and stale-running recovery, and reject an old
+worker that tries to persist progress or finalize after ownership changed.
+BackgroundJob remains transport-only; WorkflowRun and WorkflowItem remain the
+business state truth.
+
+Primary conclusion: `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`
+
+The next task is `Task 9C.4Z: Formal BackgroundJob Atomic Claim, Lease,
+Heartbeat, And Stale-Recovery Contract`. It must not implement document
+processing. After that slice, the chunk-scoped term/item bootstrap boundary
+and transaction-neutral draft/verification adapters must be reassessed
+separately before provider-backed orchestration.
+
 ## Rejected Alternatives
 
 1. Wrap legacy `run_alignment` as a service.
@@ -613,11 +655,12 @@ FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 ## Consequences
 
-The next work is not the application service. The next work is formal workflow
-models for the small pilot:
+The model and admission prerequisites are implemented. The next work is not
+the processing orchestrator. It is the BackgroundJob claim/lease contract:
 
 ```text
-Task 9C.4W: Formal Workflow Models
+Task 9C.4Z: Formal BackgroundJob Atomic Claim, Lease, Heartbeat, And
+Stale-Recovery Contract
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still
@@ -627,5 +670,6 @@ cutover, HTTP 410, and legacy path removal remain later phases.
 ## Pilot Limitations
 
 This ADR is not production-ready. It does not enable real providers, does not
-create schema, does not add the new API, and does not migrate frontend callers.
-It defines the contract required before implementation.
+add the new API or worker, and does not migrate frontend callers. The formal
+tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
+claim/locking validation remain required.
