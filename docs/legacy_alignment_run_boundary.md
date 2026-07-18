@@ -1,15 +1,24 @@
 # Legacy Alignment Run Boundary
 
-Status: `CHARACTERIZED`
-Task: 9C.4S
+Status:
+- `CHARACTERIZED`
+- `DEPRECATION_POLICY_ACCEPTED`
+- `EXTERNAL_EXECUTION_DISABLED`
+- `WORKER_EXTERNAL_EXECUTION_DISABLED`
+- `EXISTING_EXTERNAL_JOBS_QUARANTINED`
+- `FRONTEND_COMPATIBILITY_RETAINED`
+- `REPLACEMENT_NOT_YET_IMPLEMENTED`
+Tasks: 9C.4S, 9C.4T, 9C.4U
 Baseline: `d82798012c263d54761a42c0ebff57ef9e78f8b2`
 Main conclusion: `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`
 Deprecation policy after Task 9C.4T:
 `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`
+External containment after Task 9C.4U:
+`LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`
 
-This document freezes the current behavior of `POST /api/alignment/run`. It
-does not describe a new implementation and does not claim the legacy route is
-safe to extract as a service.
+This document freezes the current behavior of `POST /api/alignment/run` and
+records the Phase 1 containment boundary. It does not describe a replacement
+workflow and does not claim the legacy route is safe to extract as a service.
 
 ## Route Registration
 
@@ -29,6 +38,10 @@ safe to extract as a service.
 
 The route remains a legacy active frontend surface. It is not an alias for
 `POST /api/alignment/verify`.
+
+Task 9C.4U keeps the route in `backend/app.py`, keeps the URL/method/endpoint,
+and adds a fail-closed provider classification gate before any legacy external
+provider execution can start.
 
 ## HTTP Contract
 
@@ -79,6 +92,10 @@ OpenAPI lists only a small request schema:
 Runtime also reads `course_name`, `courseware_sentence`, `chapter`, and the
 `sync` query parameter. OpenAPI does not describe the three distinct response
 shapes.
+
+After Task 9C.4U, OpenAPI marks the route `deprecated: true` and documents
+`LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`. It still does not return HTTP
+410 and does not claim that the replacement workflow exists.
 
 ### Frontend Migration Checklist
 
@@ -144,8 +161,8 @@ The two routes are not compatible schemas and do not write the same tables.
 
 ## Provider Selection
 
-The legacy route uses `current_provider_metadata()` and `call_ai_task(...)`.
-Those paths use:
+Before Task 9C.4U, the legacy route used `current_provider_metadata()` and
+`call_ai_task(...)`. Those paths use:
 
 - `ensure_ai_registry_seed(...)`;
 - `ai_selection_from_config(...)`;
@@ -157,12 +174,31 @@ Those paths use:
 The route does not accept a formal provider selection payload and does not call
 the formal provider registry used by `/api/alignment/verify`.
 
+Task 9C.4U adds `services/legacy_alignment_provider_classification.py`. The
+classification helper is pure Python and does not import Flask, routes,
+network clients, environment variables, credentials, or database state.
+
+| Provider class | Transitional result |
+|---|---|
+| `none` / disabled | allowed deterministic local compatibility |
+| `mock` | allowed deterministic compatibility |
+| `local`, `heuristic`, `local_heuristic` | normalized to `local_heuristic` and allowed |
+| `deepseek`, `openai`, `external`, `live`, `custom_openai_compatible` | blocked |
+| unknown provider names | blocked |
+| substring values such as `mock-deepseek` | blocked |
+| custom endpoint/base URL in request metadata | blocked |
+
+The gate uses an explicit allowlist. It does not treat substring matches as
+safe and it has no environment, query, debug, or test flag that can re-enable
+legacy external execution.
+
 | Condition | Current result |
 |---|---|
 | No provider configured | local fallback after `AICallLog` error |
 | Mock/local provider | local/mock result, requires QC |
-| Live provider default with usable key | live transport intent exists |
-| Live transport exception | route falls back to local heuristic for sync direct path |
+| Live provider default with usable key before 9C.4U | live transport intent existed |
+| Live provider default with usable key after 9C.4U | HTTP 422 `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` before credential/transport |
+| Live transport exception after 9C.4U | no legacy transport is constructed |
 | Provider disabled by formal policy | not checked |
 | Preflight not ready | not checked |
 | Credential missing | legacy provider error/fallback |
@@ -172,9 +208,9 @@ the formal provider registry used by `/api/alignment/verify`.
 | Condition | Policy invoked | Preflight invoked | Execution attempted | Result |
 |---|---:|---:|---:|---|
 | Async default request | no | no | no immediate provider execution | queued `AlignmentRun` and `BackgroundJob` |
-| Sync direct no provider | no | no | legacy `call_ai_task` with none provider | fallback card/result |
-| Sync document no provider | no | no | local term extraction plus legacy alignment per term | cards/result |
-| Live provider default | no | no | legacy live transport intent | fallback if transport spy blocks |
+| Sync direct no provider | no | no | local deterministic metadata | fallback card/result |
+| Sync document no provider | no | no | local term extraction plus deterministic alignment per term | cards/result |
+| Live provider default after 9C.4U | no | no | none | 422 blocked response or worker terminal failure |
 | Formal provider disabled | no | no | not evaluated as formal policy | legacy behavior |
 
 The route bypasses the formal provider governance and preflight chain.
@@ -228,41 +264,70 @@ evaluated model is configured. Formal verification never auto approves a card.
 | Malformed JSON | none | none | Flask 400 |
 | Non-object JSON | none | none | API 500 when exceptions do not propagate |
 | Async direct term | no formal gates | no immediate provider execution | queued `AlignmentRun` and `BackgroundJob` |
-| Sync direct term | no formal gates | legacy evidence + `call_ai_task` + fallback | raw success with `alignment` and `card` |
+| Sync direct term | no formal gates | legacy evidence + deterministic provider metadata | raw success with `alignment` and `card` |
 | Sync document | no formal gates | legacy term extraction + card generation | raw success with `cards` |
-| Live default provider | no formal gates | live transport intent before fallback | raw success if transport exception is caught |
+| Live/default external provider | no formal gates | no execution after 9C.4U | `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` |
 | Repeated async request | none | no idempotency | new `AlignmentRun` and new `BackgroundJob` |
 
 ## Transport Intent
 
-Characterization blocks `socket.socket` and `urllib.request.urlopen`.
+Characterization blocks `socket.socket`, `urllib.request.Request`, and
+`urllib.request.urlopen`.
 
 Findings:
 
-- async default request has zero socket/urlopen calls;
+- async local/deterministic request has zero socket/urlopen calls;
 - sync direct request with default none/local provider has zero socket/urlopen
-  calls but does select a legacy provider adapter;
+  calls and no legacy provider adapter initialization;
 - sync document request under default none/local provider has zero socket/urlopen
   calls;
 - when a live provider is made the default and an API key is present, the route
-  reaches `urllib.request.urlopen(...)` through the legacy provider adapter. The
-  test stops before a real connection.
+  returns `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` before `urllib.Request`,
+  `urlopen`, socket, provider selection, adapter construction, or credential
+  metadata access.
 
-This is the strongest reason not to extract the current route as a normal
-application service.
+This containment is intentionally not a service extraction. The legacy route
+still bypasses formal policy/preflight/parser/audit and remains a temporary
+frontend compatibility surface.
+
+## Route, Worker, And Queued Job Containment
+
+Task 9C.4U closes all currently reachable legacy execution entries:
+
+| Entry | Gate | External/live result | Writes on blocked path |
+|---|---|---|---|
+| HTTP `POST /api/alignment/run` | request classification before run/job/card creation | HTTP 422 `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` | none |
+| `process_alignment_job(...)` | job/run/input classification before marking run running | terminal failed job with `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` | only job failure bookkeeping |
+| `/api/jobs/<id>/retry` for quarantined external job | retry guard on failed job error code | HTTP 422, job remains failed | none |
+| direct `generate_alignment_result(...)` helper | default provider classification before evidence/provider execution | raises `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` | none |
+| direct `run_alignment_for_chunks(...)` helper | default provider classification before `AlignmentRun` creation | raises `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` | none |
+
+Historical queued/running/retrying jobs with external/live intent are
+quarantined by the worker gate when a worker attempts to process them. The
+readiness gate counts remaining runnable external legacy jobs and requires
+`legacy_external_runnable_jobs_count == 0`.
+
+Blocked route paths do not create `AlignmentRun`, `BackgroundJob`,
+`TerminologyCard`, legacy `UsageRecord`, `AICallLog`, formal verification
+records, preflight records, concept cards, or audit records. Blocked worker
+paths do not create cards, usage, AI call logs, verification runs, concept
+cards, or audit records.
+
+The blocked response is not `LEGACY_ALIGNMENT_RUN_DEPRECATED`; the endpoint is
+not HTTP 410 while the frontend still calls it.
 
 ## Credential Flow
 
 | Source | Current behavior |
 |---|---|
 | Request body credential-like unknown fields | ignored |
-| Module globals | `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, base URL globals can be read |
-| Environment | `env_provider_selection(os.environ)` participates in seed and selection |
-| Provider adapter | receives API key when live provider is selected |
-| Transport | Authorization header is built inside `OpenAICompatibleProvider` |
-| API response | sentinel not returned in characterization |
+| Module globals on blocked external path | not read for route/worker/direct helper classification |
+| Environment on blocked external path | not read by `legacy_alignment_provider_classification` |
+| Provider adapter on blocked external path | not initialized |
+| Transport on blocked external path | not constructed |
+| API response | sentinel not returned in characterization or 9C.4U security tests |
 | AuditRecord | no legacy route audit |
-| AICallLog | redacted previews; live transport exception path did not persist sentinel |
+| AICallLog | not written on blocked external route/worker paths |
 | AlignmentRun/TerminologyCard | sentinel not persisted in characterized fields |
 
 ## Write-set Matrix
@@ -271,10 +336,12 @@ application service.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Unauthorized | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | Validation/permission failure | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Blocked external/live HTTP request after 9C.4U | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Blocked external/live worker job after 9C.4U | existing only | existing only terminal failure | 0 | 0 | 0 | 0 | 0 | 0 | 0 | worker commit | worker failure path |
 | Async direct term | +1 queued | +1 queued | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
-| Sync direct term course | +1 completed | 0 | +1/update | +1 under none/local provider failure | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
-| Sync direct term personal | +1 completed | 0 | +1/update | +1 under none/local provider failure | +1 | 0 | 0 | 0 | 0 | 1 | 0 |
-| Sync document | +1 completed | 0 | +N/update | possible per term | optional personal usage | 0 | 0 | 0 | possible parse-risk audit only | 1 | helper exceptions only |
+| Sync direct term course deterministic | +1 completed | 0 | +1/update | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
+| Sync direct term personal deterministic | +1 completed | 0 | +1/update | 0 | +1 | 0 | 0 | 0 | 0 | 1 | 0 |
+| Sync document deterministic | +1 completed | 0 | +N/update | 0 | optional personal usage | 0 | 0 | 0 | possible parse-risk audit only | 1 | helper exceptions only |
 | Repeated async request | +1 each request | +1 each request | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 each | 0 |
 | Commit failure | unhandled 500 | maybe pending before rollback | pending before rollback | pending before rollback | pending before rollback | 0 | 0 | 0 | 0 | commit raises | no explicit handler rollback |
 
@@ -366,7 +433,9 @@ Lifecycle:
 6. `PHASE_5_REMOVE_DEAD_PATH`: remove the dead handler/helpers and archive or
    document legacy records separately.
 
-The next implementation slice is external execution containment, not route
-extraction.
+Task 9C.4U completes `PHASE_1_EXTERNAL_EXECUTION_CONTAINMENT`: external/live
+legacy execution is blocked at the HTTP route, worker, queued-job retry, and
+direct helper boundaries. The next implementation slice is the replacement
+workflow contract, not route extraction.
 
 Do not move the current handler into a service unchanged.

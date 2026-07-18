@@ -74,6 +74,10 @@ from services.legacy_provider_prompt_mutation import (
     LegacyPromptMutationDependencies,
     execute_legacy_prompt_mutation,
 )
+from services.legacy_alignment_provider_classification import (
+    LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED,
+    classify_legacy_alignment_provider,
+)
 from services.ai_provider import provider_from_selection
 from services.prompt_registry import (
     DEFAULT_PROMPTS,
@@ -315,6 +319,7 @@ ERROR_CODES = {
     "QUOTA_EXCEEDED": 402,
     "AI_PROVIDER_FAILED": 502,
     "AI_PROVIDER_NOT_CONFIGURED": 422,
+    "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED": 422,
     "AI_INVALID_RESPONSE": 502,
     "PDF_FONT_UNAVAILABLE": 422,
     "TOO_MANY_REQUESTS": 429,
@@ -4760,7 +4765,16 @@ def finalize_alignment_result(result, min_ocr_confidence=100):
     return finalize_alignment_decision(result, min_ocr_confidence=min_ocr_confidence)
 
 
-def generate_alignment_result(english_term, courseware_sentence, course, chapter="", scope_type="course", owner_user_id=None, min_ocr_confidence=100):
+def generate_alignment_result(
+    english_term,
+    courseware_sentence,
+    course,
+    chapter="",
+    scope_type="course",
+    owner_user_id=None,
+    min_ocr_confidence=100,
+    provider_metadata=None,
+):
     """
     Evidence-alignment workflow:
     1. retrieve English KB evidence
@@ -4769,6 +4783,7 @@ def generate_alignment_result(english_term, courseware_sentence, course, chapter
     4. compare whether both sides refer to the same academic concept
     """
     english_term = str(english_term or "").strip()
+    metadata = provider_metadata or default_legacy_alignment_provider_metadata()
     course_obj = Course.query.filter_by(name=course).first() if course else None
     course_id = course_obj.id if course_obj else None
     english_chunks = retrieve_evidence_results(
@@ -4797,74 +4812,76 @@ def generate_alignment_result(english_term, courseware_sentence, course, chapter
     )
     chinese_evidence = chinese_chunks
 
-    try:
-        ai_call = call_ai_task(
-            task_type="term_alignment",
-            prompt_key="term_alignment",
-            prompt_version="v1",
-            input_payload={
+    fallback_error = "Local deterministic provider selected."
+    if metadata is None or bool(metadata.get("is_real_provider")):
+        try:
+            ai_call = call_ai_task(
+                task_type="term_alignment",
+                prompt_key="term_alignment",
+                prompt_version="v1",
+                input_payload={
+                    "english_term": english_term,
+                    "course": course,
+                    "chapter": chapter,
+                    "courseware_sentence": courseware_sentence,
+                    "english_evidence": english_evidence,
+                    "translation_candidate_hint": translation_candidate,
+                    "chinese_evidence": chinese_evidence,
+                },
+                user_id=owner_user_id,
+                course_id=course_id,
+            )
+            if ai_call.get("status") != "success":
+                raise RuntimeError(f"{ai_call.get('error_code')}: {ai_call.get('message')}")
+            ai_result = ai_call.get("result", {})
+            raw_confidence = float(ai_result.get("ai_confidence", ai_result.get("confidence_score", 0)) or 0)
+            confidence = int(raw_confidence * 100) if raw_confidence <= 1 else int(raw_confidence)
+            confidence = max(0, min(confidence, 100))
+            final_term = str(ai_result.get("candidate_chinese_term") or ai_result.get("final_chinese_term") or "").strip() or translation_candidate
+            provider_mode = ai_call.get("provider_mode", "")
+            provider_status = "real_provider" if provider_mode == "live" else provider_mode
+            result = {
                 "english_term": english_term,
                 "course": course,
                 "chapter": chapter,
-                "courseware_sentence": courseware_sentence,
-                "english_evidence": english_evidence,
-                "translation_candidate_hint": translation_candidate,
-                "chinese_evidence": chinese_evidence,
-            },
-            user_id=owner_user_id,
-            course_id=course_id,
-        )
-        if ai_call.get("status") != "success":
-            raise RuntimeError(f"{ai_call.get('error_code')}: {ai_call.get('message')}")
-        ai_result = ai_call.get("result", {})
-        raw_confidence = float(ai_result.get("ai_confidence", ai_result.get("confidence_score", 0)) or 0)
-        confidence = int(raw_confidence * 100) if raw_confidence <= 1 else int(raw_confidence)
-        confidence = max(0, min(confidence, 100))
-        final_term = str(ai_result.get("candidate_chinese_term") or ai_result.get("final_chinese_term") or "").strip() or translation_candidate
-        provider_mode = ai_call.get("provider_mode", "")
-        provider_status = "real_provider" if provider_mode == "live" else provider_mode
-        result = {
-            "english_term": english_term,
-            "course": course,
-            "chapter": chapter,
-            "ai_translation_candidate": final_term,
-            "final_chinese_term": final_term,
-            "chinese_term": final_term,
-            "explanation": str(ai_result.get("concept_explanation") or ai_result.get("explanation") or "").strip(),
-            "confidence_score": confidence,
-            "alignment_status": str(ai_result.get("alignment_status", "")).strip(),
-            "alignment_reason": str(ai_result.get("alignment_reason", "")).strip(),
-            "review_status": "pending_quality_control" if ai_result.get("requires_human_review") else str(ai_result.get("review_status", "")).strip(),
-            "risk_note": str(ai_result.get("risk_note", "")).strip(),
-            "english_kb_evidence": first_evidence_text(english_evidence),
-            "chinese_kb_evidence": first_evidence_text(chinese_evidence),
-            "english_evidence_items": english_evidence,
-            "chinese_evidence_items": chinese_evidence,
-            "ai_provider": ai_call.get("provider_name", AI_PROVIDER),
-            "ai_provider_mode": provider_mode,
-            "ai_model": ai_call.get("model_name", ""),
-            "provider_status": provider_status,
-            "is_real_provider": provider_mode == "live",
-            "prompt_key": ai_call.get("prompt_key", "term_alignment"),
-            "prompt_version": ai_call.get("prompt_version", "v1"),
-            "retrieval_version": RETRIEVAL_VERSION,
-            "ai_call_log_id": ai_call.get("ai_call_log_id"),
-        }
-        if provider_mode != "live":
-            result["risk_note"] = result["risk_note"] or "No live AI provider configured; local heuristic/mock result requires Quality Control."
-        else:
-            model_ok, model_reasons = can_use_model_for_auto_approval(
-                result["ai_provider"],
-                result["ai_model"],
-                result["prompt_version"],
-            )
-            if not model_ok:
-                result["quality_flags"] = sorted(set((result.get("quality_flags") or []) + ["model_not_evaluated"]))
-                result["risk_note"] = result["risk_note"] or "; ".join(model_reasons[:3])
-        return finalize_alignment_result(result, min_ocr_confidence=min_ocr_confidence)
-    except Exception as exc:
-        fallback_error = str(exc)
-        add_system_log("warning", "ai_provider", f"{AI_PROVIDER} failed or unavailable; using local heuristic fallback: {fallback_error}")
+                "ai_translation_candidate": final_term,
+                "final_chinese_term": final_term,
+                "chinese_term": final_term,
+                "explanation": str(ai_result.get("concept_explanation") or ai_result.get("explanation") or "").strip(),
+                "confidence_score": confidence,
+                "alignment_status": str(ai_result.get("alignment_status", "")).strip(),
+                "alignment_reason": str(ai_result.get("alignment_reason", "")).strip(),
+                "review_status": "pending_quality_control" if ai_result.get("requires_human_review") else str(ai_result.get("review_status", "")).strip(),
+                "risk_note": str(ai_result.get("risk_note", "")).strip(),
+                "english_kb_evidence": first_evidence_text(english_evidence),
+                "chinese_kb_evidence": first_evidence_text(chinese_evidence),
+                "english_evidence_items": english_evidence,
+                "chinese_evidence_items": chinese_evidence,
+                "ai_provider": ai_call.get("provider_name", AI_PROVIDER),
+                "ai_provider_mode": provider_mode,
+                "ai_model": ai_call.get("model_name", ""),
+                "provider_status": provider_status,
+                "is_real_provider": provider_mode == "live",
+                "prompt_key": ai_call.get("prompt_key", "term_alignment"),
+                "prompt_version": ai_call.get("prompt_version", "v1"),
+                "retrieval_version": RETRIEVAL_VERSION,
+                "ai_call_log_id": ai_call.get("ai_call_log_id"),
+            }
+            if provider_mode != "live":
+                result["risk_note"] = result["risk_note"] or "No live AI provider configured; local heuristic/mock result requires Quality Control."
+            else:
+                model_ok, model_reasons = can_use_model_for_auto_approval(
+                    result["ai_provider"],
+                    result["ai_model"],
+                    result["prompt_version"],
+                )
+                if not model_ok:
+                    result["quality_flags"] = sorted(set((result.get("quality_flags") or []) + ["model_not_evaluated"]))
+                    result["risk_note"] = result["risk_note"] or "; ".join(model_reasons[:3])
+            return finalize_alignment_result(result, min_ocr_confidence=min_ocr_confidence)
+        except Exception as exc:
+            fallback_error = str(exc)
+            add_system_log("warning", "ai_provider", f"{AI_PROVIDER} failed or unavailable; using local heuristic fallback: {fallback_error}")
 
     confidence = 58 if english_evidence and chinese_evidence else 35
     final_term = translation_candidate
@@ -4891,10 +4908,10 @@ def generate_alignment_result(english_term, courseware_sentence, course, chapter
         "chinese_kb_evidence": first_evidence_text(chinese_evidence),
         "english_evidence_items": english_evidence,
         "chinese_evidence_items": chinese_evidence,
-        "ai_provider": AI_PROVIDER,
-        "ai_provider_mode": "provider_failed" if AI_PROVIDER not in {"none", "mock"} else "local_heuristic",
-        "ai_model": "local_heuristic",
-        "provider_status": "provider_failed" if AI_PROVIDER not in {"none", "mock"} else "local_heuristic",
+        "ai_provider": (metadata or {}).get("provider", AI_PROVIDER),
+        "ai_provider_mode": (metadata or {}).get("provider_mode", "provider_failed" if AI_PROVIDER not in {"none", "mock"} else "local_heuristic"),
+        "ai_model": (metadata or {}).get("model_name", "local_heuristic"),
+        "provider_status": (metadata or {}).get("provider_mode", "provider_failed" if AI_PROVIDER not in {"none", "mock"} else "local_heuristic"),
         "prompt_key": "term_alignment",
         "prompt_version": "v1",
         "retrieval_version": RETRIEVAL_VERSION
@@ -5932,7 +5949,7 @@ def run_evaluation_set(evaluation_set, user, split="test", model_version="", pro
     if not items:
         raise ValueError("Evaluation set 没有测试项。")
 
-    meta = current_provider_metadata()
+    meta = default_legacy_alignment_provider_metadata()
     started = current_time_text()
     run = EvaluationRun(
         evaluation_set_id=evaluation_set.id,
@@ -6269,6 +6286,17 @@ def process_alignment_job(job):
     alignment_run = db.session.get(AlignmentRun, job.alignment_run_id) if job.alignment_run_id else None
     if alignment_run is None:
         raise JobExecutionError("AlignmentRun not found.", "RESOURCE_NOT_FOUND", retryable=False)
+    classification = classify_legacy_alignment_job(job, alignment_run=alignment_run, data=data)
+    if classification.external_execution_blocked:
+        raise JobExecutionError(
+            "Legacy alignment external execution is disabled.",
+            LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED,
+            retryable=False,
+        )
+    provider_metadata = legacy_alignment_provider_metadata(
+        classification,
+        model_name=str(data.get("model_name") or data.get("model") or "").strip(),
+    )
     alignment_run.status = "running"
     alignment_run.started_at = alignment_run.started_at or current_time_text()
     update_job_progress(job, 10, 100, "Starting terminology alignment")
@@ -6290,7 +6318,8 @@ def process_alignment_job(job):
             scope_type=document.scope_type if document.scope_type == "personal" else "course",
             owner_user_id=document.owner_user_id if document.scope_type == "personal" else None,
             source_document_id=document.id,
-            triggered_by_user_id=job.created_by
+            triggered_by_user_id=job.created_by,
+            provider_metadata=provider_metadata,
         )
         for card in cards:
             card.alignment_run_id = alignment_run.id
@@ -6315,7 +6344,8 @@ def process_alignment_job(job):
         course=course.name if course else "",
         chapter=str(data.get("chapter", "")).strip(),
         scope_type=scope_type,
-        owner_user_id=job.owner_user_id if scope_type == "personal" else None
+        owner_user_id=job.owner_user_id if scope_type == "personal" else None,
+        provider_metadata=provider_metadata,
     )
     alignment["alignment_run_id"] = alignment_run.id
     card = create_or_update_card_from_alignment(
@@ -6816,6 +6846,122 @@ def current_provider_metadata():
         "term_extraction_prompt_version": TERM_EXTRACTION_PROMPT_VERSION,
         "retrieval_version": RETRIEVAL_VERSION,
     }
+
+
+def _legacy_alignment_first_provider_value(data):
+    if not isinstance(data, dict):
+        return None
+    for key in ("provider", "provider_name", "ai_provider"):
+        value = data.get(key)
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
+def _legacy_alignment_first_provider_mode(data):
+    if not isinstance(data, dict):
+        return None
+    for key in ("provider_mode", "ai_provider_mode"):
+        value = data.get(key)
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
+def _legacy_alignment_custom_endpoint_present(data):
+    if not isinstance(data, dict):
+        return False
+    for key in ("base_url", "api_base_url", "provider_url", "endpoint", "custom_base_url"):
+        if key in data and str(data.get(key) or "").strip():
+            return True
+    return False
+
+
+def _legacy_alignment_default_provider_identity():
+    config = AIProviderConfig.query.filter_by(is_default=True, is_enabled=True).order_by(AIProviderConfig.id.desc()).first()
+    if config is not None:
+        return {
+            "provider": getattr(config, "provider_name", "") or "none",
+            "provider_mode": getattr(config, "provider_mode", "") or "none",
+            "model_name": getattr(config, "default_model", "") or "",
+        }
+    return {
+        "provider": AI_PROVIDER or "none",
+        "provider_mode": AI_PROVIDER_MODE or "none",
+        "model_name": AI_MODEL or "",
+    }
+
+
+def classify_legacy_alignment_request(data):
+    default_identity = _legacy_alignment_default_provider_identity()
+    return classify_legacy_alignment_provider(
+        _legacy_alignment_first_provider_value(data),
+        provider_mode_value=_legacy_alignment_first_provider_mode(data),
+        default_provider_value=default_identity["provider"],
+        default_provider_mode_value=default_identity["provider_mode"],
+        custom_endpoint_present=_legacy_alignment_custom_endpoint_present(data),
+    )
+
+
+def classify_legacy_alignment_job(job, alignment_run=None, data=None):
+    data = data if isinstance(data, dict) else {}
+    provider_value = _legacy_alignment_first_provider_value(data)
+    provider_mode = _legacy_alignment_first_provider_mode(data)
+    if provider_value is None and alignment_run is not None:
+        provider_value = getattr(alignment_run, "ai_provider", "") or getattr(alignment_run, "provider", "")
+    if provider_mode is None and alignment_run is not None:
+        provider_mode = getattr(alignment_run, "ai_provider_mode", "") or getattr(alignment_run, "provider_mode", "")
+    default_identity = _legacy_alignment_default_provider_identity()
+    return classify_legacy_alignment_provider(
+        provider_value,
+        provider_mode_value=provider_mode,
+        default_provider_value=default_identity["provider"],
+        default_provider_mode_value=default_identity["provider_mode"],
+        custom_endpoint_present=_legacy_alignment_custom_endpoint_present(data),
+    )
+
+
+def legacy_alignment_provider_metadata(classification, model_name=""):
+    provider = classification.effective_provider or "none"
+    mode = classification.provider_class if classification.deterministic_allowed else "blocked"
+    model = str(model_name or "").strip() or provider
+    return {
+        "provider": provider,
+        "provider_mode": mode,
+        "model_name": model,
+        "is_real_provider": False,
+        "prompt_version": ALIGNMENT_PROMPT_VERSION,
+        "prompt_key": "term_alignment",
+        "term_extraction_prompt_version": TERM_EXTRACTION_PROMPT_VERSION,
+        "retrieval_version": RETRIEVAL_VERSION,
+    }
+
+
+def default_legacy_alignment_provider_metadata(model_name=""):
+    default_identity = _legacy_alignment_default_provider_identity()
+    classification = classify_legacy_alignment_provider(
+        None,
+        default_provider_value=default_identity["provider"],
+        default_provider_mode_value=default_identity["provider_mode"],
+    )
+    if classification.external_execution_blocked:
+        raise RuntimeError(LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED)
+    return legacy_alignment_provider_metadata(
+        classification,
+        model_name=str(model_name or default_identity.get("model_name") or "").strip(),
+    )
+
+
+def legacy_alignment_external_execution_error(classification):
+    return api_error(
+        LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED,
+        "Legacy alignment external execution is disabled. Use an allowlisted local deterministic provider or the future governed document alignment workflow.",
+        422,
+        {
+            "reason_code": classification.reason_code,
+            "external_execution_blocked": True,
+        },
+    )
 
 
 def current_system_status(user=None):
@@ -8655,7 +8801,16 @@ def create_kb_version(scope_type, course_id, created_by, source_count=1, chunk_c
     return version
 
 
-def run_alignment_for_chunks(chunks, course=None, scope_type="course", owner_user_id=None, source_document_id=None, limit_terms=12, triggered_by_user_id=None):
+def run_alignment_for_chunks(
+    chunks,
+    course=None,
+    scope_type="course",
+    owner_user_id=None,
+    source_document_id=None,
+    limit_terms=12,
+    triggered_by_user_id=None,
+    provider_metadata=None,
+):
     parse_quality_metadata = parse_quality_metadata_from_chunks(chunks)
     if parse_quality_risk_service.should_block_downstream_creation(parse_quality_metadata):
         return []
@@ -8664,7 +8819,7 @@ def run_alignment_for_chunks(chunks, course=None, scope_type="course", owner_use
         for chunk in chunks
         if chunk.content and not contains_formula_placeholder(chunk.content)
     )
-    meta = current_provider_metadata()
+    meta = provider_metadata or default_legacy_alignment_provider_metadata()
     alignment_run = AlignmentRun(
         document_id=source_document_id,
         course_id=course.id if course else None,
@@ -8749,7 +8904,8 @@ def run_alignment_for_chunks(chunks, course=None, scope_type="course", owner_use
                 chapter="",
                 scope_type=scope_type,
                 owner_user_id=owner_user_id,
-                min_ocr_confidence=min_ocr
+                min_ocr_confidence=min_ocr,
+                provider_metadata=meta,
             )
             alignment = apply_parse_quality_to_alignment(alignment, parse_quality_metadata)
             alignment["alignment_run_id"] = alignment_run.id
@@ -10161,7 +10317,13 @@ def run_alignment():
         elif not english_term:
             return api_error("VALIDATION_ERROR", "english_term 或 document_id 必须提供一个。", 400)
 
-        meta = current_provider_metadata()
+        classification = classify_legacy_alignment_request(data)
+        if classification.external_execution_blocked:
+            return legacy_alignment_external_execution_error(classification)
+        meta = legacy_alignment_provider_metadata(
+            classification,
+            model_name=str(data.get("model_name") or data.get("model") or "").strip(),
+        )
         alignment_run = AlignmentRun(
             document_id=document.id if document else None,
             course_id=course.id if course else None,
@@ -10195,6 +10357,9 @@ def run_alignment():
                 "chapter": str(data.get("chapter", "")).strip(),
                 "scope_type": document.scope_type if document else scope_type,
                 "course_id": course.id if course else None,
+                "provider": meta["provider"],
+                "provider_mode": meta.get("provider_mode", ""),
+                "model_name": meta["model_name"],
             }
         )
         db.session.commit()
@@ -10213,6 +10378,13 @@ def run_alignment():
             return api_error("RESOURCE_NOT_FOUND", "文档不存在。", 404)
         if document.scope_type == "personal" and document.owner_user_id != user.id and user.role != "admin":
             return api_error("PERMISSION_DENIED", "无权对齐该个人文档。", 403)
+        classification = classify_legacy_alignment_request(data)
+        if classification.external_execution_blocked:
+            return legacy_alignment_external_execution_error(classification)
+        provider_metadata = legacy_alignment_provider_metadata(
+            classification,
+            model_name=str(data.get("model_name") or data.get("model") or "").strip(),
+        )
         chunks = DocumentChunk.query.filter_by(document_id=document.id).all()
         cards = run_alignment_for_chunks(
             chunks,
@@ -10220,7 +10392,8 @@ def run_alignment():
             scope_type=document.scope_type if document.scope_type == "personal" else "course",
             owner_user_id=document.owner_user_id if document.scope_type == "personal" else None,
             source_document_id=document.id,
-            triggered_by_user_id=user.id
+            triggered_by_user_id=user.id,
+            provider_metadata=provider_metadata,
         )
         db.session.commit()
         return jsonify({
@@ -10233,7 +10406,13 @@ def run_alignment():
         return api_error("VALIDATION_ERROR", "english_term 或 document_id 必须提供一个。", 400)
 
     course_name = course.name if course else ""
-    meta = current_provider_metadata()
+    classification = classify_legacy_alignment_request(data)
+    if classification.external_execution_blocked:
+        return legacy_alignment_external_execution_error(classification)
+    meta = legacy_alignment_provider_metadata(
+        classification,
+        model_name=str(data.get("model_name") or data.get("model") or "").strip(),
+    )
     alignment_run = AlignmentRun(
         document_id=None,
         course_id=course.id if course else None,
@@ -10259,7 +10438,8 @@ def run_alignment():
         course=course_name,
         chapter=str(data.get("chapter", "")).strip(),
         scope_type=scope_type,
-        owner_user_id=user.id if scope_type == "personal" else None
+        owner_user_id=user.id if scope_type == "personal" else None,
+        provider_metadata=meta,
     )
     alignment["alignment_run_id"] = alignment_run.id
     card = create_or_update_card_from_alignment(
@@ -13836,7 +14016,7 @@ def evaluation_run():
     if not can_manage_evaluation_set(user, evaluation_set):
         return api_error("PERMISSION_DENIED", "无权运行该 EvaluationSet。", 403)
     if not sync_requested:
-        meta = current_provider_metadata()
+        meta = default_legacy_alignment_provider_metadata()
         now = current_time_text()
         run = EvaluationRun(
             evaluation_set_id=evaluation_set.id,
@@ -14033,6 +14213,13 @@ def retry_background_job(job_id):
         return api_error("PERMISSION_DENIED", "无权重试该后台任务。", 403)
     if job.status != "failed":
         return api_error("VALIDATION_ERROR", "只有 failed 任务可以手动重试。", 400, {"status": job.status})
+    if job.error_code == LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED:
+        return api_error(
+            LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED,
+            "Legacy alignment external execution is disabled.",
+            422,
+            {"retry_blocked": True},
+        )
     job.status = "queued"
     job.error_code = ""
     job.error_message = ""

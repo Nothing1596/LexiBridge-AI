@@ -38,6 +38,12 @@ def test_generate_alignment_uses_call_ai_task(app_module, monkeypatch):
             "Fourier Transform",
             "Fourier Transform converts a signal.",
             "No Such Course",
+            provider_metadata={
+                "provider": "deepseek",
+                "provider_mode": "live",
+                "model_name": "deepseek-chat",
+                "is_real_provider": True,
+            },
         )
         assert called["count"] == 1
         assert result["review_status"] == "needs_more_evidence"

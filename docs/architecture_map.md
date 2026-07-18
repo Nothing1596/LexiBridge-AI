@@ -202,10 +202,12 @@ Legacy alignment run:
   and `AlignmentProviderUsageRecord`.
 - It bypasses formal provider policy, provider preflight, request-id, audit,
   formal parser, and attach gates.
-- A live default legacy provider with a usable key can reach legacy transport
-  intent. Task 9C.4T now prohibits legacy external execution and requires
-  a replacement `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION` workflow before
-  frontend cutover, disabled response, and final removal.
+- Task 9C.4U blocks live/external legacy execution before HTTP route writes,
+  worker execution, queued-job retry, and direct helper transport intent.
+- The route is still active frontend compatibility, not a formal verification
+  workflow. It still requires replacement
+  `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION` before frontend cutover, disabled
+  response, and final removal.
 
 ## Permission Boundaries
 

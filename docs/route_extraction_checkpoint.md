@@ -804,6 +804,35 @@ Post-9C.4T status:
 - Extracted routes remain 32.
 - `RouteCoreDependencies` remains 9 fields.
 
-Next recommended slice: disable legacy alignment external/live execution and
-credential flow while keeping the current frontend compatibility contract.
-Do not build the replacement document-alignment workflow in the same task.
+Next recommended slice after 9C.4T: disable legacy alignment external/live
+execution and credential flow while keeping the current frontend compatibility
+contract. Do not build the replacement document-alignment workflow in the same
+task.
+
+## Task 9C.4U Legacy Alignment External Execution Containment
+
+Task 9C.4U keeps `POST /api/alignment/run` in `backend/app.py`; it is not a
+route extraction. It adds a pure provider classification boundary and blocks
+legacy external/live execution before route writes, worker execution, retry, or
+direct helper transport intent.
+
+Post-9C.4U status:
+
+- `POST /api/alignment/run` URL/method/endpoint remain unchanged.
+- The frontend document-alignment compatibility flow remains active.
+- External/live intent returns or records `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`.
+- Safe transitional providers are explicit allowlist values only:
+  `none`, `mock`, and `local_heuristic` aliases.
+- Unknown/custom provider names and custom endpoint/base URL metadata fail
+  closed.
+- `urllib.Request`, `urlopen`, socket, adapter construction, and credential
+  metadata are not reached on blocked route/worker/helper paths.
+- Historical queued/running/retrying external legacy jobs are quarantined by
+  the worker gate and cannot be retried into execution.
+- OpenAPI marks `/api/alignment/run` as deprecated but does not declare HTTP
+  410 or a replacement endpoint.
+- Direct `@app.route` count remains unchanged because the route was not moved.
+
+Next recommended slice: define the formal document alignment workflow contract
+and boundary. Do not extract the legacy route as a service and do not cut over
+the frontend until the replacement workflow exists.

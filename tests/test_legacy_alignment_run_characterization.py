@@ -206,6 +206,12 @@ def test_legacy_alignment_run_route_registration_frontend_and_openapi(app_module
     contract = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
     assert "/api/alignment/run" in contract["paths"]
     assert "post" in contract["paths"]["/api/alignment/run"]
+    operation = contract["paths"]["/api/alignment/run"]["post"]
+    assert operation["deprecated"] is True
+    description = operation["description"]
+    assert "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED" in description
+    assert "LEGACY_ALIGNMENT_RUN_DEPRECATED" in description
+    assert "not HTTP 410" in description
     frontend = FRONTEND.read_text(encoding="utf-8")
     assert 'api("/api/alignment/run"' in frontend
     assert "runAlignmentForDocument" in frontend
@@ -404,7 +410,7 @@ def test_legacy_alignment_run_sync_direct_uses_legacy_execution_bypasses_formal_
     assert body["card"]["status"] in {"needs_more_evidence", "pending_quality_control"}
     assert_no_secret_payload(body)
     assert network_calls == {"socket": 0, "urlopen": 0}
-    assert provider_calls["count"] == 1
+    assert provider_calls["count"] == 0
     assert formal_calls == {"policy": 0, "preflight": 0}
 
     with app_module.app.app_context():
@@ -412,7 +418,7 @@ def test_legacy_alignment_run_sync_direct_uses_legacy_execution_bypasses_formal_
         assert after["alignment_runs"] == before["alignment_runs"] + 1
         assert after["background_jobs"] == before["background_jobs"]
         assert after["terminology_cards"] == before["terminology_cards"] + 1
-        assert after["ai_call_logs"] == before["ai_call_logs"] + 1
+        assert after["ai_call_logs"] == before["ai_call_logs"]
         assert after["usage_records"] == before["usage_records"]
         assert after["verification_runs"] == before["verification_runs"]
         assert after["provider_usage"] == before["provider_usage"]
@@ -471,23 +477,28 @@ def test_legacy_alignment_run_sync_document_creates_legacy_run_and_cards_not_for
         assert after["concept_cards"] == before["concept_cards"]
 
 
-def test_legacy_alignment_run_can_reach_live_transport_intent_when_live_provider_is_default(
+def test_legacy_alignment_run_live_transport_intent_is_blocked_before_request_construction(
     client,
     app_module,
     teacher_token,
     test_course,
     monkeypatch,
 ):
-    transport_calls = {"urlopen": 0}
+    transport_calls = {"request": 0, "urlopen": 0}
+
+    def request_spy(*args, **kwargs):
+        transport_calls["request"] += 1
+        raise AssertionError("legacy live urllib Request should not be constructed")
 
     def transport_spy(*args, **kwargs):
         transport_calls["urlopen"] += 1
-        raise AssertionError("controlled legacy live transport stop before socket")
+        raise AssertionError("legacy live urlopen should not be called")
 
     def blocked_socket(*args, **kwargs):
         raise AssertionError("legacy live transport reached raw socket")
 
     monkeypatch.setattr(socket, "socket", blocked_socket)
+    monkeypatch.setattr(urllib.request, "Request", request_spy)
     monkeypatch.setattr(urllib.request, "urlopen", transport_spy)
     monkeypatch.setenv("AI_PROVIDER", "deepseek")
     monkeypatch.setenv("AI_PROVIDER_MODE", "live")
@@ -525,14 +536,20 @@ def test_legacy_alignment_run_can_reach_live_transport_intent_when_live_provider
         request_id="legacy-run-live-intent",
     )
 
-    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.status_code == 422, response.get_data(as_text=True)
     body = response.get_json()
-    assert body["status"] == "success"
-    assert transport_calls["urlopen"] >= 1
+    assert body["status"] == "error"
+    assert body["error_code"] == "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED"
+    assert body["reason_code"] == "LEGACY_ALIGNMENT_EXTERNAL_PROVIDER_DISABLED"
+    assert transport_calls == {"request": 0, "urlopen": 0}
     assert_no_secret_payload(body)
     with app_module.app.app_context():
         after = counts(app_module)
-        assert after["alignment_runs"] == before["alignment_runs"] + 1
+        assert after["alignment_runs"] == before["alignment_runs"]
+        assert after["background_jobs"] == before["background_jobs"]
+        assert after["terminology_cards"] == before["terminology_cards"]
+        assert after["usage_records"] == before["usage_records"]
+        assert after["ai_call_logs"] == before["ai_call_logs"]
         assert after["verification_runs"] == before["verification_runs"]
         assert after["provider_usage"] == before["provider_usage"]
         assert after["provider_preflight"] == before["provider_preflight"]

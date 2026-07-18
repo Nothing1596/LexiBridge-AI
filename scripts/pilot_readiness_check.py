@@ -279,6 +279,7 @@ def provider_network_disabled_code() -> str:
 import importlib.util
 import socket
 import sys
+import urllib.request
 from pathlib import Path
 
 root = Path.cwd()
@@ -299,9 +300,17 @@ login = client.post("/api/auth/login", json={
 assert login.status_code == 200, login.get_data(as_text=True)
 token = login.get_json()["token"]
 original_connect = socket.socket.connect
+original_request = urllib.request.Request
+original_urlopen = urllib.request.urlopen
 def blocked_connect(*args, **kwargs):
     raise AssertionError("external network is disabled during pilot readiness checks")
+def blocked_request(*args, **kwargs):
+    raise AssertionError("legacy alignment urllib Request must not be constructed")
+def blocked_urlopen(*args, **kwargs):
+    raise AssertionError("legacy alignment urlopen must not be called")
 socket.socket.connect = blocked_connect
+urllib.request.Request = blocked_request
+urllib.request.urlopen = blocked_urlopen
 try:
     response = client.post(
         "/api/alignment/verify",
@@ -310,6 +319,8 @@ try:
     )
 finally:
     socket.socket.connect = original_connect
+    urllib.request.Request = original_request
+    urllib.request.urlopen = original_urlopen
 assert response.status_code == 200, response.get_data(as_text=True)
 payload = response.get_json()["data"]
 assert payload["verification_status"] == "failed"
@@ -343,7 +354,136 @@ assert any(
     item.get("error_code") == "LEGACY_LIVE_PROBE_DISABLED"
     for item in legacy_payload["data"]["items"]
 ), legacy_payload
-print("disabled external provider and legacy live probe produced safe results without network")
+ctx = app_module.app.app_context()
+ctx.push()
+course = app_module.Course.query.filter_by(name=summary["course"]).first()
+admin = app_module.User.query.filter_by(email=summary["users"]["admin"]["email"]).first()
+assert course is not None
+assert admin is not None
+before_route = {
+    "alignment_runs": app_module.AlignmentRun.query.count(),
+    "background_jobs": app_module.BackgroundJob.query.count(),
+    "terminology_cards": app_module.TerminologyCard.query.count(),
+    "usage_records": app_module.UsageRecord.query.count(),
+    "ai_call_logs": app_module.AICallLog.query.count(),
+    "verification_runs": app_module.AlignmentVerificationRun.query.count(),
+    "audit_records": app_module.AuditRecord.query.count(),
+}
+def fail_metadata(*args, **kwargs):
+    raise AssertionError("legacy alignment blocked path must not load provider metadata")
+app_module.current_provider_metadata = fail_metadata
+original_connect = socket.socket.connect
+original_request = urllib.request.Request
+original_urlopen = urllib.request.urlopen
+socket.socket.connect = blocked_connect
+urllib.request.Request = blocked_request
+urllib.request.urlopen = blocked_urlopen
+try:
+    route_response = client.post(
+        "/api/alignment/run",
+        json={
+            "scope_type": "course",
+            "course_id": course.id,
+            "english_term": "Pilot readiness external legacy route",
+            "courseware_sentence": "External provider must be blocked before transport.",
+            "provider": "deepseek",
+            "base_url": "https://example.invalid/readiness-legacy-alignment?token=LEXIBRIDGE_READINESS_SENTINEL_SECRET",
+        },
+        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "pilot-readiness-legacy-alignment-external-disabled"},
+    )
+finally:
+    socket.socket.connect = original_connect
+    urllib.request.Request = original_request
+    urllib.request.urlopen = original_urlopen
+assert route_response.status_code == 422, route_response.get_data(as_text=True)
+route_payload = route_response.get_json()
+route_serialized = str(route_payload)
+assert route_payload["error_code"] == "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED", route_payload
+assert "LEXIBRIDGE_READINESS_SENTINEL_SECRET" not in route_serialized
+after_route = {
+    "alignment_runs": app_module.AlignmentRun.query.count(),
+    "background_jobs": app_module.BackgroundJob.query.count(),
+    "terminology_cards": app_module.TerminologyCard.query.count(),
+    "usage_records": app_module.UsageRecord.query.count(),
+    "ai_call_logs": app_module.AICallLog.query.count(),
+    "verification_runs": app_module.AlignmentVerificationRun.query.count(),
+    "audit_records": app_module.AuditRecord.query.count(),
+}
+assert after_route == before_route, (before_route, after_route)
+alignment_run = app_module.AlignmentRun(
+    course_id=course.id,
+    triggered_by=admin.id,
+    provider="deepseek",
+    model_name="deepseek-chat",
+    ai_provider="deepseek",
+    ai_provider_mode="live",
+    ai_model="deepseek-chat",
+    prompt_key="term_alignment",
+    prompt_version="v1",
+    retrieval_version=app_module.RETRIEVAL_VERSION,
+    status="queued",
+    started_at="",
+)
+app_module.db.session.add(alignment_run)
+app_module.db.session.flush()
+job = app_module.create_background_job(
+    "alignment_run",
+    admin.id,
+    course_id=course.id,
+    alignment_run_id=alignment_run.id,
+    scope_type="course",
+    input_data={
+        "provider": "deepseek",
+        "provider_mode": "live",
+        "base_url": "https://example.invalid/readiness-worker?token=LEXIBRIDGE_READINESS_SENTINEL_SECRET",
+        "english_term": "Pilot readiness external worker",
+        "courseware_sentence": "Queued external job must be quarantined.",
+    },
+)
+app_module.db.session.commit()
+before_worker = {
+    "terminology_cards": app_module.TerminologyCard.query.count(),
+    "usage_records": app_module.UsageRecord.query.count(),
+    "ai_call_logs": app_module.AICallLog.query.count(),
+    "verification_runs": app_module.AlignmentVerificationRun.query.count(),
+    "audit_records": app_module.AuditRecord.query.count(),
+}
+original_connect = socket.socket.connect
+original_request = urllib.request.Request
+original_urlopen = urllib.request.urlopen
+socket.socket.connect = blocked_connect
+urllib.request.Request = blocked_request
+urllib.request.urlopen = blocked_urlopen
+try:
+    processed = app_module.run_background_job(job.id, worker_id="pilot-readiness-worker")
+finally:
+    socket.socket.connect = original_connect
+    urllib.request.Request = original_request
+    urllib.request.urlopen = original_urlopen
+assert processed.status == "failed"
+assert processed.error_code == "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED"
+assert "LEXIBRIDGE_READINESS_SENTINEL_SECRET" not in (processed.error_message or "")
+after_worker = {
+    "terminology_cards": app_module.TerminologyCard.query.count(),
+    "usage_records": app_module.UsageRecord.query.count(),
+    "ai_call_logs": app_module.AICallLog.query.count(),
+    "verification_runs": app_module.AlignmentVerificationRun.query.count(),
+    "audit_records": app_module.AuditRecord.query.count(),
+}
+assert after_worker == before_worker, (before_worker, after_worker)
+legacy_external_runnable_jobs_count = 0
+for existing_job in app_module.BackgroundJob.query.filter(app_module.BackgroundJob.status.in_(["queued", "running", "retrying"])).all():
+    data = app_module.job_input(existing_job)
+    run = app_module.db.session.get(app_module.AlignmentRun, existing_job.alignment_run_id) if existing_job.alignment_run_id else None
+    classification = app_module.classify_legacy_alignment_job(existing_job, alignment_run=run, data=data)
+    if classification.external_execution_blocked:
+        legacy_external_runnable_jobs_count += 1
+assert legacy_external_runnable_jobs_count == 0
+openapi_text = (root / "docs" / "openapi.yaml").read_text(encoding="utf-8")
+alignment_run_section = openapi_text.split("/api/alignment/run:", 1)[1].split("/api/", 1)[0]
+assert "deprecated: true" in alignment_run_section
+assert "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED" in alignment_run_section
+print("disabled external provider, legacy live probe, legacy alignment route, and legacy worker produced safe results without network")
 """
 
 

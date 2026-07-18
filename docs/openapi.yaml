@@ -53,6 +53,7 @@ components:
             - QUOTA_EXCEEDED
             - AI_PROVIDER_FAILED
             - AI_PROVIDER_NOT_CONFIGURED
+            - LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED
             - AI_INVALID_RESPONSE
             - PDF_FONT_UNAVAILABLE
             - TOO_MANY_REQUESTS
@@ -825,6 +826,15 @@ paths:
   /api/alignment/run:
     post:
       summary: Run terminology alignment for a document or direct term
+      deprecated: true
+      description: >
+        Legacy temporary frontend compatibility endpoint. External/live
+        execution is disabled in this path and returns
+        LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED. Only explicitly
+        allowlisted local deterministic compatibility modes may continue.
+        The formal replacement document-alignment workflow is not available
+        yet. This endpoint is not HTTP 410 until all callers are migrated; a
+        later zero-caller phase will use LEGACY_ALIGNMENT_RUN_DEPRECATED.
       requestBody:
         required: true
         content:

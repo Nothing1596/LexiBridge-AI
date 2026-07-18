@@ -137,6 +137,25 @@ and audit behavior.
 The next production-code task after this ADR must be the security containment
 task for legacy external execution.
 
+Implementation status after Task 9C.4U:
+
+- `PHASE_1_EXTERNAL_EXECUTION_CONTAINMENT_COMPLETE` for all currently reachable
+  legacy execution entries.
+- `POST /api/alignment/run` keeps its frontend compatibility contract but
+  returns `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED` for external/live
+  intent before creating run/job/card records.
+- `process_alignment_job(...)` has an independent worker gate and terminates
+  external/live legacy jobs with `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`
+  before provider execution.
+- `/api/jobs/<id>/retry` refuses to requeue a quarantined external legacy
+  alignment job.
+- Direct legacy alignment helpers fail closed for external/live default
+  provider configuration.
+- The deprecated endpoint is not HTTP 410 yet because current frontend callers
+  still exist.
+- The replacement workflow, frontend cutover, disabled endpoint response, and
+  dead-path removal remain future phases.
+
 ## Transitional Provider Modes
 
 During the compatibility period, only local or deterministic behavior may

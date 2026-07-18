@@ -106,7 +106,7 @@ The remaining legacy provider admin write/high-risk routes should not be extract
 - `GET /api/alignment/runs` is a role-filtered listing for student/teacher/admin.
 - `GET /api/alignment/runs/<int:run_id>` is a role-filtered detail route.
 
-Task 9C.4S concluded `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`. Task 9C.4T accepts `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`: the POST route is temporary frontend compatibility only, legacy external execution is prohibited, direct aliasing to `/api/alignment/verify` is prohibited, and replacement must be a formal document-alignment orchestration workflow. The two GET routes should be extracted only after deciding whether this legacy alignment-run surface remains as a compatibility read model.
+Task 9C.4S concluded `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`. Task 9C.4T accepts `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`: the POST route is temporary frontend compatibility only, legacy external execution is prohibited, direct aliasing to `/api/alignment/verify` is prohibited, and replacement must be a formal document-alignment orchestration workflow. Task 9C.4U contains legacy external/live execution at the POST route, worker, retry, queued-job, and direct-helper boundaries without extracting the route. The two GET routes should be extracted only after deciding whether this legacy alignment-run surface remains as a compatibility read model.
 
 ## Duplicate And Alias Matrix
 
@@ -244,7 +244,7 @@ Confirmed contract:
 
 Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
 
-Task 9C.4M establishes the local readiness service. Task 9C.4N extracts the thin healthcheck route adapter while preserving caller-owned transaction behavior. Task 9C.4O characterizes prompt mutation and records `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`; Task 9C.4P defines `LEGACY_PROMPT_MUTABLE_REVISION_V1`; Task 9C.4Q extracts the prompt mutation application service so seed/upsert/commit/rollback are no longer implemented directly in the HTTP adapter; Task 9C.4R moves that adapter into the shared configuration route module. Task 9C.4S characterizes legacy `/api/alignment/run` and records `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`; the next task should define a compatibility/deprecation policy rather than extract the route unchanged.
+Task 9C.4M establishes the local readiness service. Task 9C.4N extracts the thin healthcheck route adapter while preserving caller-owned transaction behavior. Task 9C.4O characterizes prompt mutation and records `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`; Task 9C.4P defines `LEGACY_PROMPT_MUTABLE_REVISION_V1`; Task 9C.4Q extracts the prompt mutation application service so seed/upsert/commit/rollback are no longer implemented directly in the HTTP adapter; Task 9C.4R moves that adapter into the shared configuration route module. Task 9C.4S characterizes legacy `/api/alignment/run` and records `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`; Task 9C.4T defines `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`; Task 9C.4U blocks legacy alignment external/live execution at route, worker, retry, queued-job, and direct-helper boundaries without moving the route. The next alignment task is the formal document alignment workflow contract, not legacy route extraction.
 
 ## Final Decision
 
