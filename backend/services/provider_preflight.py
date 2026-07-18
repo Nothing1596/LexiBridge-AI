@@ -351,6 +351,7 @@ def run_provider_preflight(
     actor: Any = None,
     include_replay_dry_run: bool = True,
     replay_response_type: str = "valid",
+    execution_key: str | None = None,
     now_fn=None,
     commit: bool = True,
 ) -> tuple[Any, dict[str, Any]]:
@@ -439,7 +440,14 @@ def run_provider_preflight(
         "allow_auto_approve": False,
         "allow_production_result": bool(policy_data.get("allow_production_result", False)),
     }
-    run = create_preflight_run(session, preflight_model, result, now_fn=now_fn, commit=commit)
+    run = create_preflight_run(
+        session,
+        preflight_model,
+        result,
+        execution_key=execution_key,
+        now_fn=now_fn,
+        commit=commit,
+    )
     result["preflight_uid"] = getattr(run, "preflight_uid", "")
     return run, build_preflight_report(result)
 
@@ -449,10 +457,12 @@ def create_preflight_run(
     preflight_model: Any,
     result: dict[str, Any],
     *,
+    execution_key: str | None = None,
     now_fn=None,
     commit: bool = True,
 ) -> Any:
     run = preflight_model(
+        execution_key=_text(execution_key) or None,
         provider_name=result.get("provider_name", ""),
         provider_type=result.get("provider_type", ""),
         policy_uid=result.get("policy_uid", ""),

@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current processing-planning conclusion:
-FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED
+FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED
 
-Implementation status after Task 9C.5B.1:
+Implementation status after Task 9C.5B (retry):
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -19,8 +19,7 @@ Implementation status after Task 9C.5B.1:
 - `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
 - `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
 - `FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED`
-- `FORMAL_ITEM_VERIFICATION_ADAPTER_NOT_IMPLEMENTED`
-- `VERIFICATION_TRANSACTION_ADAPTER_NOT_IMPLEMENTED`
+- `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
@@ -657,10 +656,20 @@ audit records:
 FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED
 ```
 
-The next blocker remains the transaction-neutral
-draft/preflight/verification/attach adapter. The schema permits recovery and
-database conflict detection; it does not make provider execution exactly-once
-or implement any processing behavior.
+Task 9C.5B (retry) consumes those identities in a lease-fenced per-item
+adapter. It creates or reuses a safe draft, enforces formal policy and
+preflight, creates or reuses one verification/usage/audit identity, persists
+reference-only verification summaries, and resumes protected attach without
+re-running a completed verification. External/live/custom providers remain
+fail-closed. A crash after `provider_started` may replay only the currently
+allowed deterministic provider; this is not provider exactly-once.
+The adapter also binds the active formal job payload to the workflow root and
+binds prepared candidate/evidence identity to the persisted item at every
+write fence. V1 accepts one already-selected Chinese candidate plus one
+provenance reference; candidate ranking remains an upstream responsibility.
+Provider completion is checkpointed before verification persistence, and the
+approved-card attach uses a conditional update so a concurrent teacher
+approval cannot be overwritten.
 
 ## Rejected Alternatives
 
@@ -680,13 +689,13 @@ or implement any processing behavior.
 ## Consequences
 
 The model, admission, formal BackgroundJob ownership, chunk-scoped item
-bootstrap, and formal item execution identity schema prerequisites are
-implemented for the local pilot. The next work is not the processing
-orchestrator. It is the transaction-neutral formal verification composition
-boundary using the new execution mapping and identities:
+bootstrap, execution identities, and lease-fenced per-item verification
+adapter are implemented for the local pilot. The next permitted slice may
+compose these existing boundaries into document-level processing and root
+finalization, but must not register a worker or route in the same task:
 
 ```text
-NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER
+NEXT_FORMAL_PROCESSING_ORCHESTRATOR
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still
@@ -699,5 +708,6 @@ This ADR is not production-ready. It does not enable real providers, does not
 add the new API or worker, and does not migrate frontend callers. The formal
 tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
 claim/locking and idempotency-constraint validation remain required. Provider
-success followed by persistence failure is still ambiguous until the adapter
-defines recovery behavior.
+success followed by persistence failure is recoverable only by deterministic
+replay under the same execution key; external provider replay and exactly-once
+charging are deliberately unsupported.

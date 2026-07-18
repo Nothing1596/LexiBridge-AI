@@ -8,7 +8,15 @@ EXPECTED_CONDITIONS = {
     "FORMAL_CHUNK_SCOPED_TERM_CANDIDATES_PRESENT",
     "FORMAL_WORKFLOW_ITEM_BOOTSTRAP_PRESENT",
     "FORMAL_BOOTSTRAP_LEASE_FENCING_PRESENT",
-    "FORMAL_VERIFICATION_TRANSACTION_ADAPTER_NOT_IMPLEMENTED",
+    "FORMAL_ITEM_VERIFICATION_ADAPTER_PRESENT",
+    "FORMAL_ITEM_EXECUTION_MAPPING_USED",
+    "FORMAL_PROVIDER_PREFLIGHT_ENFORCED",
+    "FORMAL_VERIFICATION_EXECUTION_REUSE_PRESENT",
+    "FORMAL_USAGE_EXECUTION_IDENTITY_ENFORCED",
+    "FORMAL_AUDIT_EVENT_IDENTITY_ENFORCED",
+    "FORMAL_APPROVED_CARD_PROTECTION_PRESENT",
+    "FORMAL_EVIDENCE_PERSISTENCE_MINIMIZED",
+    "POSTGRESQL_ITEM_ADAPTER_NOT_VERIFIED",
     "POSTGRESQL_BOOTSTRAP_TRANSACTION_NOT_VERIFIED",
     "FORMAL_BACKGROUND_JOB_HANDLER_NOT_IMPLEMENTED",
     "FORMAL_PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED",
@@ -18,7 +26,6 @@ EXPECTED_CONDITIONS = {
     "FORMAL_PREFLIGHT_EXECUTION_KEY_UNIQUENESS_PRESENT",
     "FORMAL_USAGE_EXECUTION_KEY_UNIQUENESS_PRESENT",
     "FORMAL_AUDIT_EVENT_IDENTITY_UNIQUENESS_PRESENT",
-    "FORMAL_ITEM_VERIFICATION_ADAPTER_NOT_IMPLEMENTED",
     "POSTGRESQL_IDEMPOTENCY_CONSTRAINTS_NOT_VERIFIED",
     "FORMAL_MIGRATION_FRAMEWORK_NOT_ESTABLISHED",
 }
@@ -42,3 +49,9 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_formal_item_verification_execution_models.py" in source
     assert "tests/test_formal_item_idempotency_constraints.py" in source
     assert "tests/test_formal_item_execution_schema_upgrade.py" in source
+    assert "formal item verification transaction adapter" in source
+    assert "tests/test_document_alignment_item_verification_adapter.py" in source
+    assert "tests/test_document_alignment_item_verification_adapter_integration.py" in source
+    assert "tests/test_document_alignment_item_verification_idempotency.py" in source
+    assert "tests/test_document_alignment_item_verification_security.py" in source
+    assert "tests/test_document_alignment_item_verification_fault_recovery.py" in source

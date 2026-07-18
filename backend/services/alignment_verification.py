@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from services import alignment_providers
@@ -354,6 +355,205 @@ def create_alignment_verification_run(
     return run
 
 
+def _safe_reference_ids(evidence: list[dict[str, Any]]) -> list[str]:
+    return sorted({
+        _text(item.get("chunk_uid"))
+        for item in evidence
+        if isinstance(item, dict) and _text(item.get("chunk_uid"))
+    })
+
+
+def _safe_provider_error(value: Any) -> str:
+    return _safe_provider_text(value, fallback="Formal alignment verification failed.", max_length=500)
+
+
+def _safe_provider_text(value: Any, *, fallback: str = "", max_length: int = 160) -> str:
+    text = _text(value)
+    forbidden = ("LEXIBRIDGE_SENTINEL_SECRET", "Authorization:", "Cookie:", "Bearer ", "sk-")
+    if any(marker in text for marker in forbidden):
+        return fallback
+    return text[:max_length]
+
+
+def _safe_provider_labels(value: Any) -> list[str]:
+    return [
+        safe
+        for label in _labels(value)
+        if (safe := _safe_provider_text(label, max_length=120))
+    ]
+
+
+def _safe_non_negative_number(value: Any, *, integer: bool = False) -> int | float:
+    try:
+        number = int(value) if integer else float(value)
+    except (TypeError, ValueError):
+        return 0 if integer else 0.0
+    if number < 0:
+        return 0 if integer else 0.0
+    return number
+
+
+def _safe_estimated_cost(value: Any) -> dict[str, int | float]:
+    source = value if isinstance(value, dict) else {}
+    return {
+        "estimated_input_tokens": _safe_non_negative_number(
+            source.get("estimated_input_tokens"), integer=True
+        ),
+        "estimated_output_tokens": _safe_non_negative_number(
+            source.get("estimated_output_tokens"), integer=True
+        ),
+        "estimated_cost": _safe_non_negative_number(source.get("estimated_cost")),
+    }
+
+
+def build_safe_alignment_verification_persistence(
+    input_data: dict[str, Any],
+    output_data: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return reference-only input and bounded parsed output summaries."""
+
+    normalized = validate_alignment_verification_input(input_data)
+    english_refs = _safe_reference_ids(normalized.get("english_evidence", []))
+    chinese_refs = _safe_reference_ids(normalized.get("chinese_evidence", []))
+    candidate_info = normalized.get("candidate_info") or {}
+    candidate_refs = sorted({
+        _text(value)
+        for value in (
+            candidate_info.get("candidate_uid"),
+            candidate_info.get("source_uid"),
+            candidate_info.get("chunk_uid"),
+            candidate_info.get("card_uid"),
+            candidate_info.get("term_id"),
+        )
+        if _text(value)
+    })
+    safe_input = {
+        "card_uid": _text(normalized.get("card_uid")),
+        "english_term": _text(normalized.get("english_term")),
+        "chinese_term": _text(normalized.get("chinese_term")),
+        "course": _text(normalized.get("course")),
+        "chapter": _text(normalized.get("chapter")),
+        "english_evidence_refs": english_refs,
+        "chinese_evidence_refs": chinese_refs,
+        "chinese_candidate_provenance_refs": candidate_refs,
+        "retrieval_version": _text(normalized.get("retrieval_version")),
+        "risk_labels": _labels(normalized.get("risk_labels", [])),
+    }
+    raw_summary = output_data.get("raw_output_summary")
+    raw_summary = raw_summary if isinstance(raw_summary, dict) else {}
+    prompt_summary = output_data.get("prompt_summary")
+    prompt_summary = prompt_summary if isinstance(prompt_summary, dict) else {}
+    safe_output = {
+        "provider_name": _safe_provider_text(output_data.get("provider_name"), max_length=120),
+        "provider_type": _safe_provider_text(output_data.get("provider_type"), max_length=80),
+        "provider_version": _safe_provider_text(output_data.get("provider_version"), max_length=120),
+        "alignment_decision": _safe_provider_text(output_data.get("alignment_decision"), max_length=80),
+        "alignment_confidence": output_data.get("alignment_confidence"),
+        "recommendation": _safe_provider_text(
+            output_data.get("recommendation"), fallback="needs_review", max_length=80
+        ) or "needs_review",
+        "risk_labels": _safe_provider_labels(output_data.get("risk_labels", [])),
+        "verification_status": _safe_provider_text(output_data.get("verification_status"), max_length=80),
+        "provider_response_status": _safe_provider_text(
+            output_data.get("provider_response_status"), max_length=80
+        ),
+        "prompt_version": _safe_provider_text(output_data.get("prompt_version"), max_length=80),
+        "prompt_summary": {
+            "prompt_version": _safe_provider_text(prompt_summary.get("prompt_version"), max_length=80),
+            "prompt_chars": _safe_non_negative_number(prompt_summary.get("prompt_chars"), integer=True),
+            "english_evidence_count": _safe_non_negative_number(
+                prompt_summary.get("english_evidence_count"), integer=True
+            ),
+            "chinese_evidence_count": _safe_non_negative_number(
+                prompt_summary.get("chinese_evidence_count"), integer=True
+            ),
+            "stores_full_prompt": False,
+        },
+        "raw_output_summary": {
+            "raw_output_chars": _safe_non_negative_number(
+                raw_summary.get("raw_output_chars"), integer=True
+            ),
+            "truncated": bool(raw_summary.get("truncated", False)),
+            "stores_full_raw_output": False,
+        },
+        "parser_version": _safe_provider_text(output_data.get("parser_version"), max_length=80),
+        "output_schema_version": _safe_provider_text(
+            output_data.get("output_schema_version"), max_length=80
+        ),
+        "is_production_result": False,
+        "can_auto_approve": False,
+        "estimated_cost": _safe_estimated_cost(output_data.get("estimated_cost")),
+        "retry_count": _safe_non_negative_number(output_data.get("retry_count"), integer=True),
+        "error_code": _safe_provider_text(output_data.get("error_code"), max_length=120),
+        "error_message": _safe_provider_error(output_data.get("error_message")),
+    }
+    return safe_input, safe_output
+
+
+def create_safe_alignment_verification_run(
+    session: Any,
+    run_model: Any,
+    input_data: dict[str, Any],
+    output_data: dict[str, Any],
+    *,
+    execution_key: str,
+    card_uid: str = "",
+    latency_ms: int | None = None,
+    now_fn=None,
+) -> Any:
+    """Persist a formal run without owning commit/rollback or storing evidence bodies."""
+
+    safe_input, safe_output = build_safe_alignment_verification_persistence(input_data, output_data)
+    confidence = safe_output.get("alignment_confidence")
+    if confidence in (None, ""):
+        confidence = None
+    else:
+        confidence = float(confidence)
+        if confidence < 0 or confidence > 1:
+            raise AlignmentVerificationError("alignment_confidence must be between 0 and 1.")
+    run = run_model(
+        execution_key=_text(execution_key),
+        card_uid=_text(card_uid or safe_input.get("card_uid")),
+        english_term=safe_input.get("english_term", ""),
+        chinese_term=safe_input.get("chinese_term", ""),
+        course=safe_input.get("course", ""),
+        chapter=safe_input.get("chapter", ""),
+        provider_name=safe_output.get("provider_name", ""),
+        provider_type=safe_output.get("provider_type", ""),
+        provider_version=safe_output.get("provider_version", ""),
+        input_payload=_dumps_json(safe_input),
+        output_payload=_dumps_json(safe_output),
+        english_evidence_count=len(safe_input.get("english_evidence_refs", [])),
+        chinese_evidence_count=len(safe_input.get("chinese_evidence_refs", [])),
+        top_english_chunk_uids=_dumps_json(safe_input.get("english_evidence_refs", [])[:5]),
+        top_chinese_chunk_uids=_dumps_json(safe_input.get("chinese_evidence_refs", [])[:5]),
+        retrieval_score_summary=_dumps_json({
+            "english_count": len(safe_input.get("english_evidence_refs", [])),
+            "chinese_count": len(safe_input.get("chinese_evidence_refs", [])),
+        }),
+        candidate_score_summary=_dumps_json({
+            "provenance_count": len(safe_input.get("chinese_candidate_provenance_refs", [])),
+        }),
+        alignment_confidence=confidence,
+        verification_status=_verification_status(safe_output),
+        recommendation=safe_output.get("recommendation", "needs_review"),
+        risk_labels=_dumps_json(safe_output.get("risk_labels", [])),
+        prompt_version=safe_output.get("prompt_version", ""),
+        prompt_summary=_dumps_json(safe_output.get("prompt_summary", {})),
+        raw_output_summary=_dumps_json(safe_output.get("raw_output_summary", {})),
+        parser_version=safe_output.get("parser_version", ""),
+        output_schema_version=safe_output.get("output_schema_version", ""),
+        provider_response_status=safe_output.get("provider_response_status", ""),
+        error_code=safe_output.get("error_code", ""),
+        error_message=safe_output.get("error_message", ""),
+        latency_ms=latency_ms,
+        created_at=now_fn() if now_fn else "",
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
 def verify_alignment(
     session: Any,
     run_model: Any,
@@ -454,6 +654,62 @@ def apply_verification_result_to_card(
     else:
         session.flush()
     return card
+
+
+@dataclass(frozen=True)
+class ProtectedVerificationAttachResult:
+    outcome: str
+    card: Any | None
+
+
+def apply_verification_result_to_card_protected(
+    session: Any,
+    card_model: Any,
+    run: Any,
+    *,
+    mode: str = "attach_only",
+    now_fn=None,
+) -> ProtectedVerificationAttachResult:
+    """Attach through an approved-card conditional update without owning commit."""
+
+    if mode != "attach_only":
+        raise AlignmentVerificationError("Only attach_only verification result application is supported.")
+    card_uid = _text(getattr(run, "card_uid", ""))
+    if not card_uid:
+        return ProtectedVerificationAttachResult(outcome="missing_card", card=None)
+    session.expire_all()
+    card = concept_alignment_cards.get_concept_card(session, card_model, card_uid)
+    if _text(getattr(card, "status", "")) == "approved":
+        return ProtectedVerificationAttachResult(outcome="approved_protected", card=card)
+    existing_labels = _loads_json(getattr(card, "risk_labels", "[]"), [])
+    run_labels = _loads_json(getattr(run, "risk_labels", "[]"), [])
+    extra_labels = ["alignment_verification_attached"]
+    provider_type = getattr(run, "provider_type", "")
+    if provider_type == "mock":
+        extra_labels.append("alignment_verification_mock_only")
+    if provider_type == "fake_llm":
+        extra_labels.append("alignment_verification_fake_only")
+    if provider_type == "external_llm":
+        extra_labels.append("alignment_verification_external_llm")
+    if provider_type == "replay_llm":
+        extra_labels.append("alignment_verification_replay_only")
+    values = {"risk_labels": _dumps_json(_merge_labels(existing_labels, run_labels, extra_labels))}
+    if getattr(card, "status", "") == "draft":
+        values["status"] = "needs_review"
+    if now_fn is not None:
+        values["updated_at"] = now_fn()
+    affected = (
+        session.query(card_model)
+        .filter(card_model.card_uid == card_uid, card_model.status != "approved")
+        .update(values, synchronize_session=False)
+    )
+    session.flush()
+    session.expire_all()
+    persisted = concept_alignment_cards.get_concept_card(session, card_model, card_uid)
+    if affected != 1:
+        outcome = "approved_protected" if persisted.status == "approved" else "conflict"
+        return ProtectedVerificationAttachResult(outcome=outcome, card=persisted)
+    return ProtectedVerificationAttachResult(outcome="attached", card=persisted)
 
 
 def serialize_alignment_verification_run(run: Any) -> dict[str, Any]:

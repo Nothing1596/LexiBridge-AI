@@ -492,6 +492,7 @@ def record_provider_usage(
     usage_model: Any,
     provider_name: str,
     *,
+    execution_key: str | None = None,
     run_uid: str = "",
     input_summary: dict[str, Any] | None = None,
     result_summary: dict[str, Any] | None = None,
@@ -503,6 +504,7 @@ def record_provider_usage(
     result_summary = result_summary or {}
     estimated_cost = result_summary.get("estimated_cost") or input_summary.get("estimated_cost") or {}
     record = usage_model(
+        execution_key=_text(execution_key) or None,
         provider_name=provider_name,
         provider_type=result_summary.get("provider_type") or provider_type_for(provider_name),
         run_uid=run_uid or result_summary.get("run_uid", ""),

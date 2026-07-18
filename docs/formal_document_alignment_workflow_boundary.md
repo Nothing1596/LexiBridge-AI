@@ -8,7 +8,7 @@ Status:
 - `PROCESSING_BOUNDARY_CHARACTERIZED`
 - `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
 - `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
-- `VERIFICATION_TRANSACTION_ADAPTER_NOT_IMPLEMENTED`
+- `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `FORMAL_WORKER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
@@ -1426,7 +1426,8 @@ Unique conclusion:
 FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
 ```
 
-Next permitted slice: `NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER`.
+Historical next slice after Task 9C.5A:
+`NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER` (completed by Task 9C.5B retry).
 
 ## Task 9C.5B.1 Formal Item Execution Identity Schema
 
@@ -1462,3 +1463,70 @@ It does not establish provider exactly-once, adapter behavior, or processing.
 SQLite additive upgrade and concurrent uniqueness are tested; formal migration
 and PostgreSQL constraint semantics remain unverified. The next permitted
 slice is the retried Task 9C.5B transaction-neutral adapter.
+
+## Task 9C.5B Formal Per-Item Verification Adapter
+
+Task 9C.5B (retry) adds
+`backend/services/document_alignment_item_verification_adapter.py`. Its frozen
+command carries only run/item/job ownership plus a prepared, bounded in-memory
+input. Its result exposes safe execution, item, draft, preflight, verification,
+usage, audit, retry, confidence, recommendation, and error summaries without
+ORM objects, evidence bodies, provider output, credentials, or lease tokens.
+
+The adapter uses the existing execution fingerprint/key and event-identity
+algorithms. Every business persistence checkpoint executes the active formal
+job lease fence in the same short transaction. Draft creation and safe
+verification persistence use internal transaction-neutral helpers; the public
+draft and verification APIs retain their existing commit behavior.
+The fence additionally verifies that the BackgroundJob payload names the same
+workflow root/version and that persisted item key, term, selected candidate,
+candidate provenance, and bilingual evidence references match the prepared
+input. A valid lease for a different formal run cannot authorize item writes.
+V1 deliberately accepts one selected Chinese candidate and one provenance
+reference; it does not infer candidate-to-provenance pairing from independently
+sorted collections.
+
+The persisted lifecycle is:
+
+```text
+prepared -> draft_ready -> preflight_passed -> provider_started
+-> provider_completed -> verification_persisted -> attach_pending
+-> needs_review
+```
+
+Preflight block, policy block, parser/provider failure, stale attempts, lease
+expiry, and persistence failure return typed safe outcomes. Approved cards are
+referenced but never changed or reverified. Attach failure preserves a
+`verification_completed` item and `attach_pending` execution so retry does not
+invoke the provider again. Verification, preflight, usage, and audit records
+reuse their database identities; the execution mapping remains the recovery
+source of truth.
+Attach performs an affected-row checked update constrained to non-approved
+cards. Tests approve the card through an independent database connection while
+the provider computes, then prove that the attach path returns blocked and
+preserves every approved-card field.
+
+Provider input may include bounded governed snippets in memory. Persistence is
+limited to evidence reference IDs/counts, fingerprints, versions, parsed safe
+fields, and bounded safe errors. No legacy AlignmentRun, TerminologyCard,
+UsageRecord, or AICallLog is written. No card is auto-approved or made student
+visible.
+
+The guarantee remains `AT_LEAST_ONCE_TRANSPORT`. A deterministic provider may
+be invoked again after a crash at `provider_started`, but database uniqueness
+keeps one logical verification, preflight, usage, and audit event per execution
+identity. External/live/custom providers are prohibited, so this does not claim
+provider exactly-once or solve external billing ambiguity. SQLite concurrent
+sessions are tested; PostgreSQL and formal migrations remain unverified.
+
+Current status:
+
+```text
+FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED
+PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED
+FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED
+FORMAL_ROUTES_NOT_IMPLEMENTED
+FRONTEND_NOT_MIGRATED
+```
+
+Next permitted slice: `NEXT_FORMAL_PROCESSING_ORCHESTRATOR`.

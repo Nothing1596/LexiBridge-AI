@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +22,16 @@ class ConceptCardDraftResult:
     bilingual_result: bilingual_evidence_workflow.BilingualEvidenceResult
     draft_payload: dict[str, Any]
     created: bool
+    reused: bool = False
+
+
+@dataclass(frozen=True)
+class PreparedConceptCardDraftResult:
+    """Transaction-neutral result for a prepared formal workflow item."""
+
+    outcome: str
+    card: Any | None
+    created: bool = False
     reused: bool = False
 
 
@@ -117,6 +128,116 @@ def find_existing_draft(session: Any, card_model: Any, draft_payload: dict[str, 
         chapter=_text(draft_payload.get("chapter")),
         retrieval_version=_text(draft_payload.get("retrieval_version")),
     ).filter(card_model.status.in_(["draft", "needs_review"])).order_by(card_model.id.desc()).first()
+
+
+def _reference_ids(value: Any) -> tuple[str, ...]:
+    if value in (None, ""):
+        values = []
+    elif isinstance(value, str):
+        try:
+            values = json.loads(value)
+        except (TypeError, ValueError):
+            values = []
+    else:
+        values = value
+    if not isinstance(values, list):
+        return ()
+    refs = []
+    for item in values:
+        if isinstance(item, dict):
+            reference = _text(item.get("chunk_uid") or item.get("reference_id"))
+        else:
+            reference = _text(item)
+        if reference:
+            refs.append(reference)
+    return tuple(sorted(set(refs)))
+
+
+def create_or_reuse_prepared_concept_card_draft(
+    session: Any,
+    card_model: Any,
+    *,
+    english_term: str,
+    chinese_term: str,
+    course: str,
+    chapter: str,
+    retrieval_version: str,
+    english_evidence_refs: tuple[str, ...],
+    chinese_evidence_refs: tuple[str, ...],
+    risk_labels: tuple[str, ...] = (),
+    now_fn=None,
+) -> PreparedConceptCardDraftResult:
+    """Create or reuse a safe draft without owning commit or rollback."""
+
+    identity = {
+        "english_term": _text(english_term),
+        "chinese_term": _text(chinese_term),
+        "course": _text(course),
+        "chapter": _text(chapter),
+    }
+    if not identity["english_term"] or not identity["course"]:
+        raise ConceptCardDraftError("english_term and course are required.")
+    approved = (
+        session.query(card_model)
+        .filter_by(**identity, status="approved")
+        .order_by(card_model.id.desc())
+        .first()
+    )
+    if approved is not None:
+        return PreparedConceptCardDraftResult(
+            outcome="approved_protected",
+            card=approved,
+            reused=True,
+        )
+
+    requested_english_refs = tuple(sorted(set(english_evidence_refs or ())))
+    requested_chinese_refs = tuple(sorted(set(chinese_evidence_refs or ())))
+    existing_rows = (
+        session.query(card_model)
+        .filter_by(**identity)
+        .filter(card_model.status.in_(["draft", "needs_review"]))
+        .order_by(card_model.id.desc())
+        .all()
+    )
+    for existing in existing_rows:
+        same_scope = (
+            _text(getattr(existing, "retrieval_version", "")) == _text(retrieval_version)
+            and _reference_ids(getattr(existing, "english_evidence", "[]")) == requested_english_refs
+            and _reference_ids(getattr(existing, "chinese_evidence", "[]")) == requested_chinese_refs
+        )
+        if same_scope:
+            return PreparedConceptCardDraftResult(
+                outcome="reused",
+                card=existing,
+                reused=True,
+            )
+    if existing_rows:
+        return PreparedConceptCardDraftResult(outcome="conflict", card=None)
+
+    merged_risks = parse_quality_risk.merge_risk_labels(
+        list(risk_labels or ()),
+        ["bilingual_alignment_not_verified"],
+    )
+    card = card_model(
+        **identity,
+        english_evidence=[{"chunk_uid": reference} for reference in requested_english_refs],
+        chinese_evidence=[{"chunk_uid": reference} for reference in requested_chinese_refs],
+        risk_labels=merged_risks,
+        status="needs_review",
+        confidence_score=None,
+        model_name=None,
+        prompt_version=None,
+        retrieval_version=_text(retrieval_version),
+        created_at=now_fn() if now_fn else "",
+        updated_at=now_fn() if now_fn else "",
+    )
+    session.add(card)
+    session.flush()
+    return PreparedConceptCardDraftResult(
+        outcome="created",
+        card=card,
+        created=True,
+    )
 
 
 def _audit_summary_payload(

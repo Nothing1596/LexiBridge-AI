@@ -1,10 +1,10 @@
 # Formal Item Verification Execution Identity
 
-Status: `FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED`
+Status: `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 
-Scope: SQLite local/small-pilot schema foundation only. The verification
-adapter, provider execution, worker, routes, and frontend are not implemented
-by this boundary.
+Scope: SQLite local/small-pilot schema and per-item adapter. Document-level
+processing, worker registration, routes, and frontend are not implemented by
+this boundary.
 
 ## Identity Semantics
 
@@ -58,8 +58,9 @@ Database identities:
 | `AuditRecord` | `event_identity` | unique when non-null |
 
 `draft_card_uid` is intentionally not unique: multiple workflow items may
-legitimately reference one protected approved card. The future adapter must
-never overwrite or downgrade that card.
+legitimately reference one protected approved card. The adapter uses a
+non-approved conditional update and affected-row check so it never overwrites
+or downgrades that card.
 
 ## Legacy Compatibility And Upgrade
 
@@ -81,14 +82,23 @@ FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION
 POSTGRESQL_IDEMPOTENCY_CONSTRAINTS_NOT_VERIFIED
 ```
 
-## Retry Mapping And Non-Guarantees
+## Adapter Use And Non-Guarantees
 
-The future adapter must create or load the execution mapping before side
-effects, use `execution_key` for verification/preflight/usage recovery, and
-use `event_identity` for bounded logical audit events. Active BackgroundJob
-lease fencing must guard every business write.
+`document_alignment_item_verification_adapter.py` now creates or loads the
+execution mapping before side effects, uses `execution_key` for
+verification/preflight/usage recovery, and uses `event_identity` for bounded
+logical audit events. Active BackgroundJob lease fencing guards every business
+persistence checkpoint. Each fence also binds the formal job payload to the
+same workflow run/version and compares prepared term, selected candidate,
+candidate provenance, and evidence-reference identity with the persisted
+WorkflowItem. V1 requires one upstream-selected Chinese candidate and one
+provenance reference rather than inventing an ambiguous pairing rule.
 
-This schema does not provide provider exactly-once semantics. In particular,
-a provider success followed by process or database failure still requires an
-explicit recovery policy. It also does not implement card creation, preflight,
-verification, attach, usage, audit, worker dispatch, or HTTP behavior.
+This does not provide provider exactly-once semantics. A crash after
+`provider_started`, or after `provider_completed` but before safe verification
+persistence, replays only a deterministic provider under the same execution
+identity. The provider completion timestamp and safe output fingerprint are
+checkpointed, but provider output bodies are not persisted for replay.
+Completed verification and attach retry reuse persisted records and do not
+invoke the provider again. External providers remain disabled. Worker dispatch
+and HTTP behavior are still not implemented.
