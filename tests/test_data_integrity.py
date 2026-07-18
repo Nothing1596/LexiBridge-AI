@@ -114,8 +114,13 @@ def test_core_pilot_data_integrity_in_demo_namespace(client, app_module):
 
         assert app_module.DocumentAlignmentWorkflowRun.__tablename__ == "document_alignment_workflow_runs"
         assert app_module.DocumentAlignmentWorkflowItem.__tablename__ == "document_alignment_workflow_items"
+        assert (
+            app_module.DocumentAlignmentItemVerificationExecution.__tablename__
+            == "document_alignment_item_verification_executions"
+        )
         assert app_module.DocumentAlignmentWorkflowRun.query.count() == 0
         assert app_module.DocumentAlignmentWorkflowItem.query.count() == 0
+        assert app_module.DocumentAlignmentItemVerificationExecution.query.count() == 0
 
         secret_dump = json.dumps(
             [

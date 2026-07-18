@@ -108,6 +108,7 @@ def _sentinel_models(app_module):
         "AlignmentProviderPolicy",
         "AuditRecord",
         "ConceptAlignmentCard",
+        "DocumentAlignmentItemVerificationExecution",
     )
     return [getattr(app_module, name) for name in names if hasattr(app_module, name)]
 

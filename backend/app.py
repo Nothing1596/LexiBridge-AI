@@ -79,6 +79,7 @@ from services.legacy_alignment_provider_classification import (
     classify_legacy_alignment_provider,
 )
 from services.document_alignment_workflow_contract import (
+    DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES,
     DOCUMENT_ALIGNMENT_ITEM_STAGES,
     DOCUMENT_ALIGNMENT_ITEM_STATUSES,
     DOCUMENT_ALIGNMENT_WORKFLOW_STAGES,
@@ -88,6 +89,8 @@ from services.document_alignment_workflow_contract import (
     ROOT_STAGE_QUEUED,
     ROOT_STATUS_QUEUED,
     FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
+    FORMAL_ITEM_VERIFICATION_EXECUTION_VERSION,
+    ITEM_VERIFICATION_EXECUTION_STATUS_PREPARED,
     WORKFLOW_VERSION_V1,
 )
 from services.ai_provider import provider_from_selection
@@ -1904,6 +1907,7 @@ class AuditRecord(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     audit_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    event_identity = db.Column(db.String(128), nullable=True)
     event_type = db.Column(db.String(120), nullable=False, default="")
     target_type = db.Column(db.String(120), nullable=False, default="")
     target_uid = db.Column(db.String(120), default="")
@@ -1926,6 +1930,14 @@ class AuditRecord(db.Model):
     latency_ms = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.String(40), default="")
 
+    __table_args__ = (
+        db.Index(
+            "uq_audit_record_event_identity",
+            "event_identity",
+            unique=True,
+        ),
+    )
+
 
 @event.listens_for(AuditRecord, "before_insert")
 def before_insert_audit_record(mapper, connection, target):
@@ -1938,6 +1950,7 @@ class AlignmentVerificationRun(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     run_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    execution_key = db.Column(db.String(128), nullable=True)
     card_uid = db.Column(db.String(64), default="")
     english_term = db.Column(db.String(220), nullable=False, default="")
     chinese_term = db.Column(db.String(220), default="")
@@ -1968,6 +1981,14 @@ class AlignmentVerificationRun(db.Model):
     error_message = db.Column(db.Text, default="")
     latency_ms = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.String(40), default="")
+
+    __table_args__ = (
+        db.Index(
+            "uq_alignment_verification_run_execution_key",
+            "execution_key",
+            unique=True,
+        ),
+    )
 
     @validates("english_term")
     def validate_alignment_english_term(self, key, value):
@@ -2060,6 +2081,15 @@ def _workflow_safe_error_message(value):
     if any(marker in text for marker in _SAFE_ERROR_FORBIDDEN_MARKERS):
         raise ValueError("error_message must be a safe summary.")
     return text[:500]
+
+
+def _workflow_safe_fingerprint(value, field_name, *, nullable=False):
+    if value in (None, "") and nullable:
+        return None
+    text = str(value or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", text):
+        raise ValueError(f"{field_name} must be a lowercase SHA-256 digest.")
+    return text
 
 
 class DocumentAlignmentWorkflowRun(db.Model):
@@ -2341,6 +2371,189 @@ def before_update_document_alignment_workflow_item(mapper, connection, target):
     validate_document_alignment_workflow_item(target)
 
 
+class DocumentAlignmentItemVerificationExecution(db.Model):
+    """Persistent identity for one logical formal item verification execution."""
+
+    __tablename__ = "document_alignment_item_verification_executions"
+
+    DEFAULT_STATUS = ITEM_VERIFICATION_EXECUTION_STATUS_PREPARED
+
+    id = db.Column(db.Integer, primary_key=True)
+    execution_key = db.Column(db.String(128), nullable=False)
+    workflow_run_uid = db.Column(db.String(64), nullable=False)
+    workflow_item_uid = db.Column(db.String(64), nullable=False)
+    workflow_item_key = db.Column(db.String(220), nullable=False)
+    draft_card_uid = db.Column(db.String(64), nullable=True)
+    preflight_run_uid = db.Column(db.String(64), nullable=True)
+    verification_run_uid = db.Column(db.String(64), nullable=True)
+    execution_version = db.Column(
+        db.String(80),
+        nullable=False,
+        default=FORMAL_ITEM_VERIFICATION_EXECUTION_VERSION,
+    )
+    workflow_version = db.Column(db.String(80), nullable=False)
+    provider_name = db.Column(db.String(120), nullable=False)
+    model_identity = db.Column(db.String(160), nullable=False)
+    retrieval_version = db.Column(db.String(80), nullable=False)
+    prompt_version = db.Column(db.String(80), nullable=False)
+    parser_version = db.Column(db.String(80), nullable=False)
+    output_schema_version = db.Column(db.String(80), nullable=False)
+    safe_input_fingerprint = db.Column(db.String(64), nullable=False)
+    safe_output_fingerprint = db.Column(db.String(64), nullable=True)
+    execution_status = db.Column(
+        db.String(40),
+        nullable=False,
+        default=ITEM_VERIFICATION_EXECUTION_STATUS_PREPARED,
+    )
+    provider_started_at = db.Column(db.String(40), nullable=True)
+    provider_completed_at = db.Column(db.String(40), nullable=True)
+    attached_at = db.Column(db.String(40), nullable=True)
+    safe_error_code = db.Column(db.String(120), nullable=True)
+    safe_error_message = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.String(40), nullable=False, default="")
+    updated_at = db.Column(db.String(40), nullable=False, default="")
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "execution_status IN ("
+            + ", ".join(
+                f"'{status}'"
+                for status in sorted(DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES)
+            )
+            + ")",
+            name="ck_document_alignment_item_verification_status",
+        ),
+        db.Index(
+            "uq_document_alignment_item_verification_execution_key",
+            "execution_key",
+            unique=True,
+        ),
+        db.Index(
+            "uq_document_alignment_item_verification_preflight_uid",
+            "preflight_run_uid",
+            unique=True,
+        ),
+        db.Index(
+            "uq_document_alignment_item_verification_run_uid",
+            "verification_run_uid",
+            unique=True,
+        ),
+        db.Index(
+            "ix_document_alignment_item_verification_workflow_run",
+            "workflow_run_uid",
+        ),
+        db.Index(
+            "ix_document_alignment_item_verification_workflow_item",
+            "workflow_item_uid",
+        ),
+        db.Index(
+            "ix_document_alignment_item_verification_status",
+            "execution_status",
+        ),
+        db.Index(
+            "ix_document_alignment_item_verification_created",
+            "created_at",
+        ),
+        db.Index(
+            "ix_document_alignment_item_verification_item_status",
+            "workflow_item_uid",
+            "execution_status",
+        ),
+    )
+
+    @validates(
+        "execution_key",
+        "workflow_run_uid",
+        "workflow_item_uid",
+        "workflow_item_key",
+        "execution_version",
+        "workflow_version",
+        "provider_name",
+        "model_identity",
+        "retrieval_version",
+        "prompt_version",
+        "parser_version",
+        "output_schema_version",
+    )
+    def validate_execution_required_text(self, key, value):
+        return _workflow_required_text(value, key)
+
+    @validates("safe_input_fingerprint")
+    def validate_execution_safe_input_fingerprint(self, key, value):
+        return _workflow_safe_fingerprint(value, key)
+
+    @validates("safe_output_fingerprint")
+    def validate_execution_safe_output_fingerprint(self, key, value):
+        return _workflow_safe_fingerprint(value, key, nullable=True)
+
+    @validates("execution_status")
+    def validate_execution_status(self, key, value):
+        value = _workflow_required_text(value, key)
+        if value not in DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES:
+            raise ValueError(
+                "execution_status must be one of "
+                f"{sorted(DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES)}."
+            )
+        return value
+
+    @validates("safe_error_message")
+    def validate_execution_safe_error_message(self, key, value):
+        if value is None:
+            return None
+        return _workflow_safe_error_message(value)
+
+
+def validate_document_alignment_item_verification_execution(execution):
+    for field_name in (
+        "execution_key",
+        "workflow_run_uid",
+        "workflow_item_uid",
+        "workflow_item_key",
+        "execution_version",
+        "workflow_version",
+        "provider_name",
+        "model_identity",
+        "retrieval_version",
+        "prompt_version",
+        "parser_version",
+        "output_schema_version",
+    ):
+        setattr(execution, field_name, _workflow_required_text(getattr(execution, field_name), field_name))
+    execution.safe_input_fingerprint = _workflow_safe_fingerprint(
+        execution.safe_input_fingerprint,
+        "safe_input_fingerprint",
+    )
+    execution.safe_output_fingerprint = _workflow_safe_fingerprint(
+        execution.safe_output_fingerprint,
+        "safe_output_fingerprint",
+        nullable=True,
+    )
+    execution.execution_status = execution.execution_status or ITEM_VERIFICATION_EXECUTION_STATUS_PREPARED
+    if execution.execution_status not in DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES:
+        raise ValueError(
+            "execution_status must be one of "
+            f"{sorted(DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES)}."
+        )
+    execution.safe_error_code = _workflow_optional_text(execution.safe_error_code, 120) or None
+    if execution.safe_error_message is not None:
+        execution.safe_error_message = _workflow_safe_error_message(execution.safe_error_message) or None
+    return True
+
+
+@event.listens_for(DocumentAlignmentItemVerificationExecution, "before_insert")
+def before_insert_document_alignment_item_verification_execution(mapper, connection, target):
+    now = current_time_text()
+    target.created_at = target.created_at or now
+    target.updated_at = target.updated_at or now
+    validate_document_alignment_item_verification_execution(target)
+
+
+@event.listens_for(DocumentAlignmentItemVerificationExecution, "before_update")
+def before_update_document_alignment_item_verification_execution(mapper, connection, target):
+    target.updated_at = current_time_text()
+    validate_document_alignment_item_verification_execution(target)
+
+
 class AlignmentProviderPolicy(db.Model):
     __tablename__ = "alignment_provider_policy"
 
@@ -2420,6 +2633,7 @@ class AlignmentProviderUsageRecord(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     usage_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    execution_key = db.Column(db.String(128), nullable=True)
     provider_name = db.Column(db.String(120), default="")
     provider_type = db.Column(db.String(40), default="")
     run_uid = db.Column(db.String(64), default="")
@@ -2436,6 +2650,14 @@ class AlignmentProviderUsageRecord(db.Model):
     error_message = db.Column(db.Text, default="")
     created_at = db.Column(db.String(40), default="")
 
+    __table_args__ = (
+        db.Index(
+            "uq_alignment_provider_usage_execution_key",
+            "execution_key",
+            unique=True,
+        ),
+    )
+
 
 @event.listens_for(AlignmentProviderUsageRecord, "before_insert")
 def before_insert_alignment_provider_usage_record(mapper, connection, target):
@@ -2451,6 +2673,7 @@ class AlignmentProviderPreflightRun(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     preflight_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    execution_key = db.Column(db.String(128), nullable=True)
     provider_name = db.Column(db.String(120), default="")
     provider_type = db.Column(db.String(40), default="")
     policy_uid = db.Column(db.String(64), default="")
@@ -2475,6 +2698,14 @@ class AlignmentProviderPreflightRun(db.Model):
     allow_auto_approve = db.Column(db.Boolean, default=False)
     allow_production_result = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.String(40), default="")
+
+    __table_args__ = (
+        db.Index(
+            "uq_alignment_provider_preflight_execution_key",
+            "execution_key",
+            unique=True,
+        ),
+    )
 
 
 def validate_alignment_provider_preflight_run(run):
@@ -3130,6 +3361,7 @@ def ensure_schema_columns():
         },
         "audit_record": {
             "audit_uid": "VARCHAR(64) DEFAULT ''",
+            "event_identity": "VARCHAR(128)",
             "event_type": "VARCHAR(120) DEFAULT ''",
             "target_type": "VARCHAR(120) DEFAULT ''",
             "target_uid": "VARCHAR(120) DEFAULT ''",
@@ -3154,6 +3386,7 @@ def ensure_schema_columns():
         },
         "alignment_verification_run": {
             "run_uid": "VARCHAR(64) DEFAULT ''",
+            "execution_key": "VARCHAR(128)",
             "card_uid": "VARCHAR(64) DEFAULT ''",
             "english_term": "VARCHAR(220) DEFAULT ''",
             "chinese_term": "VARCHAR(220) DEFAULT ''",
@@ -3215,6 +3448,7 @@ def ensure_schema_columns():
         },
         "alignment_provider_usage_record": {
             "usage_uid": "VARCHAR(64) DEFAULT ''",
+            "execution_key": "VARCHAR(128)",
             "provider_name": "VARCHAR(120) DEFAULT ''",
             "provider_type": "VARCHAR(40) DEFAULT ''",
             "run_uid": "VARCHAR(64) DEFAULT ''",
@@ -3233,6 +3467,7 @@ def ensure_schema_columns():
         },
         "alignment_provider_preflight_run": {
             "preflight_uid": "VARCHAR(64) DEFAULT ''",
+            "execution_key": "VARCHAR(128)",
             "provider_name": "VARCHAR(120) DEFAULT ''",
             "provider_type": "VARCHAR(40) DEFAULT ''",
             "policy_uid": "VARCHAR(64) DEFAULT ''",
@@ -3531,6 +3766,22 @@ def ensure_schema_columns():
     db.session.execute(db.text(
         "CREATE INDEX IF NOT EXISTS ix_background_job_formal_stale_lease "
         "ON background_job (job_type, status, lease_expires_at)"
+    ))
+    db.session.execute(db.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_alignment_verification_run_execution_key "
+        "ON alignment_verification_run (execution_key)"
+    ))
+    db.session.execute(db.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_alignment_provider_preflight_execution_key "
+        "ON alignment_provider_preflight_run (execution_key)"
+    ))
+    db.session.execute(db.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_alignment_provider_usage_execution_key "
+        "ON alignment_provider_usage_record (execution_key)"
+    ))
+    db.session.execute(db.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_record_event_identity "
+        "ON audit_record (event_identity)"
     ))
 
     db.session.commit()

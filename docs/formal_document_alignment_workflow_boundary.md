@@ -1427,3 +1427,38 @@ FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
 ```
 
 Next permitted slice: `NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER`.
+
+## Task 9C.5B.1 Formal Item Execution Identity Schema
+
+Task 9C.5B stopped before implementation because WorkflowItem linkage and
+random verification/preflight/usage/audit UIDs could not prevent duplicate
+logical execution. Task 9C.5B.1 establishes the schema foundation documented
+in `docs/formal_item_verification_execution_identity.md`:
+
+- `DocumentAlignmentItemVerificationExecution` stores one logical execution
+  mapping and safe recovery state;
+- safe input fingerprints use only normalized values and governed references;
+- `item-verification-execution-v1:<sha256>` identifies the stable combination
+  of item input and provider/model/retrieval/prompt/parser/schema versions;
+- verification, preflight, and provider usage records have nullable unique
+  `execution_key` columns;
+- AuditRecord has nullable unique `event_identity`;
+- old rows remain null with no guessed backfill;
+- named SQLite unique indexes enforce one winner for concurrent duplicate
+  mapping insertion.
+
+The mapping can represent preparation, draft, preflight, provider completion,
+verification persistence, attach pending/completed, review, block, and failure
+states. It stores no evidence body, prompt, raw provider output, credential,
+lease token, worker, request ID, or arbitrary metadata.
+
+This result is exactly:
+
+```text
+FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED
+```
+
+It does not establish provider exactly-once, adapter behavior, or processing.
+SQLite additive upgrade and concurrent uniqueness are tested; formal migration
+and PostgreSQL constraint semantics remain unverified. The next permitted
+slice is the retried Task 9C.5B transaction-neutral adapter.

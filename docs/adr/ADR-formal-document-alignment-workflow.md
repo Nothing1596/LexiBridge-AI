@@ -9,15 +9,17 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current processing-planning conclusion:
-FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
+FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED
 
-Implementation status after Task 9C.5A:
+Implementation status after Task 9C.5B.1:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
 - `PROCESSING_BOUNDARY_CHARACTERIZED`
 - `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
 - `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
+- `FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED`
+- `FORMAL_ITEM_VERIFICATION_ADAPTER_NOT_IMPLEMENTED`
 - `VERIFICATION_TRANSACTION_ADAPTER_NOT_IMPLEMENTED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED`
@@ -646,10 +648,19 @@ satisfies the chunk-scoped candidate and item persistence prerequisite:
 FORMAL_CHUNK_SCOPED_ITEM_BOOTSTRAP_ESTABLISHED
 ```
 
-The next blocker is a transaction-neutral draft/preflight/verification/attach
-adapter. Provider-backed processing orchestration must not start before that
-adapter defines partial commits, retries, usage/audit idempotency, and attach
-ownership.
+Task 9C.5B correctly stopped at its schema gate. Task 9C.5B.1 adds a persistent
+per-item execution mapping, stable safe-input/execution identities, and
+nullable unique identities for formal verification, preflight, usage, and
+audit records:
+
+```text
+FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED
+```
+
+The next blocker remains the transaction-neutral
+draft/preflight/verification/attach adapter. The schema permits recovery and
+database conflict detection; it does not make provider execution exactly-once
+or implement any processing behavior.
 
 ## Rejected Alternatives
 
@@ -668,10 +679,11 @@ ownership.
 
 ## Consequences
 
-The model, admission, formal BackgroundJob ownership, and chunk-scoped item
-bootstrap prerequisites are implemented for the local pilot. The next work is
-not the processing orchestrator. It is the transaction-neutral formal
-verification composition boundary:
+The model, admission, formal BackgroundJob ownership, chunk-scoped item
+bootstrap, and formal item execution identity schema prerequisites are
+implemented for the local pilot. The next work is not the processing
+orchestrator. It is the transaction-neutral formal verification composition
+boundary using the new execution mapping and identities:
 
 ```text
 NEXT_FORMAL_VERIFICATION_TRANSACTION_ADAPTER
@@ -686,4 +698,6 @@ cutover, HTTP 410, and legacy path removal remain later phases.
 This ADR is not production-ready. It does not enable real providers, does not
 add the new API or worker, and does not migrate frontend callers. The formal
 tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
-claim/locking validation remain required.
+claim/locking and idempotency-constraint validation remain required. Provider
+success followed by persistence failure is still ambiguous until the adapter
+defines recovery behavior.
