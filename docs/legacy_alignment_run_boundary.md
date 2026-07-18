@@ -20,6 +20,8 @@ Replacement contract after Task 9C.4V:
 `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Replacement contract conclusion:
 `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
+Replacement model status after Task 9C.4W:
+`FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 
 This document freezes the current behavior of `POST /api/alignment/run` and
 records the Phase 1 containment boundary. Task 9C.4V separately defines the
@@ -141,6 +143,9 @@ Task 9C.4V defines the replacement frontend target as the formal API family:
 - `GET /api/document-alignment-runs/{run_uid}/items`
 
 Those routes do not exist yet and must not be documented as implemented.
+Task 9C.4W adds the formal root/item data models only. The frontend still calls
+legacy `/api/alignment/run`; no replacement route, worker, OpenAPI entry, or
+cutover exists yet.
 
 ## Formal Verification Comparison
 

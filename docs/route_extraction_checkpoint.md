@@ -877,7 +877,42 @@ Main conclusion:
 
 `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
 
-Next recommended slice: Task 9C.4W should add formal workflow models for the
-small pilot. It should not implement the whole application service, route,
-worker, frontend cutover, HTTP 410, or legacy dead-path removal in the same
-task.
+## Task 9C.4W Formal Document Alignment Workflow Models
+
+Task 9C.4W adds only the formal data model layer required by the 9C.4V
+contract. It does not add the replacement application service, API route,
+worker orchestration, frontend cutover, OpenAPI contract, HTTP 410 disabled
+response, or legacy dead-path removal.
+
+Added model layer:
+
+- `DocumentAlignmentWorkflowRun`;
+- `DocumentAlignmentWorkflowItem`;
+- `backend/services/document_alignment_workflow_contract.py` constants;
+- root/item status and stage validation;
+- idempotency scope unique constraint;
+- per-run item key unique constraint;
+- source/parse references;
+- draft card and verification run UID references;
+- safe error fields;
+- `BACKGROUND_JOB_AS_TRANSPORT_ONLY` remains unchanged.
+
+Post-9C.4W status:
+
+- `POST /api/alignment/run` remains in `backend/app.py`.
+- Legacy external/live execution remains disabled by 9C.4U.
+- Frontend still calls the legacy route.
+- No replacement route is registered.
+- No workflow worker is registered.
+- No application service is implemented.
+- Direct `@app.route` count remains 131.
+- Extracted route modules remain 12.
+- Extracted routes remain 32.
+- `RouteCoreDependencies` remains 9 fields.
+- Migration remains `PILOT_CREATE_ALL_ONLY`; production still requires
+  `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`.
+
+Next recommended slice: freeze and implement the formal document alignment
+application service. That task must explicitly define service DTOs, transaction
+ownership, item-key generation, idempotency enforcement, and worker handoff
+from the model fields before any route or frontend cutover.

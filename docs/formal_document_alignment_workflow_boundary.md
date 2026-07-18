@@ -2,20 +2,30 @@
 
 Status:
 - `CONTRACT_PROPOSED`
-- `PROPOSED_FOR_SMALL_PILOT`
+- `ACCEPTED_FOR_SMALL_PILOT`
+- `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
+- `APPLICATION_SERVICE_NOT_IMPLEMENTED`
+- `ROUTES_NOT_IMPLEMENTED`
+- `WORKER_NOT_IMPLEMENTED`
+- `FRONTEND_NOT_MIGRATED`
 - `LEGACY_REPLACEMENT_NOT_IMPLEMENTED`
 - `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
+- `PILOT_CREATE_ALL_ONLY`
+- `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
 Task: 9C.4V
-Baseline: `aa20eef49b260f8c70beed754f091f3263c4cfb2`
+Implementation update: 9C.4W
+Baseline: `fad02b9f5e52e3ec71c9f309669c729a410cd542`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
 Data policy: `NO_LEGACY_AND_FORMAL_DUAL_WRITE`
+Background job policy: `BACKGROUND_JOB_AS_TRANSPORT_ONLY`
 
-This document defines the formal document-alignment workflow contract. It does
-not implement routes, services, models, frontend changes, OpenAPI changes, or
-database schema. Legacy `POST /api/alignment/run` remains temporary frontend
+This document defines the formal document-alignment workflow contract and the
+Task 9C.4W model boundary. It does not implement routes, services, worker
+orchestration, frontend changes, OpenAPI changes, or a production migration
+framework. Legacy `POST /api/alignment/run` remains temporary frontend
 compatibility with external execution disabled.
 
 ## Component Matrix
@@ -32,8 +42,8 @@ compatibility with external execution disabled.
 | Provider governance | `services/provider_governance.py`, `services/provider_preflight.py` | required for every provider execution | policy/preflight/usage records through formal services | formal services |
 | Teacher review | `services/concept_card_review.py` | final approval owner | review record, card status, audit | review service |
 | Queue transport | `BackgroundJob` | transport envelope only | job progress/events | job infrastructure |
-| Workflow root | `DocumentAlignmentWorkflowRun` | missing, must be added | formal root status/progress | future workflow service |
-| Workflow item | `DocumentAlignmentWorkflowItem` | missing, must be added | item state/references | future workflow service |
+| Workflow root | `DocumentAlignmentWorkflowRun` | established in 9C.4W | formal root status/progress | future workflow service |
+| Workflow item | `DocumentAlignmentWorkflowItem` | established in 9C.4W | item state/references | future workflow service |
 | Legacy run | `AlignmentRun`, `TerminologyCard`, `AICallLog`, legacy `UsageRecord` | do not reuse | legacy only while compatibility remains | legacy route/worker |
 
 ## Data Flow
@@ -93,6 +103,164 @@ Item states:
 | any nonterminal | `failed` | infrastructure/parser/persistence failure | unsafe processing failure |
 
 No workflow state grants student visibility.
+
+## Model Fields And Constraints
+
+`DocumentAlignmentWorkflowRun` table:
+
+```text
+document_alignment_workflow_runs
+```
+
+Root fields:
+
+- `id`;
+- `run_uid`, unique, non-null;
+- `source_uid`, non-null;
+- `parse_uid`, non-null;
+- `source_version`;
+- `course`;
+- `chapter`;
+- `requested_by`, non-null;
+- `request_id`;
+- `idempotency_key`, non-null;
+- `idempotency_fingerprint`, non-null;
+- `workflow_version`, non-null;
+- `retrieval_version`;
+- `prompt_version`;
+- `provider_policy_version`;
+- `provider_preference`;
+- `model_preference`;
+- `status`;
+- `stage`;
+- `total_items`;
+- `successful_items`;
+- `ready_for_review_items`;
+- `blocked_items`;
+- `failed_items`;
+- `warning_count`;
+- `risk_summary`;
+- `error_code`;
+- `error_message`;
+- `created_at`;
+- `started_at`;
+- `finished_at`;
+- `updated_at`.
+
+Root constraints and indexes:
+
+- unique `run_uid`;
+- `uq_document_alignment_workflow_idempotency` over
+  `requested_by`, `source_uid`, `workflow_version`, `idempotency_key`;
+- non-negative checks for progress and warning counts;
+- `ix_document_alignment_workflow_source_status`;
+- `ix_document_alignment_workflow_requested_created`.
+
+`DocumentAlignmentWorkflowItem` table:
+
+```text
+document_alignment_workflow_items
+```
+
+Item fields:
+
+- `id`;
+- `item_uid`, unique, non-null;
+- `workflow_run_id`, foreign key to `DocumentAlignmentWorkflowRun`;
+- `item_key`, non-null;
+- `candidate_term`, non-null;
+- `normalized_term`, non-null;
+- `source_chunk_refs`;
+- `chinese_candidate_summary`;
+- `english_evidence_refs`;
+- `chinese_evidence_refs`;
+- `draft_card_uid`;
+- `verification_run_uid`;
+- `status`;
+- `stage`;
+- `risk_labels`;
+- `confidence_score`;
+- `confidence_summary`;
+- `recommendation`;
+- `warning_count`;
+- `error_code`;
+- `error_message`;
+- `retry_count`;
+- `created_at`;
+- `updated_at`;
+- `started_at`;
+- `finished_at`.
+
+Item constraints and indexes:
+
+- unique `item_uid`;
+- `uq_document_alignment_workflow_item_key` over
+  `workflow_run_id`, `item_key`;
+- non-negative checks for `warning_count` and `retry_count`;
+- `confidence_score` must be null or within `[0, 1]`;
+- `ix_document_alignment_workflow_item_run_status`;
+- `ix_document_alignment_workflow_item_draft_card`;
+- `ix_document_alignment_workflow_item_verification`.
+
+Relationship:
+
+```text
+DocumentAlignmentWorkflowRun.items
+DocumentAlignmentWorkflowItem.workflow_run
+```
+
+The root uses dynamic item loading so future status APIs can page items instead
+of loading a whole document workflow at once.
+
+## Status And Stage Constants
+
+The single source for status and stage strings is:
+
+```text
+backend/services/document_alignment_workflow_contract.py
+```
+
+Root statuses:
+
+- `queued`;
+- `validating`;
+- `processing`;
+- `ready_for_review`;
+- `completed_with_warnings`;
+- `blocked`;
+- `failed`.
+
+Root stages:
+
+- `queued`;
+- `source_validation`;
+- `term_extraction`;
+- `evidence_retrieval`;
+- `draft_creation`;
+- `verification`;
+- `finalization`;
+- `terminal`.
+
+Item statuses:
+
+- `candidate`;
+- `evidence_ready`;
+- `draft_created`;
+- `verification_completed`;
+- `needs_review`;
+- `blocked`;
+- `failed`.
+
+Workflow statuses intentionally exclude `approved`, `published`, and
+`student_visible`.
+
+## Serialization Boundary
+
+No HTTP serializer or response envelope is implemented in 9C.4W. The model
+schema intentionally stores only stable references, counts, safe summaries,
+status, stage, and safe error fields. Future serializers must not expose
+database integer IDs, idempotency fingerprints, full evidence, raw prompts, raw
+provider output, credentials, or raw exceptions.
 
 ## Partial Failure
 

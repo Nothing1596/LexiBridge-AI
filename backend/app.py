@@ -78,6 +78,17 @@ from services.legacy_alignment_provider_classification import (
     LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED,
     classify_legacy_alignment_provider,
 )
+from services.document_alignment_workflow_contract import (
+    DOCUMENT_ALIGNMENT_ITEM_STAGES,
+    DOCUMENT_ALIGNMENT_ITEM_STATUSES,
+    DOCUMENT_ALIGNMENT_WORKFLOW_STAGES,
+    DOCUMENT_ALIGNMENT_WORKFLOW_STATUSES,
+    ITEM_STAGE_CANDIDATE,
+    ITEM_STATUS_CANDIDATE,
+    ROOT_STAGE_QUEUED,
+    ROOT_STATUS_QUEUED,
+    WORKFLOW_VERSION_V1,
+)
 from services.ai_provider import provider_from_selection
 from services.prompt_registry import (
     DEFAULT_PROMPTS,
@@ -2011,6 +2022,322 @@ def before_insert_alignment_verification_run(mapper, connection, target):
 @event.listens_for(AlignmentVerificationRun, "before_update")
 def before_update_alignment_verification_run(mapper, connection, target):
     validate_alignment_verification_run(target)
+
+
+_SAFE_ERROR_FORBIDDEN_MARKERS = (
+    "LEXIBRIDGE_SENTINEL_SECRET",
+    "Authorization:",
+    "Cookie:",
+    "Bearer ",
+    "sk-",
+)
+
+
+def _workflow_required_text(value, field_name):
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field_name} is required.")
+    return text
+
+
+def _workflow_optional_text(value, max_length=None):
+    text = str(value or "").strip()
+    if max_length is not None:
+        return text[:max_length]
+    return text
+
+
+def _workflow_non_negative_int(value, field_name):
+    number = int(value or 0)
+    if number < 0:
+        raise ValueError(f"{field_name} must be non-negative.")
+    return number
+
+
+def _workflow_safe_error_message(value):
+    text = str(value or "").strip()
+    if any(marker in text for marker in _SAFE_ERROR_FORBIDDEN_MARKERS):
+        raise ValueError("error_message must be a safe summary.")
+    return text[:500]
+
+
+class DocumentAlignmentWorkflowRun(db.Model):
+    """Formal document-level workflow root for future document alignment."""
+
+    __tablename__ = "document_alignment_workflow_runs"
+
+    DEFAULT_STATUS = ROOT_STATUS_QUEUED
+    DEFAULT_STAGE = ROOT_STAGE_QUEUED
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    source_uid = db.Column(db.String(64), nullable=False, default="")
+    parse_uid = db.Column(db.String(64), nullable=False, default="")
+    source_version = db.Column(db.String(80), default="")
+    course = db.Column(db.String(160), default="")
+    chapter = db.Column(db.String(160), default="")
+    requested_by = db.Column(db.String(120), nullable=False, default="")
+    request_id = db.Column(db.String(120), default="")
+    idempotency_key = db.Column(db.String(160), nullable=False, default="")
+    idempotency_fingerprint = db.Column(db.String(128), nullable=False, default="")
+    workflow_version = db.Column(db.String(80), nullable=False, default=WORKFLOW_VERSION_V1)
+    retrieval_version = db.Column(db.String(80), default="")
+    prompt_version = db.Column(db.String(80), default="")
+    provider_policy_version = db.Column(db.String(80), default="")
+    provider_preference = db.Column(db.String(120), default="")
+    model_preference = db.Column(db.String(120), default="")
+    status = db.Column(db.String(40), nullable=False, default=ROOT_STATUS_QUEUED)
+    stage = db.Column(db.String(80), nullable=False, default=ROOT_STAGE_QUEUED)
+    total_items = db.Column(db.Integer, nullable=False, default=0)
+    successful_items = db.Column(db.Integer, nullable=False, default=0)
+    ready_for_review_items = db.Column(db.Integer, nullable=False, default=0)
+    blocked_items = db.Column(db.Integer, nullable=False, default=0)
+    failed_items = db.Column(db.Integer, nullable=False, default=0)
+    warning_count = db.Column(db.Integer, nullable=False, default=0)
+    risk_summary = db.Column(db.Text, default="{}")
+    error_code = db.Column(db.String(120), default="")
+    error_message = db.Column(db.String(500), default="")
+    created_at = db.Column(db.String(40), nullable=False, default="")
+    started_at = db.Column(db.String(40), default="")
+    finished_at = db.Column(db.String(40), default="")
+    updated_at = db.Column(db.String(40), default="")
+
+    items = db.relationship(
+        "DocumentAlignmentWorkflowItem",
+        back_populates="workflow_run",
+        lazy="dynamic",
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "requested_by",
+            "source_uid",
+            "workflow_version",
+            "idempotency_key",
+            name="uq_document_alignment_workflow_idempotency",
+        ),
+        db.CheckConstraint("total_items >= 0", name="ck_document_alignment_workflow_total_items_nonnegative"),
+        db.CheckConstraint("successful_items >= 0", name="ck_document_alignment_workflow_successful_items_nonnegative"),
+        db.CheckConstraint("ready_for_review_items >= 0", name="ck_document_alignment_workflow_ready_items_nonnegative"),
+        db.CheckConstraint("blocked_items >= 0", name="ck_document_alignment_workflow_blocked_items_nonnegative"),
+        db.CheckConstraint("failed_items >= 0", name="ck_document_alignment_workflow_failed_items_nonnegative"),
+        db.CheckConstraint("warning_count >= 0", name="ck_document_alignment_workflow_warning_count_nonnegative"),
+        db.Index("ix_document_alignment_workflow_source_status", "source_uid", "status"),
+        db.Index("ix_document_alignment_workflow_requested_created", "requested_by", "created_at"),
+    )
+
+    @validates("status")
+    def validate_workflow_status(self, key, value):
+        value = _workflow_required_text(value, "status")
+        if value not in DOCUMENT_ALIGNMENT_WORKFLOW_STATUSES:
+            raise ValueError(f"status must be one of {sorted(DOCUMENT_ALIGNMENT_WORKFLOW_STATUSES)}.")
+        return value
+
+    @validates("stage")
+    def validate_workflow_stage(self, key, value):
+        value = _workflow_required_text(value, "stage")
+        if value not in DOCUMENT_ALIGNMENT_WORKFLOW_STAGES:
+            raise ValueError(f"stage must be one of {sorted(DOCUMENT_ALIGNMENT_WORKFLOW_STAGES)}.")
+        return value
+
+    @validates("run_uid", "source_uid", "parse_uid", "requested_by", "idempotency_key", "idempotency_fingerprint", "workflow_version")
+    def validate_workflow_required_text(self, key, value):
+        return _workflow_required_text(value, key)
+
+    @validates("total_items", "successful_items", "ready_for_review_items", "blocked_items", "failed_items", "warning_count")
+    def validate_workflow_count(self, key, value):
+        return _workflow_non_negative_int(value, key)
+
+    @validates("error_message")
+    def validate_workflow_error_message(self, key, value):
+        return _workflow_safe_error_message(value)
+
+
+def validate_document_alignment_workflow_run(run):
+    run.run_uid = _workflow_required_text(run.run_uid or str(uuid.uuid4()), "run_uid")
+    run.source_uid = _workflow_required_text(run.source_uid, "source_uid")
+    run.parse_uid = _workflow_required_text(run.parse_uid, "parse_uid")
+    run.requested_by = _workflow_required_text(run.requested_by, "requested_by")
+    run.idempotency_key = _workflow_required_text(run.idempotency_key, "idempotency_key")
+    run.idempotency_fingerprint = _workflow_required_text(run.idempotency_fingerprint, "idempotency_fingerprint")
+    run.workflow_version = _workflow_required_text(run.workflow_version or WORKFLOW_VERSION_V1, "workflow_version")
+    run.status = run.status or ROOT_STATUS_QUEUED
+    run.stage = run.stage or ROOT_STAGE_QUEUED
+    if run.status not in DOCUMENT_ALIGNMENT_WORKFLOW_STATUSES:
+        raise ValueError(f"status must be one of {sorted(DOCUMENT_ALIGNMENT_WORKFLOW_STATUSES)}.")
+    if run.stage not in DOCUMENT_ALIGNMENT_WORKFLOW_STAGES:
+        raise ValueError(f"stage must be one of {sorted(DOCUMENT_ALIGNMENT_WORKFLOW_STAGES)}.")
+    for field_name in (
+        "total_items",
+        "successful_items",
+        "ready_for_review_items",
+        "blocked_items",
+        "failed_items",
+        "warning_count",
+    ):
+        setattr(run, field_name, _workflow_non_negative_int(getattr(run, field_name), field_name))
+    run.risk_summary = concept_card_json_dumps(concept_card_json_loads(run.risk_summary, {}))
+    run.error_code = _workflow_optional_text(run.error_code, 120)
+    run.error_message = _workflow_safe_error_message(run.error_message)
+    return True
+
+
+@event.listens_for(DocumentAlignmentWorkflowRun, "before_insert")
+def before_insert_document_alignment_workflow_run(mapper, connection, target):
+    now = current_time_text()
+    target.run_uid = target.run_uid or str(uuid.uuid4())
+    target.created_at = target.created_at or now
+    target.updated_at = target.updated_at or now
+    validate_document_alignment_workflow_run(target)
+
+
+@event.listens_for(DocumentAlignmentWorkflowRun, "before_update")
+def before_update_document_alignment_workflow_run(mapper, connection, target):
+    target.updated_at = current_time_text()
+    validate_document_alignment_workflow_run(target)
+
+
+class DocumentAlignmentWorkflowItem(db.Model):
+    """Formal per-concept workflow item for future document alignment."""
+
+    __tablename__ = "document_alignment_workflow_items"
+
+    DEFAULT_STATUS = ITEM_STATUS_CANDIDATE
+    DEFAULT_STAGE = ITEM_STAGE_CANDIDATE
+
+    id = db.Column(db.Integer, primary_key=True)
+    item_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    workflow_run_id = db.Column(
+        db.Integer,
+        db.ForeignKey("document_alignment_workflow_runs.id"),
+        nullable=False,
+    )
+    item_key = db.Column(db.String(220), nullable=False, default="")
+    candidate_term = db.Column(db.String(220), nullable=False, default="")
+    normalized_term = db.Column(db.String(220), nullable=False, default="")
+    source_chunk_refs = db.Column(db.Text, default="[]")
+    chinese_candidate_summary = db.Column(db.Text, default="{}")
+    english_evidence_refs = db.Column(db.Text, default="[]")
+    chinese_evidence_refs = db.Column(db.Text, default="[]")
+    draft_card_uid = db.Column(db.String(64), default="")
+    verification_run_uid = db.Column(db.String(64), default="")
+    status = db.Column(db.String(40), nullable=False, default=ITEM_STATUS_CANDIDATE)
+    stage = db.Column(db.String(80), nullable=False, default=ITEM_STAGE_CANDIDATE)
+    risk_labels = db.Column(db.Text, default="[]")
+    confidence_score = db.Column(db.Float, nullable=True)
+    confidence_summary = db.Column(db.Text, default="{}")
+    recommendation = db.Column(db.String(80), default="")
+    warning_count = db.Column(db.Integer, nullable=False, default=0)
+    error_code = db.Column(db.String(120), default="")
+    error_message = db.Column(db.String(500), default="")
+    retry_count = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.String(40), nullable=False, default="")
+    updated_at = db.Column(db.String(40), default="")
+    started_at = db.Column(db.String(40), default="")
+    finished_at = db.Column(db.String(40), default="")
+
+    workflow_run = db.relationship("DocumentAlignmentWorkflowRun", back_populates="items")
+
+    __table_args__ = (
+        db.UniqueConstraint("workflow_run_id", "item_key", name="uq_document_alignment_workflow_item_key"),
+        db.CheckConstraint("warning_count >= 0", name="ck_document_alignment_workflow_item_warning_count_nonnegative"),
+        db.CheckConstraint("retry_count >= 0", name="ck_document_alignment_workflow_item_retry_count_nonnegative"),
+        db.CheckConstraint(
+            "confidence_score IS NULL OR (confidence_score >= 0 AND confidence_score <= 1)",
+            name="ck_document_alignment_workflow_item_confidence_range",
+        ),
+        db.Index("ix_document_alignment_workflow_item_run_status", "workflow_run_id", "status"),
+        db.Index("ix_document_alignment_workflow_item_draft_card", "draft_card_uid"),
+        db.Index("ix_document_alignment_workflow_item_verification", "verification_run_uid"),
+    )
+
+    @validates("status")
+    def validate_workflow_item_status(self, key, value):
+        value = _workflow_required_text(value, "status")
+        if value not in DOCUMENT_ALIGNMENT_ITEM_STATUSES:
+            raise ValueError(f"status must be one of {sorted(DOCUMENT_ALIGNMENT_ITEM_STATUSES)}.")
+        return value
+
+    @validates("stage")
+    def validate_workflow_item_stage(self, key, value):
+        value = _workflow_required_text(value, "stage")
+        if value not in DOCUMENT_ALIGNMENT_ITEM_STAGES:
+            raise ValueError(f"stage must be one of {sorted(DOCUMENT_ALIGNMENT_ITEM_STAGES)}.")
+        return value
+
+    @validates("item_uid", "item_key", "candidate_term", "normalized_term")
+    def validate_workflow_item_required_text(self, key, value):
+        return _workflow_required_text(value, key)
+
+    @validates("warning_count", "retry_count")
+    def validate_workflow_item_count(self, key, value):
+        return _workflow_non_negative_int(value, key)
+
+    @validates("confidence_score")
+    def validate_workflow_item_confidence(self, key, value):
+        if value is None:
+            return None
+        score = float(value)
+        if score < 0 or score > 1:
+            raise ValueError("confidence_score must be between 0 and 1.")
+        return score
+
+    @validates("error_message")
+    def validate_workflow_item_error_message(self, key, value):
+        return _workflow_safe_error_message(value)
+
+
+def validate_document_alignment_workflow_item(item):
+    item.item_uid = _workflow_required_text(item.item_uid or str(uuid.uuid4()), "item_uid")
+    item.item_key = _workflow_required_text(item.item_key, "item_key")
+    item.candidate_term = _workflow_required_text(item.candidate_term, "candidate_term")
+    item.normalized_term = _workflow_required_text(item.normalized_term, "normalized_term")
+    item.status = item.status or ITEM_STATUS_CANDIDATE
+    item.stage = item.stage or ITEM_STAGE_CANDIDATE
+    if item.status not in DOCUMENT_ALIGNMENT_ITEM_STATUSES:
+        raise ValueError(f"status must be one of {sorted(DOCUMENT_ALIGNMENT_ITEM_STATUSES)}.")
+    if item.stage not in DOCUMENT_ALIGNMENT_ITEM_STAGES:
+        raise ValueError(f"stage must be one of {sorted(DOCUMENT_ALIGNMENT_ITEM_STAGES)}.")
+    item.warning_count = _workflow_non_negative_int(item.warning_count, "warning_count")
+    item.retry_count = _workflow_non_negative_int(item.retry_count, "retry_count")
+    if item.confidence_score is not None:
+        score = float(item.confidence_score)
+        if score < 0 or score > 1:
+            raise ValueError("confidence_score must be between 0 and 1.")
+        item.confidence_score = score
+    item.source_chunk_refs = concept_card_serialize_list(
+        concept_card_json_loads(item.source_chunk_refs, []),
+        "source_chunk_refs",
+    )
+    item.english_evidence_refs = concept_card_serialize_list(
+        concept_card_json_loads(item.english_evidence_refs, []),
+        "english_evidence_refs",
+    )
+    item.chinese_evidence_refs = concept_card_serialize_list(
+        concept_card_json_loads(item.chinese_evidence_refs, []),
+        "chinese_evidence_refs",
+    )
+    item.risk_labels = concept_card_serialize_list(concept_card_json_loads(item.risk_labels, []), "risk_labels")
+    item.chinese_candidate_summary = concept_card_json_dumps(concept_card_json_loads(item.chinese_candidate_summary, {}))
+    item.confidence_summary = concept_card_json_dumps(concept_card_json_loads(item.confidence_summary, {}))
+    item.error_code = _workflow_optional_text(item.error_code, 120)
+    item.error_message = _workflow_safe_error_message(item.error_message)
+    return True
+
+
+@event.listens_for(DocumentAlignmentWorkflowItem, "before_insert")
+def before_insert_document_alignment_workflow_item(mapper, connection, target):
+    now = current_time_text()
+    target.item_uid = target.item_uid or str(uuid.uuid4())
+    target.created_at = target.created_at or now
+    target.updated_at = target.updated_at or now
+    validate_document_alignment_workflow_item(target)
+
+
+@event.listens_for(DocumentAlignmentWorkflowItem, "before_update")
+def before_update_document_alignment_workflow_item(mapper, connection, target):
+    target.updated_at = current_time_text()
+    validate_document_alignment_workflow_item(target)
 
 
 class AlignmentProviderPolicy(db.Model):

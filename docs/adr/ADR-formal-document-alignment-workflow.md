@@ -1,12 +1,22 @@
 # ADR: Formal Document Alignment Workflow Contract
 
-Status: PROPOSED_FOR_SMALL_PILOT
+Status: ACCEPTED_FOR_SMALL_PILOT
 
 Date: 2026-07-18
 
 Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 
 Main conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
+
+Implementation status after Task 9C.4W:
+
+- `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
+- `APPLICATION_SERVICE_NOT_IMPLEMENTED`
+- `ROUTES_NOT_IMPLEMENTED`
+- `WORKER_NOT_IMPLEMENTED`
+- `FRONTEND_NOT_MIGRATED`
+- `PILOT_CREATE_ALL_ONLY`
+- `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
 ## Context
 
@@ -26,9 +36,10 @@ KnowledgeSource and KnowledgeChunk records, lexical evidence retrieval,
 bilingual evidence workflow, Chinese term candidates, ConceptAlignmentCard
 drafts, formal provider governance, policy, preflight, alignment verification,
 UsageRecord, AuditRecord, teacher review, and student approved-only access.
-What is missing is a document-level orchestration root and item-level progress
-model that can safely connect those components without reusing the legacy
-execution path.
+Task 9C.4W establishes the document-level orchestration root and item-level
+progress models needed to connect those components without reusing the legacy
+execution path. The application service, route, worker, and frontend cutover
+are still not implemented.
 
 ## Decision
 
@@ -130,7 +141,7 @@ Use a new model:
 DocumentAlignmentWorkflowRun
 ```
 
-Minimum fields:
+Task 9C.4W model fields:
 
 - `run_uid`, unique;
 - `source_uid`;
@@ -141,26 +152,26 @@ Minimum fields:
 - `chapter`;
 - `requested_by`;
 - `request_id`;
-- `idempotency_key_hash`;
-- `idempotency_scope`;
-- `canonical_payload_hash`;
+- `idempotency_key`;
+- `idempotency_fingerprint`;
 - `workflow_version`;
 - `provider_preference`;
-- `provider_policy_uid`;
+- `provider_preference`;
+- `model_preference`;
+- `provider_policy_version`;
 - `status`;
 - `stage`;
-- `progress_current`;
-- `progress_total`;
-- `total_candidates`;
+- `total_items`;
 - `successful_items`;
+- `ready_for_review_items`;
 - `blocked_items`;
 - `failed_items`;
 - `warning_count`;
 - `created_at`;
 - `started_at`;
 - `finished_at`;
-- `safe_error_code`;
-- `safe_error_message`.
+- `error_code`;
+- `error_message`.
 
 Existing models are insufficient. `BackgroundJob` lacks stable business
 identity, source/version/idempotency fields, item outcome counts, and document
@@ -175,16 +186,16 @@ Use a new model:
 DocumentAlignmentWorkflowItem
 ```
 
-Minimum fields:
+Task 9C.4W model fields:
 
 - `item_uid`, unique;
-- `workflow_run_uid`;
+- `workflow_run_id`;
 - deterministic item key for retry/idempotent item writes;
 - candidate term;
 - normalized term;
-- source chunk UID list;
+- source chunk reference list;
 - Chinese candidate summary;
-- evidence reference UID list;
+- English and Chinese evidence reference lists;
 - draft ConceptAlignmentCard UID;
 - AlignmentVerificationRun UID;
 - item status;
@@ -193,12 +204,16 @@ Minimum fields:
 - safe error code;
 - safe error message;
 - retry count;
+- warning count;
+- recommendation;
+- confidence score and summary;
 - created_at;
 - updated_at;
 - finished_at.
 
 The item model must not duplicate full evidence text, full prompts, raw
-provider output, credentials, or complete source documents.
+provider output, credentials, legacy AlignmentRun, legacy TerminologyCard,
+legacy UsageRecord, legacy AICallLog, or complete source documents.
 
 ## State Machines
 

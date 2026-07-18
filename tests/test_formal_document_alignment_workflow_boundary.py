@@ -106,8 +106,8 @@ def test_background_job_is_transport_not_formal_workflow_root(app_module):
         "warning_count",
     }
 
-    assert not hasattr(app_module, "DocumentAlignmentWorkflowRun")
-    assert not hasattr(app_module, "DocumentAlignmentWorkflowItem")
+    assert hasattr(app_module, "DocumentAlignmentWorkflowRun")
+    assert hasattr(app_module, "DocumentAlignmentWorkflowItem")
     assert all(not hasattr(app_module.BackgroundJob, field) for field in missing_business_fields)
 
 

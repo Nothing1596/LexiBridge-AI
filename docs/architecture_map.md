@@ -12,8 +12,8 @@ This map describes the current implemented pilot architecture. It is not a futur
 - `KnowledgeChunk`: governed evidence chunk linked to `KnowledgeSource`, optionally linked to `DocumentParseBlock`, with source locator, language, trust, quality, status, and embedding status.
 - `ConceptAlignmentCard`: bilingual concept object with English/Chinese terms, explanations, evidence JSON, risk labels, parse metadata, review status, and review metadata.
 - `AlignmentVerificationRun`: alignment verification run record for mock/fake/replay/disabled providers. It stores structured input/output summaries, provider metadata, parser/schema versions, risk labels, status, and confidence. It is not a production approval record.
-- `DocumentAlignmentWorkflowRun`: proposed formal document-alignment workflow root from Task 9C.4V. It does not exist yet. It is required to represent document-level status, source identity, idempotency, progress, request ID, and terminal outcomes without overloading `BackgroundJob` or legacy `AlignmentRun`.
-- `DocumentAlignmentWorkflowItem`: proposed formal document-alignment workflow item from Task 9C.4V. It does not exist yet. It is required to represent per-concept evidence, draft card, verification run, risk, and blocked/failed/needs-review state.
+- `DocumentAlignmentWorkflowRun`: formal document-alignment workflow root added in Task 9C.4W. It represents document-level status, source identity, parse provenance, idempotency, progress, request ID, safe errors, and terminal outcomes without overloading `BackgroundJob` or legacy `AlignmentRun`.
+- `DocumentAlignmentWorkflowItem`: formal document-alignment workflow item added in Task 9C.4W. It represents per-concept item key, evidence references, draft card UID, verification run UID, risk summary, retry count, and blocked/failed/needs-review state.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.
@@ -213,8 +213,8 @@ Legacy alignment run:
 - Task 9C.4V defines that replacement contract as an async document workflow
   with canonical `GOVERNED_KNOWLEDGE_SOURCE` input, `Idempotency-Key`, formal
   root/item models, formal provider policy/preflight/verification, and
-  `NO_LEGACY_AND_FORMAL_DUAL_WRITE`. The unique conclusion is
-  `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`; no replacement route, model, worker,
+  `NO_LEGACY_AND_FORMAL_DUAL_WRITE`. Task 9C.4W adds the formal root/item
+  models and constants. No replacement application service, route, worker,
   frontend cutover, or OpenAPI entry exists yet.
 
 ## Permission Boundaries

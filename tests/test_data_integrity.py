@@ -112,6 +112,11 @@ def test_core_pilot_data_integrity_in_demo_namespace(client, app_module):
             assert policy.allow_auto_approve is False
             assert policy.require_human_review is True
 
+        assert app_module.DocumentAlignmentWorkflowRun.__tablename__ == "document_alignment_workflow_runs"
+        assert app_module.DocumentAlignmentWorkflowItem.__tablename__ == "document_alignment_workflow_items"
+        assert app_module.DocumentAlignmentWorkflowRun.query.count() == 0
+        assert app_module.DocumentAlignmentWorkflowItem.query.count() == 0
+
         secret_dump = json.dumps(
             [
                 {
