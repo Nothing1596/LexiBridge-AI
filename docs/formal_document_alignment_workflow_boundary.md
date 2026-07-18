@@ -9,7 +9,7 @@ Status:
 - `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`
 - `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
 - `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
-- `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
+- `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
 - `FORMAL_WORKER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
@@ -18,9 +18,9 @@ Status:
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.5A
-Implementation update: chunk-scoped candidates and lease-fenced item bootstrap established; downstream processing remains absent
-Baseline: `3a82e7a8aa7c80b80af291c322159baeaa306170`
+Task: 9C.5C
+Implementation update: sequential document processing and root finalization established; worker/routes/frontend remain absent
+Baseline: `ff1b543d71454667f7bc4a0bd72a0b756d94ab12`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -28,10 +28,11 @@ Data policy: `NO_LEGACY_AND_FORMAL_DUAL_WRITE`
 Background job policy: `BACKGROUND_JOB_AS_TRANSPORT_ONLY`
 
 This document defines the formal document-alignment workflow contract and the
-implemented Task 9C.4W model boundary plus the Task 9C.4X admission/start
-service boundary. It does not implement routes, worker orchestration, document
-processing, frontend changes, OpenAPI changes, or a production migration
-framework. Legacy `POST /api/alignment/run` remains temporary frontend
+implemented model, admission, execution-ownership, item bootstrap,
+per-item verification, and document processing boundaries. It does not
+implement routes, worker dispatch/final job mapping, frontend changes,
+OpenAPI changes, or a production migration framework. Legacy
+`POST /api/alignment/run` remains temporary frontend
 compatibility with external execution disabled.
 
 ## Component Matrix
@@ -51,6 +52,8 @@ compatibility with external execution disabled.
 | Workflow root | `DocumentAlignmentWorkflowRun` | established in 9C.4W | formal root status/progress | future workflow service |
 | Workflow item | `DocumentAlignmentWorkflowItem` | established in 9C.4W | item state/references | future workflow service |
 | Workflow admission | `services/document_alignment_workflow_application.py` | established in 9C.4X | root, BackgroundJob, AuditRecord | admission application service |
+| Item preparation | `services/document_alignment_item_preparation.py` | established in 9C.5C | read-only governed evidence/candidate composition | read transaction is rolled back by preparation |
+| Processing orchestrator | `services/document_alignment_processing_orchestrator.py` | established in 9C.5C | root/item progress and root audit; indirect formal item writes | short lease-fenced checkpoints and established collaborators |
 | Legacy run | `AlignmentRun`, `TerminologyCard`, `AICallLog`, legacy `UsageRecord` | do not reuse | legacy only while compatibility remains | legacy route/worker |
 
 ## Data Flow
@@ -1523,10 +1526,50 @@ Current status:
 
 ```text
 FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED
-PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED
+FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED
 FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED
 FORMAL_ROUTES_NOT_IMPLEMENTED
 FRONTEND_NOT_MIGRATED
 ```
 
-Next permitted slice: `NEXT_FORMAL_PROCESSING_ORCHESTRATOR`.
+## Task 9C.5C Formal Processing Orchestrator
+
+Task 9C.5C adds `document_alignment_item_preparation.py` and
+`document_alignment_processing_orchestrator.py`. Preparation composes the
+existing governed Chinese-candidate and bilingual-evidence services, selects
+one candidate with deterministic score/UID/value ordering, constrains English
+evidence to the item's governed source chunks, and keeps bounded snippets in
+memory. The persisted checkpoint contains only evidence reference IDs, one
+candidate/provenance summary, risk labels, and state.
+
+The orchestrator accepts a frozen command containing run/job/worker/attempt and
+a repr-hidden lease token. It validates the formal BackgroundJob payload,
+heartbeats synchronously at every specified boundary, invokes the existing
+item bootstrap, iterates by database ID plus item key, and invokes only the
+9C.5B adapter for draft, policy, preflight, provider, verification, usage,
+audit, and attach. It never completes, fails, or requeues BackgroundJob.
+
+Business blocks are persisted per item and later items continue. Infrastructure
+errors, unavailable chunks, retryable adapter outcomes, stale attempts, and
+expired leases stop the invocation without root terminalization. Source
+identity/version drift preserves completed items and atomically blocks all
+unstarted candidates while the lease is active. Counts are always recomputed
+from database item states. V1 warning count is the number of needs-review items
+with nonempty risk labels plus blocked items plus failed items.
+
+Root terminal rules are: all needs-review -> `ready_for_review`; mixed
+needs-review and blocked/failed -> `completed_with_warnings`; all blocked ->
+`blocked`; no needs-review with any failed -> `failed`. Nonterminal items keep
+the root processing. Terminal audits use a stable event identity derived only
+from run UID, workflow version, and event type.
+
+Repeated invocation skips terminal items, reconstructs bounded in-memory input
+for resumable item states, reuses per-item execution identities, and rebuilds
+root counts. Five two-session SQLite duplicate-invocation rounds converged
+without duplicate item, draft, preflight, verification, usage, or audit rows.
+This is a defensive idempotency result, not permission for parallel item
+processing and not PostgreSQL proof. The declared policy remains
+`SINGLE_SEQUENTIAL_ORCHESTRATOR_PER_LEASE` and provider execution remains
+at-least-once for deterministic providers.
+
+Next permitted slice: `NEXT_FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER`.

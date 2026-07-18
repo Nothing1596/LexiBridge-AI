@@ -186,7 +186,7 @@ def test_processing_boundary_docs_freeze_contracts_state_machines_and_transactio
 
     required_terms = (
         "PROCESSING_BOUNDARY_CHARACTERIZED",
-        "PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED",
+        "FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED",
         "FORMAL_WORKER_NOT_IMPLEMENTED",
         "FORMAL_ROUTES_NOT_IMPLEMENTED",
         "FRONTEND_NOT_MIGRATED",

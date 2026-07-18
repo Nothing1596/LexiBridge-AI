@@ -18,8 +18,17 @@ EXPECTED_CONDITIONS = {
     "FORMAL_EVIDENCE_PERSISTENCE_MINIMIZED",
     "POSTGRESQL_ITEM_ADAPTER_NOT_VERIFIED",
     "POSTGRESQL_BOOTSTRAP_TRANSACTION_NOT_VERIFIED",
-    "FORMAL_BACKGROUND_JOB_HANDLER_NOT_IMPLEMENTED",
-    "FORMAL_PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED",
+    "FORMAL_DOCUMENT_PROCESSING_ORCHESTRATOR_PRESENT",
+    "FORMAL_ITEM_PREPARATION_COMPOSITION_PRESENT",
+    "FORMAL_ROOT_PROGRESS_RECALCULATION_PRESENT",
+    "FORMAL_ROOT_FINALIZATION_PRESENT",
+    "FORMAL_ROOT_AUDIT_IDEMPOTENCY_PRESENT",
+    "FORMAL_PROCESSING_PARTIAL_FAILURE_PRESENT",
+    "FORMAL_PROCESSING_RESUME_PRESENT",
+    "FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED",
+    "FORMAL_ROUTES_NOT_IMPLEMENTED",
+    "FRONTEND_NOT_MIGRATED",
+    "POSTGRESQL_PROCESSING_NOT_VERIFIED",
     "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
     "FORMAL_ITEM_EXECUTION_IDENTITY_SCHEMA_PRESENT",
     "FORMAL_VERIFICATION_EXECUTION_KEY_UNIQUENESS_PRESENT",
@@ -55,3 +64,11 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_item_verification_idempotency.py" in source
     assert "tests/test_document_alignment_item_verification_security.py" in source
     assert "tests/test_document_alignment_item_verification_fault_recovery.py" in source
+    assert "formal document alignment processing orchestrator" in source
+    assert "tests/test_document_alignment_processing_orchestrator.py" in source
+    assert "tests/test_document_alignment_processing_orchestrator_integration.py" in source
+    assert "tests/test_document_alignment_processing_partial_failure.py" in source
+    assert "tests/test_document_alignment_processing_resume.py" in source
+    assert "tests/test_document_alignment_processing_concurrency.py" in source
+    assert "tests/test_document_alignment_processing_security.py" in source
+    assert "tests/test_document_alignment_processing_fault_recovery.py" in source

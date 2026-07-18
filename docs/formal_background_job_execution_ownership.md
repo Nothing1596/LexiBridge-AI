@@ -211,8 +211,9 @@ query-first worker excludes that type. The formal type remains absent from the
 legacy dispatcher, and direct legacy dispatch returns it untouched. Legacy job
 ordering, retry, and execution behavior otherwise remain unchanged.
 
-This isolation is required while `FORMAL_BACKGROUND_JOB_HANDLER_NOT_IMPLEMENTED`
-and `FORMAL_PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED` remain true.
+This isolation remains required after the processing orchestrator is
+established because `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED` is still true and
+the generic legacy dispatcher must never claim formal jobs.
 
 ## Concurrency Evidence
 

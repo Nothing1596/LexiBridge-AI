@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current processing-planning conclusion:
-FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED
+FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED
 
-Implementation status after Task 9C.5B (retry):
+Implementation status after Task 9C.5C:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -20,7 +20,7 @@ Implementation status after Task 9C.5B (retry):
 - `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
 - `FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED`
 - `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
-- `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
+- `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
 - `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
@@ -671,6 +671,25 @@ Provider completion is checkpointed before verification persistence, and the
 approved-card attach uses a conditional update so a concurrent teacher
 approval cannot be overwritten.
 
+Task 9C.5C composes the established boundaries in
+`backend/services/document_alignment_processing_orchestrator.py`. The
+HTTP-neutral and worker-neutral service validates the formal job/run identity
+and active lease, invokes the existing bootstrap, prepares one item at a time
+through the governed bilingual evidence and Chinese-candidate services, calls
+only the per-item verification adapter for draft/provider/verification work,
+recalculates progress from persisted items, and finalizes the workflow root
+with an idempotent root audit. It preserves completed items across business
+blocks and source drift, stops on infrastructure or lease failures, and leaves
+BackgroundJob completion/failure/requeue to the future formal worker handler.
+The V1 execution policy is `SINGLE_SEQUENTIAL_ORCHESTRATOR_PER_LEASE`.
+
+This establishes an internal processing application service, not an exposed
+workflow. There is no formal worker registration, status/items query service,
+HTTP route, OpenAPI operation, or frontend caller. Deterministic provider
+replay remains at-least-once after the existing provider-started crash point.
+The concurrent duplicate-invocation tests use SQLite and independent sessions;
+PostgreSQL locking, migration, and operational recovery remain unverified.
+
 ## Rejected Alternatives
 
 1. Wrap legacy `run_alignment` as a service.
@@ -689,13 +708,15 @@ approval cannot be overwritten.
 ## Consequences
 
 The model, admission, formal BackgroundJob ownership, chunk-scoped item
-bootstrap, execution identities, and lease-fenced per-item verification
-adapter are implemented for the local pilot. The next permitted slice may
-compose these existing boundaries into document-level processing and root
-finalization, but must not register a worker or route in the same task:
+bootstrap, execution identities, lease-fenced per-item verification adapter,
+and document-level processing/root finalization service are implemented for
+the local pilot. The next permitted slice may connect the orchestrator to the
+formal BackgroundJob worker and map typed outcomes to job completion,
+failure, or requeue; it must not add routes or frontend cutover in the same
+task:
 
 ```text
-NEXT_FORMAL_PROCESSING_ORCHESTRATOR
+NEXT_FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still
