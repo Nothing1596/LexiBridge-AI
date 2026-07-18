@@ -31,6 +31,10 @@ PROFILE_CONDITIONS = {
         "external_llm_disabled",
         "demo_local_accounts_only",
         "formal_migration_not_enabled",
+        "FORMAL_BACKGROUND_JOB_LEASE_FOUNDATION_PRESENT",
+        "FORMAL_BACKGROUND_JOB_HANDLER_NOT_IMPLEMENTED",
+        "FORMAL_PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED",
+        "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
     ],
     "small-pilot": [
         "small_pilot_only",
@@ -40,6 +44,10 @@ PROFILE_CONDITIONS = {
         "demo_local_account_restrictions",
         "formal_migration_not_enabled",
         "production_monitoring_not_enabled",
+        "FORMAL_BACKGROUND_JOB_LEASE_FOUNDATION_PRESENT",
+        "FORMAL_BACKGROUND_JOB_HANDLER_NOT_IMPLEMENTED",
+        "FORMAL_PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED",
+        "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
     ],
 }
 
@@ -657,6 +665,19 @@ print("restored database integrity ok")
         phases.append(run_python_snippet("provider network-disabled check", provider_network_disabled_code(), env, timeout=120))
         phases.append(run_command("openapi route parity", [PYTHON_CMD, "-m", "pytest", "-q", "tests/test_openapi_route_parity.py"], env, timeout=120))
         phases.append(run_command("data integrity checks", [PYTHON_CMD, "-m", "pytest", "-q", "tests/test_data_integrity.py"], env, timeout=180))
+        phases.append(run_command(
+            "formal background job execution ownership",
+            [
+                PYTHON_CMD,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_formal_background_job_execution.py",
+                "tests/test_formal_background_job_concurrency.py",
+            ],
+            env,
+            timeout=240,
+        ))
         phases.append(run_command("critical e2e workflow", [PYTHON_CMD, "-m", "pytest", "-q", "tests/test_pilot_end_to_end.py"], env, timeout=300))
         browser_phase = run_command(
             "browser e2e",

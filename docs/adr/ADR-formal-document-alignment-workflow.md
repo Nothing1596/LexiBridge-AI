@@ -9,15 +9,16 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current processing-planning conclusion:
-WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST
+SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
 
-Implementation status after Task 9C.4Y:
+Implementation status after Task 9C.4Z:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
 - `PROCESSING_BOUNDARY_CHARACTERIZED`
+- `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
-- `FORMAL_WORKER_NOT_IMPLEMENTED`
+- `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
@@ -51,14 +52,13 @@ and commits once. Processing orchestration, route, worker, and frontend cutover
 are still not implemented.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
-current BackgroundJob queue is sufficient only for a controlled single-worker
-compatibility pilot: claim is query-then-update, with no atomic compare-and-set,
-lease expiry, heartbeat, stale-running recovery, or attempt-scoped ownership.
-The existing text-level term extractor also lacks governed chunk scope, and
-the draft/preflight/verification/attach collaborators have independent commit
-defaults. Those later processing concerns remain separate slices, but the
-queue ownership gap is the first blocking boundary because duplicate workers
-could duplicate provider and business writes.
+Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
+heartbeat, stale-running reclaim, attempt fencing, terminal immutability, and
+formal/legacy worker isolation for the local SQLite pilot. This is
+`AT_LEAST_ONCE_TRANSPORT` plus `ATTEMPT_FENCED_OWNERSHIP`, not exactly-once or a
+formal processing worker. The existing text-level term extractor still lacks
+governed chunk scope, and draft/preflight/verification/attach collaborators
+still have independent commit defaults.
 
 ## Decision
 
@@ -601,7 +601,8 @@ progress. New workflow models are required before an application service.
 
 Small-pilot implementation may continue using the current `create_all` pattern
 because the repository has not yet introduced a formal migration framework and
-this design is still `PROPOSED_FOR_SMALL_PILOT`. Production rollout requires a
+This design began as `PROPOSED_FOR_SMALL_PILOT`; its current status is
+`ACCEPTED_FOR_SMALL_PILOT`. Production rollout requires a
 separate migration hardening task before real deployment.
 
 Main conclusion:
@@ -630,13 +631,14 @@ worker that tries to persist progress or finalize after ownership changed.
 BackgroundJob remains transport-only; WorkflowRun and WorkflowItem remain the
 business state truth.
 
-Primary conclusion: `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`
+Historical Task 9C.4Y conclusion:
+`WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`.
 
-The next task is `Task 9C.4Z: Formal BackgroundJob Atomic Claim, Lease,
-Heartbeat, And Stale-Recovery Contract`. It must not implement document
-processing. After that slice, the chunk-scoped term/item bootstrap boundary
-and transaction-neutral draft/verification adapters must be reassessed
-separately before provider-backed orchestration.
+Task 9C.4Z satisfies that local-pilot ownership prerequisite. The next unique
+conclusion is `SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST`, because the
+current extractor cannot produce a stable governed chunk scope for
+`item-key-v1`. Transaction-neutral draft/verification adapters remain a later
+prerequisite before provider-backed orchestration.
 
 ## Rejected Alternatives
 
@@ -655,12 +657,13 @@ separately before provider-backed orchestration.
 
 ## Consequences
 
-The model and admission prerequisites are implemented. The next work is not
-the processing orchestrator. It is the BackgroundJob claim/lease contract:
+The model, admission, and formal BackgroundJob ownership prerequisites are
+implemented for the local pilot. The next work is not the processing
+orchestrator. It is the chunk-scoped candidate and idempotent item bootstrap
+boundary:
 
 ```text
-Task 9C.4Z: Formal BackgroundJob Atomic Claim, Lease, Heartbeat, And
-Stale-Recovery Contract
+SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still

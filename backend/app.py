@@ -87,6 +87,7 @@ from services.document_alignment_workflow_contract import (
     ITEM_STATUS_CANDIDATE,
     ROOT_STAGE_QUEUED,
     ROOT_STATUS_QUEUED,
+    FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
     WORKFLOW_VERSION_V1,
 )
 from services.ai_provider import provider_from_selection
@@ -2574,7 +2575,13 @@ class BackgroundJob(db.Model):
     Local async job record for long-running MVP workflows.
     The worker is intentionally SQLite-friendly and single-process for this stage.
     """
+    __table_args__ = (
+        db.Index("ix_background_job_formal_claim", "job_type", "status", "priority", "id"),
+        db.Index("ix_background_job_formal_stale_lease", "job_type", "status", "lease_expires_at"),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
+    job_uid = db.Column(db.String(64), unique=True, nullable=True, index=True, default=lambda: uuid.uuid4().hex)
     job_type = db.Column(db.String(80), nullable=False)
     status = db.Column(db.String(40), default="queued")
     priority = db.Column(db.Integer, default=100)
@@ -2601,6 +2608,10 @@ class BackgroundJob(db.Model):
     updated_at = db.Column(db.String(40), default="")
     locked_by = db.Column(db.String(120), default="")
     locked_at = db.Column(db.String(40), default="")
+    execution_attempt = db.Column(db.Integer, nullable=False, default=0)
+    lease_token = db.Column(db.String(128), default="")
+    heartbeat_at = db.Column(db.String(40), default="")
+    lease_expires_at = db.Column(db.String(40), default="")
 
 
 class BackgroundJobEvent(db.Model):
@@ -3454,6 +3465,7 @@ def ensure_schema_columns():
             "finished_at": "VARCHAR(40) DEFAULT ''"
         },
         "background_job": {
+            "job_uid": "VARCHAR(64)",
             "job_type": "VARCHAR(80) DEFAULT ''",
             "status": "VARCHAR(40) DEFAULT 'queued'",
             "priority": "INTEGER DEFAULT 100",
@@ -3479,7 +3491,11 @@ def ensure_schema_columns():
             "created_at": "VARCHAR(40) DEFAULT ''",
             "updated_at": "VARCHAR(40) DEFAULT ''",
             "locked_by": "VARCHAR(120) DEFAULT ''",
-            "locked_at": "VARCHAR(40) DEFAULT ''"
+            "locked_at": "VARCHAR(40) DEFAULT ''",
+            "execution_attempt": "INTEGER DEFAULT 0 NOT NULL",
+            "lease_token": "VARCHAR(128) DEFAULT ''",
+            "heartbeat_at": "VARCHAR(40) DEFAULT ''",
+            "lease_expires_at": "VARCHAR(40) DEFAULT ''"
         },
         "background_job_event": {
             "job_id": "INTEGER DEFAULT 0",
@@ -3503,6 +3519,19 @@ def ensure_schema_columns():
                 db.session.execute(
                     db.text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
                 )
+
+    db.session.execute(db.text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_background_job_job_uid "
+        "ON background_job (job_uid)"
+    ))
+    db.session.execute(db.text(
+        "CREATE INDEX IF NOT EXISTS ix_background_job_formal_claim "
+        "ON background_job (job_type, status, priority, id)"
+    ))
+    db.session.execute(db.text(
+        "CREATE INDEX IF NOT EXISTS ix_background_job_formal_stale_lease "
+        "ON background_job (job_type, status, lease_expires_at)"
+    ))
 
     db.session.commit()
 
@@ -6737,6 +6766,8 @@ def run_background_job(job_id, worker_id=JOB_WORKER_ID):
     job = db.session.get(BackgroundJob, int(job_id))
     if job is None:
         raise JobExecutionError("BackgroundJob not found.", "RESOURCE_NOT_FOUND", retryable=False)
+    if job.job_type == FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE:
+        return job
     if job.status == "canceled":
         add_job_event(job, "canceled", "Job was canceled before execution.")
         return job
@@ -6818,7 +6849,8 @@ def run_background_job(job_id, worker_id=JOB_WORKER_ID):
 
 def claim_next_background_job(worker_id=JOB_WORKER_ID):
     job = BackgroundJob.query.filter(
-        BackgroundJob.status.in_(["queued", "retrying"])
+        BackgroundJob.status.in_(["queued", "retrying"]),
+        BackgroundJob.job_type != FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
     ).order_by(BackgroundJob.priority.asc(), BackgroundJob.id.asc()).first()
     if job is None:
         return None

@@ -3,6 +3,8 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 
+from services.document_alignment_workflow_contract import FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE
+
 
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"}
@@ -133,3 +135,49 @@ def test_worker_processes_evaluation_job(client, app_module, teacher_token):
             eval_file.unlink()
         except FileNotFoundError:
             pass
+
+
+def test_legacy_worker_never_claims_or_fails_formal_job(app_module):
+    with app_module.app.app_context():
+        app_module.db.session.rollback()
+        formal = app_module.BackgroundJob(
+            job_type=FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
+            status="queued",
+            priority=1,
+            input_json="{}",
+            result_json="{}",
+            attempt_count=0,
+            max_attempts=1,
+            created_at=app_module.current_time_text(),
+            updated_at=app_module.current_time_text(),
+        )
+        legacy = app_module.BackgroundJob(
+            job_type="document_ingestion",
+            status="queued",
+            priority=2,
+            input_json="{}",
+            result_json="{}",
+            attempt_count=0,
+            max_attempts=1,
+            created_at=app_module.current_time_text(),
+            updated_at=app_module.current_time_text(),
+        )
+        app_module.db.session.add_all([formal, legacy])
+        app_module.db.session.commit()
+
+        claimed = app_module.claim_next_background_job(worker_id="legacy-worker-9c4z")
+        assert claimed.id == legacy.id
+        app_module.db.session.rollback()
+
+        direct = app_module.run_background_job(formal.id, worker_id="legacy-worker-9c4z")
+        app_module.db.session.expire_all()
+        stored = app_module.db.session.get(app_module.BackgroundJob, formal.id)
+        assert direct.id == formal.id
+        assert stored.status == "queued"
+        assert stored.attempt_count == 0
+        assert stored.error_code in {None, ""}
+
+        app_module.BackgroundJob.query.filter(
+            app_module.BackgroundJob.id.in_([formal.id, legacy.id])
+        ).delete(synchronize_session=False)
+        app_module.db.session.commit()

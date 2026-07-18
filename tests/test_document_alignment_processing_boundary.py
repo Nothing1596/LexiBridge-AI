@@ -105,23 +105,28 @@ def test_current_transaction_owners_are_explicit_and_verification_omits_prefligh
     assert "commit=True" in execution_source
 
 
-def test_background_job_claim_is_single_worker_only_and_has_no_lease_contract(app_module):
+def test_background_job_formal_path_has_attempt_fenced_lease_contract(app_module):
     columns = {column.name for column in app_module.BackgroundJob.__table__.columns}
     assert {"locked_by", "locked_at", "attempt_count", "max_attempts"} <= columns
     assert {
-        "claim_token",
+        "job_uid",
+        "execution_attempt",
         "lease_token",
         "lease_expires_at",
         "heartbeat_at",
-    }.isdisjoint(columns)
+    } <= columns
 
     claim_source = inspect.getsource(app_module.claim_next_background_job)
     assert ".first()" in claim_source
     assert "status.in_([\"queued\", \"retrying\"])" in claim_source
+    assert "FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE" in claim_source
     assert "db.session.commit()" in claim_source
-    assert "with_for_update" not in claim_source
-    assert "rowcount" not in claim_source
-    assert "compare" not in claim_source.lower()
+
+    from services import formal_background_job_execution
+
+    formal_claim = inspect.getsource(formal_background_job_execution.claim_next_formal_background_job)
+    assert "rowcount" in formal_claim
+    assert "update(" in formal_claim
 
 
 def test_formal_job_has_no_worker_dispatch_or_route_yet(app_module):

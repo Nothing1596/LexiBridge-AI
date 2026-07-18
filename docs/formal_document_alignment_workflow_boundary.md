@@ -6,6 +6,7 @@ Status:
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
 - `PROCESSING_BOUNDARY_CHARACTERIZED`
+- `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`
 - `PROCESSING_ORCHESTRATOR_NOT_IMPLEMENTED`
 - `FORMAL_WORKER_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
@@ -15,9 +16,9 @@ Status:
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.4Y
-Implementation update: 9C.4X admission established; 9C.4Y processing boundary characterized
-Baseline: `7840993e2aee9e107022083c0172101c55cf38ea`
+Task: 9C.4Z
+Implementation update: formal BackgroundJob CAS/lease ownership established; processing remains absent
+Baseline: `7eb8c1440ca192383ff817c4d3c55c7240ebd173`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -864,14 +865,14 @@ ProcessDocumentAlignmentWorkflowCommand(
     workflow_run_uid: str,
     job_uid: str,
     worker_id: str,
-    attempt: int,
+    execution_attempt: int,
+    lease_token: str,
     expected_job_status: str,
 )
 ```
 
-The claim implementation may represent the persisted attempt as a lease
-generation. A separate claim token is required only if an implementation
-cannot compare and finalize against `attempt_count`. The command contains no
+The persisted execution attempt and opaque lease token are both required.
+Worker ID or transport status alone never proves ownership. The command contains no
 raw document, chunks, evidence body, credential, provider URL, prompt, Flask
 request, HTTP response, user session, ORM graph, or route dependency container.
 
@@ -928,28 +929,24 @@ provider transports, legacy alignment helpers, or frontend configuration.
 | worker ID and locked timestamp | yes | yes | fields exist |
 | attempt and max attempts | yes; default maximum is 3 | yes | none |
 | job type and minimal payload | yes | yes | formal type is not in worker dispatch |
-| atomic claim | no; query-first then update | yes | blocking |
-| compare-and-set finalization | no | yes | blocking |
-| lease generation | no dedicated token; attempt may serve after a contract | yes | blocking contract |
-| lease expiry | no | yes | blocking |
-| heartbeat | no | required before long work | blocking |
-| stale-running recovery | no | yes | blocking |
+| atomic claim | formal path uses conditional SQL UPDATE and requires rowcount 1 | yes | established for tested SQLite path |
+| compare-and-set finalization | worker, attempt, token, status and expiry fence | yes | established for formal transport state |
+| lease generation | unpredictable token plus monotonic execution attempt | yes | established |
+| lease expiry | explicit UTC text deadline; expiry at `lease_expires_at <= now` | yes | established for single-node pilot |
+| heartbeat | fenced renewal extends expiry by 30 seconds | required before long work | established |
+| stale-running recovery | CAS replacement with new attempt/token | yes | established |
 | formal job cancellation policy | generic cancel currently applies | explicit formal policy required | blocking contract |
 | formal manual retry policy | generic failed-job retry currently applies | attempt-aware retry required | blocking contract |
 | PostgreSQL locking behavior | unverified | required before production | deferred production validation |
 
-The current queue is safe only under a controlled single worker operational
-assumption. Two workers can currently read the same queued row before either commit. SQLite
-serializes writes but does not make the query-first claim atomic. A running job
-has no expiry or heartbeat, and `run_background_job` accepts a running job
-without validating ownership or attempt generation. Repeated invocation can
-therefore repeat provider execution and business writes.
-
-For the small pilot, the next slice must implement an atomic status-and-attempt
-compare-and-set, update `locked_at` as a heartbeat, define a stale cutoff,
-requeue only an expired matching attempt, and reject finalization from an old
-attempt. BackgroundJob remains transport-only; its status never replaces the
-workflow root status.
+The legacy queue remains query-first for legacy job types. Formal jobs use the
+dedicated ownership service and are excluded from generic claim/dispatch. Real
+file-backed SQLite tests synchronize two sessions after candidate discovery and
+repeat queued claim races 20 times with exactly one winner. PostgreSQL and
+distributed clock semantics remain unverified. BackgroundJob remains
+transport-only; its status never replaces workflow root status.
+Legacy job execution still retains its historical single worker operational
+assumption; the formal CAS contract does not retroactively harden legacy jobs.
 
 ### Root State Machine
 
@@ -1325,18 +1322,33 @@ students. Frontend polling targets WorkflowRun status, not BackgroundJob.
 
 ### Unique Processing Conclusion And Next Task
 
-Primary conclusion: `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`
+Historical 9C.4Y conclusion: `WORKER_CLAIM_AND_LEASE_CONTRACT_REQUIRED_FIRST`.
 
-The processing orchestrator cannot be implemented directly. The immediate
-next task is:
+Task 9C.4Z conclusion: `FORMAL_JOB_EXECUTION_OWNERSHIP_ESTABLISHED`.
+
+The processing orchestrator still cannot be implemented directly. The existing
+term extractor has no governed chunk-scoped candidate contract, so the immediate
+next blocker is:
 
 ```text
-Task 9C.4Z: Formal BackgroundJob Atomic Claim, Lease, Heartbeat, And
-Stale-Recovery Contract
+SPLIT_TERM_EXTRACTION_AND_ITEM_PERSISTENCE_FIRST
 ```
 
-That task must establish atomic claim, attempt ownership, heartbeat, stale
-recovery, old-worker finalization rejection, formal cancel/retry behavior, and
-formal job-type dispatch tests without implementing document processing.
-After 9C.4Z, term-scoping/bootstrap and draft/verification transaction adapters
-must be reassessed as separate slices before provider-backed orchestration.
+The next task must establish a formal chunk-scoped candidate DTO and idempotent
+WorkflowItem bootstrap. Draft/verification transaction adapters remain a
+separate later slice before provider-backed orchestration.
+
+## Task 9C.4Z Formal Job Ownership Update
+
+The implemented contract is documented in
+`docs/formal_background_job_execution_ownership.md`. It provides
+`FORMAL_BACKGROUND_JOB_EXECUTION_OWNERSHIP_ESTABLISHED_FOR_LOCAL_PILOT`,
+`AT_LEAST_ONCE_TRANSPORT`, and `ATTEMPT_FENCED_OWNERSHIP` with
+`FORMAL_JOB_DEFAULT_LEASE_SECONDS = 30`. Expiry uses
+`lease_expires_at <= now`. The clock policy remains
+`SINGLE_NODE_CLOCK_TRUSTED_FOR_PILOT` and
+`DATABASE_TIME_REQUIRED_FOR_DISTRIBUTED_PRODUCTION`.
+
+`CANCELLATION_OUT_OF_SCOPE_FOR_9C4Z`. The additive schema remains
+`PILOT_CREATE_ALL_ONLY`; `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION` and
+`POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED` remain explicit conditions.
