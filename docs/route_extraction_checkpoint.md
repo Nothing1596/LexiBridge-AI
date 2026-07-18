@@ -836,3 +836,48 @@ Post-9C.4U status:
 Next recommended slice: define the formal document alignment workflow contract
 and boundary. Do not extract the legacy route as a service and do not cut over
 the frontend until the replacement workflow exists.
+
+## Task 9C.4V Formal Document Alignment Workflow Contract
+
+Task 9C.4V does not modify production code, does not add a route, does not add
+models, and does not modify frontend or OpenAPI. It defines the replacement
+contract for legacy document alignment in
+`docs/adr/ADR-formal-document-alignment-workflow.md` and
+`docs/formal_document_alignment_workflow_boundary.md`.
+
+Contract summary:
+
+- workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`;
+- status: `PROPOSED_FOR_SMALL_PILOT`;
+- canonical input: `GOVERNED_KNOWLEDGE_SOURCE`;
+- execution model: `ASYNC_JOB_ORCHESTRATION`;
+- start endpoint target: `POST /api/document-alignment-runs`;
+- status endpoint target: `GET /api/document-alignment-runs/{run_uid}`;
+- item endpoint target: `GET /api/document-alignment-runs/{run_uid}/items`;
+- idempotency: `Idempotency-Key`, not request ID;
+- root model required: `DocumentAlignmentWorkflowRun`;
+- item model required: `DocumentAlignmentWorkflowItem`;
+- data policy: `NO_LEGACY_AND_FORMAL_DUAL_WRITE`;
+- provider path: formal governance, policy, preflight, verification, parser,
+  usage, and audit only.
+
+Post-9C.4V status:
+
+- `POST /api/alignment/run` remains in `backend/app.py`.
+- Legacy external/live execution remains disabled by 9C.4U.
+- Frontend still calls the legacy route.
+- No new route module.
+- No additional extracted route.
+- Direct `@app.route` count remains unchanged.
+- Extracted route modules remain 12.
+- Extracted routes remain 32.
+- `RouteCoreDependencies` remains 9 fields.
+
+Main conclusion:
+
+`FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
+
+Next recommended slice: Task 9C.4W should add formal workflow models for the
+small pilot. It should not implement the whole application service, route,
+worker, frontend cutover, HTTP 410, or legacy dead-path removal in the same
+task.

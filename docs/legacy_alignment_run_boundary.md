@@ -7,18 +7,26 @@ Status:
 - `WORKER_EXTERNAL_EXECUTION_DISABLED`
 - `EXISTING_EXTERNAL_JOBS_QUARANTINED`
 - `FRONTEND_COMPATIBILITY_RETAINED`
+- `FORMAL_REPLACEMENT_CONTRACT_PROPOSED`
 - `REPLACEMENT_NOT_YET_IMPLEMENTED`
-Tasks: 9C.4S, 9C.4T, 9C.4U
+Tasks: 9C.4S, 9C.4T, 9C.4U, 9C.4V
 Baseline: `d82798012c263d54761a42c0ebff57ef9e78f8b2`
 Main conclusion: `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`
 Deprecation policy after Task 9C.4T:
 `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`
 External containment after Task 9C.4U:
 `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`
+Replacement contract after Task 9C.4V:
+`FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
+Replacement contract conclusion:
+`FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
 
 This document freezes the current behavior of `POST /api/alignment/run` and
-records the Phase 1 containment boundary. It does not describe a replacement
-workflow and does not claim the legacy route is safe to extract as a service.
+records the Phase 1 containment boundary. Task 9C.4V separately defines the
+formal replacement workflow contract in
+`docs/formal_document_alignment_workflow_boundary.md` and
+`docs/adr/ADR-formal-document-alignment-workflow.md`. The replacement is not
+implemented and the legacy route is still not safe to extract as a service.
 
 ## Route Registration
 
@@ -125,6 +133,14 @@ Cutover checklist:
 5. statically prove frontend references to `/api/alignment/run` are zero;
 6. dynamically prove E2E makes zero calls to `/api/alignment/run`;
 7. only then move the legacy endpoint to a disabled/deprecated response.
+
+Task 9C.4V defines the replacement frontend target as the formal API family:
+
+- `POST /api/document-alignment-runs`
+- `GET /api/document-alignment-runs/{run_uid}`
+- `GET /api/document-alignment-runs/{run_uid}/items`
+
+Those routes do not exist yet and must not be documented as implemented.
 
 ## Formal Verification Comparison
 

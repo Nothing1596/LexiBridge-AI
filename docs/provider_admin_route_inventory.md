@@ -246,6 +246,17 @@ Task 9C.4L conclusion: `DISABLE_OR_DEPRECATE_LIVE_PROBE_FIRST`.
 
 Task 9C.4M establishes the local readiness service. Task 9C.4N extracts the thin healthcheck route adapter while preserving caller-owned transaction behavior. Task 9C.4O characterizes prompt mutation and records `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`; Task 9C.4P defines `LEGACY_PROMPT_MUTABLE_REVISION_V1`; Task 9C.4Q extracts the prompt mutation application service so seed/upsert/commit/rollback are no longer implemented directly in the HTTP adapter; Task 9C.4R moves that adapter into the shared configuration route module. Task 9C.4S characterizes legacy `/api/alignment/run` and records `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`; Task 9C.4T defines `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`; Task 9C.4U blocks legacy alignment external/live execution at route, worker, retry, queued-job, and direct-helper boundaries without moving the route. The next alignment task is the formal document alignment workflow contract, not legacy route extraction.
 
+Task 9C.4V defines that formal replacement contract as
+`FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`. The target API family is
+`POST /api/document-alignment-runs`,
+`GET /api/document-alignment-runs/{run_uid}`, and
+`GET /api/document-alignment-runs/{run_uid}/items`; those routes are not
+implemented yet. The conclusion is `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
+because `BackgroundJob` cannot serve as the business root and no
+`DocumentAlignmentWorkflowRun` or `DocumentAlignmentWorkflowItem` exists. The
+legacy `/api/alignment/run` route remains temporary frontend compatibility and
+must not be extracted as a normal service/route.
+
 ## Final Decision
 
 Primary conclusion after Task 9C.4G: `ADMIN_ALIGNMENT_RUNS_EXTRACTED`

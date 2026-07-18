@@ -1,0 +1,588 @@
+# ADR: Formal Document Alignment Workflow Contract
+
+Status: PROPOSED_FOR_SMALL_PILOT
+
+Date: 2026-07-18
+
+Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
+
+Main conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
+
+## Context
+
+Task 9C.4S characterized legacy `POST /api/alignment/run` and concluded
+`DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`. Task 9C.4T accepted
+`LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`. Task 9C.4U completed Phase 1 external
+execution containment for the legacy endpoint, worker, retry, queued job, and
+direct-helper paths.
+
+The legacy route still exists for current frontend document-alignment
+compatibility. It can run local deterministic compatibility behavior, but
+external/live/custom legacy execution is blocked with
+`LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`.
+
+The formal system already has governed document ingestion, parse quality gates,
+KnowledgeSource and KnowledgeChunk records, lexical evidence retrieval,
+bilingual evidence workflow, Chinese term candidates, ConceptAlignmentCard
+drafts, formal provider governance, policy, preflight, alignment verification,
+UsageRecord, AuditRecord, teacher review, and student approved-only access.
+What is missing is a document-level orchestration root and item-level progress
+model that can safely connect those components without reusing the legacy
+execution path.
+
+## Decision
+
+Define a new formal workflow contract:
+
+```text
+FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
+```
+
+Its responsibility is:
+
+```text
+governed document source
+-> validate ownership and parse quality
+-> obtain governed chunks
+-> extract or receive term candidates
+-> retrieve governed bilingual evidence
+-> generate Chinese term candidates
+-> create ConceptAlignmentCard drafts
+-> invoke formal provider policy and preflight
+-> invoke formal alignment verification
+-> persist per-item outcome
+-> expose progress and review readiness
+-> hand off to teacher review
+```
+
+It is not a wrapper around legacy `run_alignment`, not a transparent alias for
+`POST /api/alignment/verify`, and not a synchronous whole-document route.
+
+The approved design direction is:
+
+- Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`.
+- Execution model: `ASYNC_JOB_ORCHESTRATION`.
+- Business root: new `DocumentAlignmentWorkflowRun`.
+- Per-concept state: new `DocumentAlignmentWorkflowItem`.
+- BackgroundJob role: transport envelope only.
+- API family:
+  - `POST /api/document-alignment-runs`
+  - `GET /api/document-alignment-runs/{run_uid}`
+  - `GET /api/document-alignment-runs/{run_uid}/items`
+- Idempotency: required `Idempotency-Key` header for start requests.
+- Data policy: `NO_LEGACY_AND_FORMAL_DUAL_WRITE`.
+- Provider policy: formal governance, policy, preflight, parser, usage, and
+  audit only.
+- Student visibility: never from workflow output; only approved
+  ConceptAlignmentCard records are student visible.
+
+## Canonical Input
+
+The start request requires a governed `knowledge_source_uid`.
+
+The workflow derives these fields from `KnowledgeSource` and linked records:
+
+- `parse_uid`
+- `document_id`
+- `course_id`
+- `course`
+- `chapter`
+- `language`
+- `visibility`
+- `trust_level`
+- `quality_status`
+- source version information
+- governed `KnowledgeChunk` rows
+
+The request may include safe options:
+
+- provider preference, if allowed by formal policy;
+- candidate limit within server limits;
+- dry-run-like local deterministic flags only if formal policy accepts them;
+- workflow version, defaulting to the current server version.
+
+The request must not include raw file bytes, full document text, arbitrary
+trusted evidence JSON, raw provider prompts, provider credentials, custom base
+URLs, `auto_approve`, or student visibility flags.
+
+## Async Model
+
+The workflow uses `ASYNC_JOB_ORCHESTRATION`.
+
+The start route validates request and permission, creates a workflow root,
+creates a BackgroundJob envelope, commits, and returns quickly with HTTP 202.
+It does not process the whole document in the HTTP request.
+
+BackgroundJob is a queue/worker transport record. It is not the source of
+business truth. Domain status, progress counts, item state, idempotency, and
+terminal errors belong to `DocumentAlignmentWorkflowRun` and
+`DocumentAlignmentWorkflowItem`.
+
+V1 does not expose user-initiated cancellation. Worker crash/retry behavior is
+handled by job infrastructure, while item-level retry remains an implementation
+choice under this contract.
+
+## Workflow Root
+
+Use a new model:
+
+```text
+DocumentAlignmentWorkflowRun
+```
+
+Minimum fields:
+
+- `run_uid`, unique;
+- `source_uid`;
+- `parse_uid`;
+- `source_version` or stable content/version reference;
+- `course_id`;
+- `course`;
+- `chapter`;
+- `requested_by`;
+- `request_id`;
+- `idempotency_key_hash`;
+- `idempotency_scope`;
+- `canonical_payload_hash`;
+- `workflow_version`;
+- `provider_preference`;
+- `provider_policy_uid`;
+- `status`;
+- `stage`;
+- `progress_current`;
+- `progress_total`;
+- `total_candidates`;
+- `successful_items`;
+- `blocked_items`;
+- `failed_items`;
+- `warning_count`;
+- `created_at`;
+- `started_at`;
+- `finished_at`;
+- `safe_error_code`;
+- `safe_error_message`.
+
+Existing models are insufficient. `BackgroundJob` lacks stable business
+identity, source/version/idempotency fields, item outcome counts, and document
+workflow terminal semantics. Legacy `AlignmentRun` is rejected as a formal root
+because it carries legacy provider and TerminologyCard semantics.
+
+## Item Model
+
+Use a new model:
+
+```text
+DocumentAlignmentWorkflowItem
+```
+
+Minimum fields:
+
+- `item_uid`, unique;
+- `workflow_run_uid`;
+- deterministic item key for retry/idempotent item writes;
+- candidate term;
+- normalized term;
+- source chunk UID list;
+- Chinese candidate summary;
+- evidence reference UID list;
+- draft ConceptAlignmentCard UID;
+- AlignmentVerificationRun UID;
+- item status;
+- risk labels;
+- confidence summary;
+- safe error code;
+- safe error message;
+- retry count;
+- created_at;
+- updated_at;
+- finished_at.
+
+The item model must not duplicate full evidence text, full prompts, raw
+provider output, credentials, or complete source documents.
+
+## State Machines
+
+Root states:
+
+- `queued`
+- `validating`
+- `processing`
+- `ready_for_review`
+- `completed_with_warnings`
+- `blocked`
+- `failed`
+
+The root never uses `approved`, `published`, or `student_visible`.
+
+Allowed root transitions:
+
+| From | To | Trigger | DB owner | Audit event |
+|---|---|---|---|---|
+| none | queued | accepted start request | start service | document_alignment_requested |
+| queued | validating | worker claim | worker orchestration | document_alignment_started |
+| validating | blocked | source, permission, or parse gate blocked | worker orchestration | document_alignment_blocked |
+| validating | processing | source and chunks usable | worker orchestration | document_alignment_started |
+| processing | ready_for_review | all processed and all successful items reviewable | worker orchestration | document_alignment_completed |
+| processing | completed_with_warnings | at least one item reviewable and at least one blocked or failed | worker orchestration | document_alignment_completed |
+| processing | blocked | all items blocked with no reviewable output | worker orchestration | document_alignment_blocked |
+| queued | failed | infrastructure/persistence failure | worker orchestration | document_alignment_failed |
+| validating | failed | infrastructure/persistence failure | worker orchestration | document_alignment_failed |
+| processing | failed | infrastructure/persistence failure | worker orchestration | document_alignment_failed |
+
+Item states:
+
+- `candidate`
+- `evidence_ready`
+- `draft_created`
+- `verification_completed`
+- `needs_review`
+- `blocked`
+- `failed`
+
+Insufficient evidence, provider policy blocked, provider preflight blocked, no
+Chinese candidate, duplicate term that cannot safely map to a draft, and
+verification recommendation `insufficient_evidence` are item-level `blocked`
+states unless a safe draft exists. Parser failure and persistence failure are
+`failed`. Successful verification still ends as `needs_review`, not approved.
+
+## Partial Failure
+
+The workflow supports partial success. A single failed item does not fail the
+whole document. Global source, permission, parse, or persistence failures can
+block or fail the root.
+
+Terminal root rules:
+
+- at least one reviewable item and no item problems: `ready_for_review`;
+- at least one reviewable item and some blocked/failed items:
+  `completed_with_warnings`;
+- all items blocked by domain gates: `blocked`;
+- unsafe infrastructure or persistence failure: `failed`.
+
+Failed and blocked items remain recorded. V1 does not expose an item retry API.
+
+## Idempotency
+
+`request_id` is trace and audit correlation only. It is not idempotency.
+
+The start API requires `Idempotency-Key`.
+
+Scope:
+
+```text
+user_id + knowledge_source_uid + workflow_version + idempotency_key
+```
+
+Rules:
+
+- same key and same canonical payload: return the existing run with
+  `idempotency.reused=true`;
+- same key and different canonical payload: return HTTP 409 conflict;
+- repeated worker execution uses item keys and persisted run/item state, not the
+  HTTP request ID;
+- small-pilot retention is 30 days for active idempotency records or until the
+  workflow root is archived by a later policy.
+
+## Provider Governance
+
+The workflow may invoke provider execution only through:
+
+- formal provider governance;
+- formal provider policy;
+- formal provider preflight;
+- formal alignment verification execution service;
+- formal output parser/schema;
+- formal AlignmentProviderUsageRecord;
+- formal AuditRecord.
+
+It must not call legacy provider helpers, `urllib`, legacy AICallLog, legacy
+UsageRecord, or any credential-bearing legacy configuration. External provider
+defaults remain disabled. Provider blocked, preflight blocked, and insufficient
+evidence cases produce no provider usage.
+
+## Evidence And Prompt Boundary
+
+Evidence comes only from governed `KnowledgeSource` and `KnowledgeChunk`
+records through the evidence retrieval and bilingual evidence workflow. The
+client may not submit arbitrary evidence and have it treated as trusted.
+
+The workflow does not store full prompts or raw provider output. Formal
+verification owns prompt construction and records prompt/schema summaries on
+`AlignmentVerificationRun`. Workflow root and items store only references,
+counts, risk labels, and safe summaries.
+
+## Card And Verification Integration
+
+Each processable concept creates or reuses a safe ConceptAlignmentCard draft.
+Draft status is `needs_review` or another formally safe review state. Formal
+verification can be attached only through the existing attach gate and provider
+policy.
+
+The workflow cannot auto approve a card, cannot publish to students, and cannot
+overwrite an approved card. Teacher review remains the owner of approval.
+
+## Data Ownership
+
+Policy: `NO_LEGACY_AND_FORMAL_DUAL_WRITE`.
+
+Formal workflow reads governed source/chunk data and writes only formal
+workflow root/item records, BackgroundJob transport records, ConceptAlignmentCard
+draft/review-ready data, AlignmentVerificationRun, AlignmentProviderUsageRecord,
+and AuditRecord.
+
+Formal workflow must not write legacy `AlignmentRun`, legacy
+`TerminologyCard`, legacy `AICallLog`, or legacy `UsageRecord`.
+
+Legacy `/api/alignment/run` must not begin writing formal workflow root/item
+records during the compatibility period.
+
+## Transaction Boundaries
+
+The workflow must not hold a long database transaction around term extraction,
+evidence retrieval, provider execution, or other long-running work.
+
+Transaction plan:
+
+1. Start transaction: validate request, permission, source identity, create
+   workflow run, create BackgroundJob envelope, create request audit, commit.
+2. Worker claim transaction: claim job, mark run started/validating, commit.
+3. Per-item transactions: write item/draft/verification references in short
+   commits; pure computation and provider execution happen outside long
+   transactions.
+4. Finalization transaction: aggregate item states, set terminal run status,
+   write completion audit, commit.
+
+The existing formal verification execution service owns its own commit/rollback
+today. Before document workflow orchestration calls it in a loop, the next
+implementation slice must either call it as an isolated per-item unit or create
+a persistence-plan boundary that prevents uncontrolled nested transactions.
+
+## Retry
+
+Worker infrastructure retry covers crash, transient database errors, and
+temporary infrastructure failures.
+
+Item retry covers retryable provider or retrieval failures only if the item key
+prevents duplicate draft or verification creation. Non-retryable blocked states
+include permission, parse quality, provider policy, provider preflight,
+insufficient evidence, and invalid source.
+
+Usage is recorded only for actual formal provider executions. A retry must not
+double-count the same actual call.
+
+## Permissions
+
+Start permission:
+
+- admin: allowed across courses;
+- teacher: allowed only for governed sources in courses they can manage;
+- reviewer: not allowed to start V1 workflow;
+- student: not allowed.
+
+Read permission:
+
+- admin;
+- creator;
+- teacher with course access;
+- reviewer with active course review permission may read review-relevant
+  summaries but not source-private text;
+- student cannot read workflow drafts or verification output.
+
+Permission checks occur before run/job creation and must not leak source
+existence across courses.
+
+## Audit And Request ID
+
+The start API and status APIs use formal response envelopes with request IDs.
+
+Required audit events:
+
+- `document_alignment_requested`
+- `document_alignment_started`
+- `document_alignment_blocked`
+- `document_alignment_completed`
+- `document_alignment_failed`
+
+Audit payloads contain source UID, course, run UID, counts, provider/model
+summary, prompt version, risk summary, and safe error codes. They must not
+contain full documents, full chunks, full evidence, full prompts, raw provider
+output, credentials, Authorization, or Cookie values.
+
+## Usage
+
+Usage is created only by formal provider execution. Blocked before provider,
+insufficient evidence, policy blocked, and preflight blocked outcomes have usage
+zero. Workflow root may aggregate usage totals by reference or summary but must
+not duplicate usage details. Legacy UsageRecord is never written.
+
+## API Contract
+
+Start endpoint:
+
+```text
+POST /api/document-alignment-runs
+Endpoint: create_document_alignment_run
+HTTP status: 202
+Required header: Idempotency-Key
+```
+
+Request:
+
+```json
+{
+  "knowledge_source_uid": "source-uid",
+  "workflow_version": "formal-document-alignment-v1",
+  "provider": "mock-rule-v1",
+  "candidate_limit": 50
+}
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "request_id": "req-...",
+  "data": {
+    "run_uid": "workflow-run-uid",
+    "status": "queued",
+    "status_url": "/api/document-alignment-runs/workflow-run-uid",
+    "items_url": "/api/document-alignment-runs/workflow-run-uid/items",
+    "job_uid": "background-job-id",
+    "idempotency": {"reused": false}
+  }
+}
+```
+
+Status endpoint:
+
+```text
+GET /api/document-alignment-runs/{run_uid}
+Endpoint: get_document_alignment_run
+```
+
+Items endpoint:
+
+```text
+GET /api/document-alignment-runs/{run_uid}/items
+Endpoint: list_document_alignment_run_items
+```
+
+Items are paginated and do not return raw prompts or raw provider output.
+
+## Error Taxonomy
+
+Synchronous start errors:
+
+- `DOCUMENT_ALIGNMENT_SOURCE_NOT_FOUND`
+- `DOCUMENT_ALIGNMENT_SOURCE_PERMISSION_DENIED`
+- `DOCUMENT_ALIGNMENT_SOURCE_NOT_GOVERNED`
+- `DOCUMENT_ALIGNMENT_PARSE_BLOCKED`
+- `DOCUMENT_ALIGNMENT_NO_USABLE_CHUNKS`
+- `DOCUMENT_ALIGNMENT_IDEMPOTENCY_REQUIRED`
+- `DOCUMENT_ALIGNMENT_IDEMPOTENCY_CONFLICT`
+- `DOCUMENT_ALIGNMENT_INVALID_REQUEST`
+
+Asynchronous terminal errors:
+
+- `DOCUMENT_ALIGNMENT_NO_TERM_CANDIDATES`
+- `DOCUMENT_ALIGNMENT_PROVIDER_POLICY_BLOCKED`
+- `DOCUMENT_ALIGNMENT_PROVIDER_PREFLIGHT_BLOCKED`
+- `DOCUMENT_ALIGNMENT_EVIDENCE_INSUFFICIENT`
+- `DOCUMENT_ALIGNMENT_PERSISTENCE_FAILED`
+- `DOCUMENT_ALIGNMENT_INTERNAL_PROCESSING_FAILED`
+
+No error includes a raw exception.
+
+## Frontend Cutover
+
+The replacement frontend migration is:
+
+1. replacement backend route and service available;
+2. contract tests and worker tests pass;
+3. replacement E2E covers start, polling, item results, warnings, review links,
+   and errors;
+4. document action switches from `/api/alignment/run` to the new start API;
+5. frontend polls the workflow status and item endpoints;
+6. static scan proves `/api/alignment/run` frontend references are zero;
+7. dynamic E2E proves legacy route call count is zero;
+8. only then can the legacy endpoint move toward HTTP 410.
+
+## Readiness And Observability
+
+Future readiness checks must cover:
+
+- workflow route registered;
+- worker handler registered;
+- queue runnable;
+- external provider disabled by default;
+- provider policy and preflight available;
+- source and parse gate available;
+- no legacy/formal dual-write;
+- no auto approval;
+- request ID and AuditRecord creation;
+- stuck job count;
+- failed job count;
+- oldest queued age.
+
+Metrics:
+
+- `document_alignment_runs_total`;
+- counts by root status;
+- `document_alignment_items_total`;
+- `items_ready_for_review`;
+- `items_blocked`;
+- `evidence_insufficient`;
+- `provider_blocked`;
+- average processing time;
+- draft count per document.
+
+## Model And Migration Decision
+
+The current models are not sufficient for the formal workflow root or item
+progress. New workflow models are required before an application service.
+
+Small-pilot implementation may continue using the current `create_all` pattern
+because the repository has not yet introduced a formal migration framework and
+this design is still `PROPOSED_FOR_SMALL_PILOT`. Production rollout requires a
+separate migration hardening task before real deployment.
+
+Main conclusion:
+
+```text
+FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
+```
+
+## Rejected Alternatives
+
+1. Wrap legacy `run_alignment` as a service.
+2. Alias `/api/alignment/run` to `/api/alignment/verify`.
+3. Process an entire document synchronously in the request.
+4. Use BackgroundJob as all domain state.
+5. Dual-write legacy and formal data.
+6. Auto approve cards.
+7. Accept client-submitted arbitrary evidence as trusted evidence.
+8. Default to live/external provider.
+9. Hold long database transactions around provider execution.
+10. Use request ID as idempotency key.
+11. Overwrite approved cards from workflow output.
+12. Delete legacy endpoint before frontend cutover.
+
+## Consequences
+
+The next work is not the application service. The next work is formal workflow
+models for the small pilot:
+
+```text
+Task 9C.4W: Formal Workflow Models
+```
+
+The legacy endpoint remains active only as temporary compatibility and still
+has external execution disabled. Replacement workflow implementation, frontend
+cutover, HTTP 410, and legacy path removal remain later phases.
+
+## Pilot Limitations
+
+This ADR is not production-ready. It does not enable real providers, does not
+create schema, does not add the new API, and does not migrate frontend callers.
+It defines the contract required before implementation.

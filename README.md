@@ -1605,5 +1605,6 @@ EMBEDDING_PROVIDER=local_hash_embedding VECTOR_INDEX_BACKEND=local_json ENABLE_R
 - OCR requires a local engine; no OCR text is fabricated when engines are unavailable.
 - Mock/local AI fallback is for workflow demonstration only.
 - Legacy `/api/alignment/run` is still active only for current frontend compatibility. Its external/live execution path is blocked, but the formal document alignment replacement workflow and frontend cutover are not implemented yet.
+- Task 9C.4V defines the replacement contract as `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION` with governed `KnowledgeSource` input, async workflow execution, formal provider policy/preflight/verification, `Idempotency-Key`, no legacy/formal dual write, and future `POST /api/document-alignment-runs` / status / items APIs. Those APIs and the required `DocumentAlignmentWorkflowRun` and `DocumentAlignmentWorkflowItem` models are not implemented yet.
 - No real payment, SMTP, cloud storage, vector database, ByrDocs connector, publisher connector, or crawler is included.
 - Production deployment would require fixed `FRONTEND_ORIGIN`, HTTPS, real secret management, audited RBAC, background workers, durable storage, and PostgreSQL/vector retrieval.
