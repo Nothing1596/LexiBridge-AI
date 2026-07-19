@@ -142,7 +142,7 @@ def test_no_auto_approve_and_student_approved_only_boundaries_remain_visible():
     assert "card_model.status == APPROVED_STATUS" in student_service_source
 
 
-def test_frontend_still_uses_legacy_alignment_run_and_replacement_endpoint_absent(app_module):
+def test_frontend_still_uses_legacy_alignment_run_while_formal_routes_exist(app_module):
     frontend = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
     openapi = (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")
 
@@ -150,11 +150,13 @@ def test_frontend_still_uses_legacy_alignment_run_and_replacement_endpoint_absen
     assert 'api("/api/alignment/run"' in frontend
     assert "loadJobs()" in frontend
     assert "loadAlignmentRuns()" in frontend
-    assert "/api/document-alignment-runs" not in openapi
+    assert "/api/document-alignment-runs" in openapi
 
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     assert "/api/alignment/run" in rules
-    assert "/api/document-alignment-runs" not in rules
+    assert "/api/document-alignment-runs" in rules
+    assert "/api/document-alignment-runs/<run_uid>" in rules
+    assert "/api/document-alignment-runs/<run_uid>/items" in rules
 
 
 def test_legacy_external_execution_remains_disabled_without_network_dependency():

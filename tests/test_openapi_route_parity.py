@@ -8,6 +8,9 @@ OPENAPI = ROOT / "docs" / "openapi.yaml"
 
 
 REQUIRED_ROUTE_METHODS = {
+    "/api/document-alignment-runs": {"post"},
+    "/api/document-alignment-runs/{run_uid}": {"get"},
+    "/api/document-alignment-runs/{run_uid}/items": {"get"},
     "/api/documents/upload": {"post"},
     "/api/knowledge/search": {"get"},
     "/api/evidence/search": {"post"},

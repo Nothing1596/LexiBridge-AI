@@ -4,6 +4,9 @@ from sqlalchemy.orm import sessionmaker
 
 from services import alignment_providers
 from services import document_alignment_item_verification_adapter as adapter
+from services.formal_item_verification_identity import (
+    build_formal_item_audit_event_identity,
+)
 from test_document_alignment_item_verification_adapter_integration import (
     _cleanup,
     _command,
@@ -13,6 +16,15 @@ from test_document_alignment_item_verification_adapter_integration import (
 
 
 def _logical_counts(app_module, execution_key):
+    audit_identities = [
+        build_formal_item_audit_event_identity(execution_key, event_type)
+        for event_type in (
+            "item_verification_requested",
+            "item_verification_provider_completed",
+            "item_verification_attached",
+            "item_verification_failed",
+        )
+    ]
     return {
         "mapping": app_module.DocumentAlignmentItemVerificationExecution.query.filter_by(
             execution_key=execution_key
@@ -27,7 +39,7 @@ def _logical_counts(app_module, execution_key):
             execution_key=execution_key
         ).count(),
         "audit": app_module.AuditRecord.query.filter(
-            app_module.AuditRecord.event_identity.like("item-audit-event-v1:%")
+            app_module.AuditRecord.event_identity.in_(audit_identities)
         ).count(),
     }
 

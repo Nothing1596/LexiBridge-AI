@@ -129,7 +129,7 @@ def test_background_job_formal_path_has_attempt_fenced_lease_contract(app_module
     assert "update(" in formal_claim
 
 
-def test_formal_job_has_dedicated_worker_dispatch_but_no_route_yet(app_module):
+def test_formal_job_has_dedicated_worker_dispatch_and_formal_routes(app_module):
     app_source = APP_PATH.read_text(encoding="utf-8")
     job_type = document_alignment_workflow_contract.FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE
 
@@ -139,7 +139,9 @@ def test_formal_job_has_dedicated_worker_dispatch_but_no_route_yet(app_module):
     assert "process_document_alignment_workflow" in app_source
 
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
-    assert "/api/document-alignment-runs" not in rules
+    assert "/api/document-alignment-runs" in rules
+    assert "/api/document-alignment-runs/<run_uid>" in rules
+    assert "/api/document-alignment-runs/<run_uid>/items" in rules
     assert not (ROOT / "backend" / "services" / "document_alignment_workflow_processing.py").exists()
 
 
@@ -172,13 +174,13 @@ def test_characterized_local_candidate_and_key_paths_do_not_use_network(monkeypa
     ).startswith("item-key-v1:")
 
 
-def test_frontend_still_uses_legacy_alignment_and_formal_query_boundary_is_absent():
+def test_frontend_still_uses_legacy_alignment_while_formal_http_contract_exists():
     frontend = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
     openapi = (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")
 
     assert "runAlignmentForDocument" in frontend
     assert 'api("/api/alignment/run"' in frontend
-    assert "/api/document-alignment-runs" not in openapi
+    assert "/api/document-alignment-runs" in openapi
 
 
 def test_processing_boundary_docs_freeze_contracts_state_machines_and_transactions():
@@ -189,7 +191,8 @@ def test_processing_boundary_docs_freeze_contracts_state_machines_and_transactio
         "PROCESSING_BOUNDARY_CHARACTERIZED",
         "FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED",
         "FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED",
-        "FORMAL_ROUTES_NOT_IMPLEMENTED",
+        "FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED",
+        "FORMAL_API_E2E_NOT_COMPLETED",
         "FRONTEND_NOT_MIGRATED",
         "ProcessDocumentAlignmentWorkflowCommand",
         "ProcessDocumentAlignmentWorkflowResult",

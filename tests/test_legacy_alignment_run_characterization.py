@@ -245,11 +245,15 @@ def test_legacy_alignment_run_deprecation_policy_matches_current_compatibility_s
     assert "Frontend Migration Checklist" in boundary
     assert "Task 9C.4U" in adr
     assert "Task 9C.5A" in adr
-    assert not any(
-        "document_alignment" in endpoint or "document-alignment" in rule
-        for (rule, _method), endpoints in routes.items()
-        for endpoint in endpoints
-    )
+    assert routes[("/api/document-alignment-runs", "POST")] == [
+        "create_document_alignment_run"
+    ]
+    assert routes[("/api/document-alignment-runs/<run_uid>", "GET")] == [
+        "get_document_alignment_run"
+    ]
+    assert routes[("/api/document-alignment-runs/<run_uid>/items", "GET")] == [
+        "list_document_alignment_run_items"
+    ]
 
 
 def test_legacy_alignment_run_auth_roles_and_body_error_contract(

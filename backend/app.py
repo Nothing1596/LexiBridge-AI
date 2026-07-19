@@ -93,6 +93,14 @@ from services.document_alignment_workflow_contract import (
     ITEM_VERIFICATION_EXECUTION_STATUS_PREPARED,
     WORKFLOW_VERSION_V1,
 )
+from services.document_alignment_workflow_admission_composition import (
+    DocumentAlignmentWorkflowAdmissionModels,
+    build_document_alignment_workflow_admission_dependencies,
+)
+from services.document_alignment_workflow_queries import (
+    DocumentAlignmentWorkflowQueryDependencies,
+    DocumentAlignmentWorkflowQueryModels,
+)
 from services.document_alignment_processing_composition import (
     DocumentAlignmentProcessingCompositionModels,
     build_document_alignment_processing_dependencies,
@@ -186,6 +194,10 @@ from routes.admin_alignment_runs import AdminAlignmentRunModels, register_admin_
 from routes.alignment_verification import register_alignment_verification_routes
 from routes.concept_card_feedback import ConceptCardFeedbackModels, register_concept_card_feedback_routes
 from routes.concept_card_review import ConceptCardReviewModels, register_concept_card_review_routes
+from routes.document_alignment_workflow_routes import (
+    DocumentAlignmentWorkflowRouteDependencies,
+    register_document_alignment_workflow_routes,
+)
 from routes.legacy_provider_admin_observability import (
     LegacyProviderAdminObservabilityModels,
     LegacyProviderAdminObservabilitySerializers,
@@ -368,6 +380,17 @@ ERROR_CODES = {
     "PDF_FONT_UNAVAILABLE": 422,
     "TOO_MANY_REQUESTS": 429,
     "INTERNAL_ERROR": 500,
+    "DOCUMENT_ALIGNMENT_INVALID_REQUEST": 400,
+    "DOCUMENT_ALIGNMENT_UNSUPPORTED_MEDIA_TYPE": 415,
+    "DOCUMENT_ALIGNMENT_SOURCE_NOT_AVAILABLE": 404,
+    "DOCUMENT_ALIGNMENT_SOURCE_NOT_GOVERNED": 422,
+    "DOCUMENT_ALIGNMENT_PARSE_BLOCKED": 422,
+    "DOCUMENT_ALIGNMENT_NO_USABLE_CHUNKS": 422,
+    "DOCUMENT_ALIGNMENT_IDEMPOTENCY_CONFLICT": 409,
+    "DOCUMENT_ALIGNMENT_PERSISTENCE_ERROR": 500,
+    "DOCUMENT_ALIGNMENT_QUERY_INVALID_REQUEST": 400,
+    "DOCUMENT_ALIGNMENT_WORKFLOW_NOT_FOUND": 404,
+    "DOCUMENT_ALIGNMENT_QUERY_PERSISTENCE_ERROR": 500,
 }
 
 
@@ -11944,6 +11967,47 @@ route_core = RouteCoreDependencies(
     attach_request_id_to_response=attach_request_id_to_response,
     api_success_with_audit_context=api_success_with_audit_context,
     api_error_with_audit_context=api_error_with_audit_context,
+)
+
+
+def _document_alignment_workflow_admission_dependencies(user):
+    return build_document_alignment_workflow_admission_dependencies(
+        session=db.session,
+        models=DocumentAlignmentWorkflowAdmissionModels(
+            workflow_run=DocumentAlignmentWorkflowRun,
+            background_job=BackgroundJob,
+            audit_record=AuditRecord,
+            knowledge_source=KnowledgeSource,
+            parse_record=DocumentParseRecord,
+            knowledge_chunk=KnowledgeChunk,
+            course=Course,
+            course_member=CourseMember,
+        ),
+        user=user,
+        current_time_factory=current_time_text,
+    )
+
+
+def _document_alignment_workflow_query_dependencies():
+    return DocumentAlignmentWorkflowQueryDependencies(
+        session=db.session,
+        models=DocumentAlignmentWorkflowQueryModels(
+            workflow_run=DocumentAlignmentWorkflowRun,
+            workflow_item=DocumentAlignmentWorkflowItem,
+            knowledge_source=KnowledgeSource,
+            course=Course,
+            course_member=CourseMember,
+        ),
+    )
+
+
+register_document_alignment_workflow_routes(
+    app,
+    core=route_core,
+    dependencies=DocumentAlignmentWorkflowRouteDependencies(
+        admission_dependencies_factory=_document_alignment_workflow_admission_dependencies,
+        query_dependencies_factory=_document_alignment_workflow_query_dependencies,
+    ),
 )
 
 

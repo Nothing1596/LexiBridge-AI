@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current implementation conclusion:
-FORMAL_DOCUMENT_ALIGNMENT_QUERY_SERVICES_ESTABLISHED
+FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED
 
-Implementation status after Task 9C.5E:
+Implementation status after Task 9C.5F:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -23,8 +23,8 @@ Implementation status after Task 9C.5E:
 - `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
 - `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
-- `FORMAL_ROUTES_NOT_IMPLEMENTED`
-- `FORMAL_OPENAPI_NOT_IMPLEMENTED`
+- `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
+- `FORMAL_API_E2E_NOT_COMPLETED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
@@ -496,10 +496,7 @@ Request:
 
 ```json
 {
-  "knowledge_source_uid": "source-uid",
-  "workflow_version": "formal-document-alignment-v1",
-  "provider": "mock-rule-v1",
-  "candidate_limit": 50
+  "source_uid": "source-uid"
 }
 ```
 
@@ -514,11 +511,19 @@ Response:
     "status": "queued",
     "status_url": "/api/document-alignment-runs/workflow-run-uid",
     "items_url": "/api/document-alignment-runs/workflow-run-uid/items",
-    "job_uid": "background-job-id",
-    "idempotency": {"reused": false}
+    "workflow_version": "formal-document-alignment-v1",
+    "stage": "queued",
+    "source_uid": "source-uid",
+    "reused": false,
+    "items_url": "/api/document-alignment-runs/workflow-run-uid/items"
   }
 }
 ```
+
+The runtime contract deliberately does not expose the transport job UID,
+payload, worker, attempt, lease, or token. The server owns workflow version,
+provider selection, and processing limits; the V1 HTTP body therefore accepts
+only `source_uid` and rejects unknown fields.
 
 Status endpoint:
 
@@ -725,12 +730,13 @@ PostgreSQL locking, migration, and operational recovery remain unverified.
 
 The model, admission, formal BackgroundJob ownership, chunk-scoped item
 bootstrap, execution identities, lease-fenced per-item verification adapter,
-document processing/root finalization, and formal local-pilot worker handler
-and read-only query services are implemented. The next permitted slice exposes
-the already-tested admission/query boundary through narrow HTTP adapters:
+document processing/root finalization, formal local-pilot worker handler,
+read-only query services, and narrow formal HTTP/OpenAPI adapters are
+implemented. The next permitted slice verifies the complete API polling and
+recovery path:
 
 ```text
-Task 9C.5F: Formal Document Alignment Routes and OpenAPI Contract
+Task 9C.5G: Formal Document Alignment API End-to-End, Polling and Recovery Verification
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still
@@ -740,7 +746,7 @@ cutover, HTTP 410, and legacy path removal remain later phases.
 ## Pilot Limitations
 
 This ADR is not production-ready. It does not enable real providers, does not
-add the new API, and does not migrate frontend callers. The local worker is not
+complete formal API browser E2E, and does not migrate frontend callers. The local worker is not
 a supervised production daemon. The formal
 tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
 claim/locking and idempotency-constraint validation remain required. Provider

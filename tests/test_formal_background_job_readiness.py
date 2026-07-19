@@ -40,8 +40,19 @@ EXPECTED_CONDITIONS = {
     "FORMAL_WORKFLOW_QUERY_SAFE_ERROR_PRESENT",
     "FORMAL_WORKFLOW_QUERY_PAGINATION_PRESENT",
     "FORMAL_WORKFLOW_QUERY_NO_WRITE_PRESENT",
-    "FORMAL_ROUTES_NOT_IMPLEMENTED",
+    "FORMAL_WORKFLOW_START_ROUTE_PRESENT",
+    "FORMAL_WORKFLOW_RUN_ROUTE_PRESENT",
+    "FORMAL_WORKFLOW_ITEMS_ROUTE_PRESENT",
+    "FORMAL_WORKFLOW_IDEMPOTENCY_HEADER_ENFORCED",
+    "FORMAL_WORKFLOW_HTTP_PERMISSION_ENFORCED",
+    "FORMAL_WORKFLOW_HTTP_STUDENT_DENIED",
+    "FORMAL_WORKFLOW_HTTP_BACKGROUND_JOB_HIDDEN",
+    "FORMAL_WORKFLOW_OPENAPI_PRESENT",
+    "FORMAL_WORKFLOW_OPENAPI_RUNTIME_PARITY_PRESENT",
+    "FORMAL_API_E2E_NOT_COMPLETED",
     "FRONTEND_NOT_MIGRATED",
+    "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+    "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
     "POSTGRESQL_QUERY_NOT_VERIFIED",
     "POSTGRESQL_PROCESSING_NOT_VERIFIED",
     "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
@@ -104,8 +115,18 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_workflow_query_integration.py" in source
     assert "tests/test_document_alignment_workflow_query_performance.py" in source
     assert "tests/test_document_alignment_workflow_query_security.py" in source
+    assert "formal document alignment routes and OpenAPI" in source
+    assert "tests/test_document_alignment_workflow_routes.py" in source
+    assert "tests/test_document_alignment_workflow_start_route.py" in source
+    assert "tests/test_document_alignment_workflow_get_route.py" in source
+    assert "tests/test_document_alignment_workflow_items_route.py" in source
+    assert "tests/test_document_alignment_workflow_route_error_mapping.py" in source
+    assert "tests/test_document_alignment_workflow_openapi.py" in source
+    assert "tests/test_document_alignment_workflow_route_security.py" in source
+    assert "tests/test_document_alignment_workflow_route_integration.py" in source
 
 
 def test_readiness_no_longer_reports_query_service_as_missing():
     for profile in ("local-demo", "small-pilot"):
         assert "FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED" not in pilot_readiness_check.default_conditions(profile)
+        assert "FORMAL_ROUTES_NOT_IMPLEMENTED" not in pilot_readiness_check.default_conditions(profile)

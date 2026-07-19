@@ -21,6 +21,7 @@ ADMIN_ALIGNMENT_RUNS_MODULE_PATH = ROOT / "backend" / "routes" / "admin_alignmen
 LEGACY_PROVIDER_OBSERVABILITY_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
 LEGACY_PROVIDER_CONFIGURATION_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
 LEGACY_PROVIDER_HEALTHCHECK_MODULE_PATH = ROOT / "backend" / "routes" / "legacy_provider_admin_healthcheck.py"
+DOCUMENT_ALIGNMENT_WORKFLOW_MODULE_PATH = ROOT / "backend" / "routes" / "document_alignment_workflow_routes.py"
 
 
 def load_route_module(module_path, module_name):
@@ -404,6 +405,11 @@ def test_route_modules_import_without_backend_app_dependency():
         LEGACY_PROVIDER_HEALTHCHECK_MODULE_PATH,
         "register_legacy_provider_admin_healthcheck_routes",
         "legacy_provider_admin_healthcheck_routes",
+    )
+    assert_module_has_no_backend_app_import(
+        DOCUMENT_ALIGNMENT_WORKFLOW_MODULE_PATH,
+        "register_document_alignment_workflow_routes",
+        "document_alignment_workflow_routes",
     )
 
 

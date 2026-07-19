@@ -250,12 +250,11 @@ Task 9C.4V defines that formal replacement contract as
 `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`. The target API family is
 `POST /api/document-alignment-runs`,
 `GET /api/document-alignment-runs/{run_uid}`, and
-`GET /api/document-alignment-runs/{run_uid}/items`; those routes are not
-implemented yet. The conclusion is `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
-because `BackgroundJob` cannot serve as the business root and no
-`DocumentAlignmentWorkflowRun` or `DocumentAlignmentWorkflowItem` exists. The
-legacy `/api/alignment/run` route remains temporary frontend compatibility and
-must not be extracted as a normal service/route.
+`GET /api/document-alignment-runs/{run_uid}/items`. Tasks 9C.4W through 9C.5F
+establish the formal models, admission, worker, processing, query services,
+HTTP adapters, and OpenAPI contract. The legacy `/api/alignment/run` route
+remains temporary frontend compatibility until formal API E2E and frontend
+cutover are complete; it must not be extracted as a normal service/route.
 
 ## Final Decision
 

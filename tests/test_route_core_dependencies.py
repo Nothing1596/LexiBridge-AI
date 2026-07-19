@@ -52,6 +52,7 @@ from routes.legacy_provider_admin_healthcheck import (
     LegacyProviderAdminHealthcheckModels,
     register_legacy_provider_admin_healthcheck_routes,
 )
+from routes.document_alignment_workflow_routes import register_document_alignment_workflow_routes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,7 @@ ADMIN_ALIGNMENT_RUNS_MODULE = ROOT / "backend" / "routes" / "admin_alignment_run
 LEGACY_PROVIDER_OBSERVABILITY_MODULE = ROOT / "backend" / "routes" / "legacy_provider_admin_observability.py"
 LEGACY_PROVIDER_CONFIGURATION_MODULE = ROOT / "backend" / "routes" / "legacy_provider_admin_configuration.py"
 LEGACY_PROVIDER_HEALTHCHECK_MODULE = ROOT / "backend" / "routes" / "legacy_provider_admin_healthcheck.py"
+DOCUMENT_ALIGNMENT_WORKFLOW_MODULE = ROOT / "backend" / "routes" / "document_alignment_workflow_routes.py"
 
 EXPECTED_CORE_FIELDS = {
     "db",
@@ -182,6 +184,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         LEGACY_PROVIDER_OBSERVABILITY_MODULE,
         LEGACY_PROVIDER_CONFIGURATION_MODULE,
         LEGACY_PROVIDER_HEALTHCHECK_MODULE,
+        DOCUMENT_ALIGNMENT_WORKFLOW_MODULE,
     ]:
         imports = set(_imports_for(path))
         assert "backend.app" not in imports
@@ -199,6 +202,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     legacy_provider_observability_sig = inspect.signature(register_legacy_provider_admin_observability_routes)
     legacy_provider_configuration_sig = inspect.signature(register_legacy_provider_admin_configuration_routes)
     legacy_provider_healthcheck_sig = inspect.signature(register_legacy_provider_admin_healthcheck_routes)
+    document_alignment_workflow_sig = inspect.signature(register_document_alignment_workflow_routes)
     assert "core" in teacher_sig.parameters
     assert "core" in student_sig.parameters
     assert "core" in review_sig.parameters
@@ -211,6 +215,8 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
     assert "core" in legacy_provider_observability_sig.parameters
     assert "core" in legacy_provider_configuration_sig.parameters
     assert "core" in legacy_provider_healthcheck_sig.parameters
+    assert "core" in document_alignment_workflow_sig.parameters
+    assert "dependencies" in document_alignment_workflow_sig.parameters
     assert "execution_dependencies" in alignment_verification_sig.parameters
     assert "models" in admin_alignment_runs_sig.parameters
     assert "serialize_alignment_run" in admin_alignment_runs_sig.parameters
@@ -261,6 +267,7 @@ def test_extracted_route_modules_accept_core_and_do_not_import_backend_app():
         assert name not in legacy_provider_observability_sig.parameters
         assert name not in legacy_provider_configuration_sig.parameters
         assert name not in legacy_provider_healthcheck_sig.parameters
+        assert name not in document_alignment_workflow_sig.parameters
 
     assert "AICallLog" in LegacyProviderAdminObservabilityModels.__dataclass_fields__
     assert "AIProviderConfig" in LegacyProviderAdminObservabilityModels.__dataclass_fields__

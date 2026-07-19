@@ -150,13 +150,15 @@ TerminologyCard, legacy UsageRecord, or AICallLog.
   supervised production runtime.
 - no multi-host scheduler, lease heartbeat thread, metrics, alerting, or stale
   job operations dashboard exists.
-- no formal query service, route, OpenAPI operation, or frontend caller exists.
+- formal query services and HTTP/OpenAPI adapters exist, but formal API browser
+  E2E and a frontend caller do not.
 - live/external providers remain disabled and real credentials are not read.
 
 Next permitted task:
 
 ```text
-Task 9C.5E establishes the HTTP-neutral formal run/item query services without
-changing worker behavior. The next slice is Task 9C.5F: Formal Document
-Alignment Routes and OpenAPI Contract.
+Task 9C.5E establishes HTTP-neutral formal run/item query services and Task
+9C.5F adds thin routes/OpenAPI without changing worker behavior. The next slice
+is Task 9C.5G: Formal Document Alignment API End-to-End, Polling and Recovery
+Verification.
 ```

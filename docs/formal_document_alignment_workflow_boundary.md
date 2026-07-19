@@ -11,17 +11,18 @@ Status:
 - `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
-- `FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED`
-- `FORMAL_ROUTES_NOT_IMPLEMENTED`
+- `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
+- `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
+- `FORMAL_API_E2E_NOT_COMPLETED`
 - `FRONTEND_NOT_MIGRATED`
 - `LEGACY_REPLACEMENT_NOT_IMPLEMENTED`
 - `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.5D
-Implementation update: formal local-pilot worker dispatch and job mapping established; query/routes/frontend remain absent
-Baseline: `0ad0636d1c9c833a58418009ad504a676ae22bcb`
+Task: 9C.5F
+Implementation update: formal start/run/items routes and OpenAPI established; formal API E2E/frontend remain absent
+Baseline: `0bfacc6b0cdc883958dbbf7a2e099df883997276`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -671,10 +672,7 @@ Request:
 
 ```json
 {
-  "knowledge_source_uid": "source-uid",
-  "workflow_version": "formal-document-alignment-v1",
-  "provider": "mock-rule-v1",
-  "candidate_limit": 50
+  "source_uid": "source-uid"
 }
 ```
 
@@ -689,13 +687,19 @@ Response:
     "status": "queued",
     "status_url": "/api/document-alignment-runs/document-alignment-run-uid",
     "items_url": "/api/document-alignment-runs/document-alignment-run-uid/items",
-    "job_uid": "background-job-uid",
-    "idempotency": {
-      "reused": false
-    }
+    "workflow_version": "formal-document-alignment-v1",
+    "stage": "queued",
+    "source_uid": "source-uid",
+    "reused": false
   }
 }
 ```
+
+Task 9C.5F resolves the older planning example in favor of the implemented
+admission DTO: only `source_uid` is client input. Workflow version, provider,
+candidate limits, job identity, and all execution ownership fields remain
+server-controlled. Successful creation and replay both return `202`,
+`Location`, fixed `Retry-After: 2`, and the existing request-id envelope.
 
 Status:
 
@@ -1529,8 +1533,9 @@ Current status:
 FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED
 FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED
 FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED
-FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED
-FORMAL_ROUTES_NOT_IMPLEMENTED
+FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED
+FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED
+FORMAL_API_E2E_NOT_COMPLETED
 FRONTEND_NOT_MIGRATED
 ```
 

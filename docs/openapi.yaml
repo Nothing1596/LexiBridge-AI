@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LexiBridge AI Local MVP API
-  version: 0.8.10-pr10
+  version: 0.8.11-pr10
   description: >
     OpenAPI contract for LexiBridge AI Local MVP, an AI-powered bilingual
     course knowledge alignment platform. This contract documents the local
@@ -58,6 +58,17 @@ components:
             - PDF_FONT_UNAVAILABLE
             - TOO_MANY_REQUESTS
             - INTERNAL_ERROR
+            - DOCUMENT_ALIGNMENT_INVALID_REQUEST
+            - DOCUMENT_ALIGNMENT_UNSUPPORTED_MEDIA_TYPE
+            - DOCUMENT_ALIGNMENT_SOURCE_NOT_AVAILABLE
+            - DOCUMENT_ALIGNMENT_SOURCE_NOT_GOVERNED
+            - DOCUMENT_ALIGNMENT_PARSE_BLOCKED
+            - DOCUMENT_ALIGNMENT_NO_USABLE_CHUNKS
+            - DOCUMENT_ALIGNMENT_IDEMPOTENCY_CONFLICT
+            - DOCUMENT_ALIGNMENT_PERSISTENCE_ERROR
+            - DOCUMENT_ALIGNMENT_QUERY_INVALID_REQUEST
+            - DOCUMENT_ALIGNMENT_WORKFLOW_NOT_FOUND
+            - DOCUMENT_ALIGNMENT_QUERY_PERSISTENCE_ERROR
         message:
           type: string
         request_id:
@@ -65,6 +76,89 @@ components:
         details:
           type: object
           description: Error details may include audit_error_code for review policy, permission, and validation failures.
+    DocumentAlignmentWorkflowRun:
+      type: object
+      required: [run_uid, workflow_version, status, stage, source_uid, progress_percent, is_terminal]
+      properties:
+        run_uid: {type: string, maxLength: 64}
+        workflow_version: {type: string, enum: [formal-document-alignment-v1]}
+        status:
+          type: string
+          enum: [queued, validating, processing, ready_for_review, completed_with_warnings, blocked, failed]
+        stage:
+          type: string
+          enum: [queued, source_validation, term_extraction, evidence_retrieval, draft_creation, verification, finalization, terminal]
+        source_uid: {type: string, maxLength: 64}
+        source_title: {type: string}
+        source_filename: {type: string}
+        course: {type: string}
+        chapter: {type: string}
+        requested_by: {type: string}
+        created_at: {type: string}
+        started_at: {type: string}
+        finished_at: {type: string}
+        total_items: {type: integer, minimum: 0}
+        ready_for_review_items: {type: integer, minimum: 0}
+        blocked_items: {type: integer, minimum: 0}
+        failed_items: {type: integer, minimum: 0}
+        warning_count: {type: integer, minimum: 0}
+        progress_percent: {type: integer, minimum: 0, maximum: 100}
+        safe_error_code: {type: string}
+        safe_error_message: {type: string, maxLength: 500}
+        consistency_warnings:
+          type: array
+          items: {type: string}
+        is_terminal: {type: boolean}
+        can_view_items: {type: boolean}
+        can_review_results: {type: boolean}
+    DocumentAlignmentWorkflowItem:
+      type: object
+      required: [item_uid, candidate_term, normalized_term, status, stage, source_chunk_count, risk_labels, retry_count, is_terminal, is_reviewable]
+      properties:
+        item_uid: {type: string, maxLength: 64}
+        candidate_term: {type: string}
+        normalized_term: {type: string}
+        status:
+          type: string
+          enum: [candidate, evidence_ready, draft_created, verification_completed, needs_review, blocked, failed]
+        stage: {type: string}
+        source_chunk_count: {type: integer, minimum: 0}
+        risk_labels:
+          type: array
+          items: {type: string}
+        draft_card_uid: {type: string, nullable: true}
+        verification_run_uid: {type: string, nullable: true}
+        confidence_score: {type: number, nullable: true}
+        confidence_summary: {type: object, nullable: true}
+        recommendation: {type: string, nullable: true}
+        safe_error_code: {type: string}
+        safe_error_message: {type: string, maxLength: 500}
+        retry_count: {type: integer, minimum: 0}
+        created_at: {type: string}
+        updated_at: {type: string}
+        consistency_warnings:
+          type: array
+          items: {type: string}
+        is_terminal: {type: boolean}
+        is_reviewable: {type: boolean}
+    DocumentAlignmentWorkflowItemPage:
+      type: object
+      required: [workflow_run_uid, items, pagination]
+      properties:
+        workflow_run_uid: {type: string, maxLength: 64}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/DocumentAlignmentWorkflowItem"}
+        pagination:
+          type: object
+          required: [page, page_size, total_items, total_pages, has_next, has_previous]
+          properties:
+            page: {type: integer, minimum: 1}
+            page_size: {type: integer, minimum: 1, maximum: 100}
+            total_items: {type: integer, minimum: 0}
+            total_pages: {type: integer, minimum: 0}
+            has_next: {type: boolean}
+            has_previous: {type: boolean}
     Pagination:
       type: object
       required: [page, page_size, total, has_next]
@@ -382,7 +476,149 @@ components:
       content:
         application/json:
           schema: {$ref: "#/components/schemas/ApiError"}
+    Error409:
+      description: Idempotency or state conflict
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ApiError"}
+    Error415:
+      description: JSON content type required
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ApiError"}
+    Error500:
+      description: Safe internal or persistence failure
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ApiError"}
 paths:
+  /api/document-alignment-runs:
+    post:
+      operationId: create_document_alignment_run
+      summary: Start an asynchronous formal document alignment workflow
+      description: Teachers and administrators may start a workflow from a governed source. Students are denied. Processing occurs asynchronously.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [source_uid]
+              properties:
+                source_uid: {type: string, minLength: 1, maxLength: 64}
+            example: {source_uid: source-uid}
+      responses:
+        "202":
+          description: Workflow accepted or idempotently reused
+          headers:
+            Location:
+              description: Canonical workflow status URL
+              schema: {type: string}
+            Retry-After:
+              description: Suggested polling interval in seconds
+              schema: {type: integer, enum: [2]}
+            X-Request-ID:
+              description: Safe request correlation identifier
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/ApiSuccess"}
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - {$ref: "#/components/schemas/DocumentAlignmentWorkflowRun"}
+                          - type: object
+                            required: [reused, status_url, items_url]
+                            properties:
+                              reused: {type: boolean}
+                              status_url: {type: string}
+                              items_url: {type: string}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+        "404": {$ref: "#/components/responses/Error404"}
+        "409": {$ref: "#/components/responses/Error409"}
+        "415": {$ref: "#/components/responses/Error415"}
+        "422": {$ref: "#/components/responses/Error422"}
+        "500": {$ref: "#/components/responses/Error500"}
+  /api/document-alignment-runs/{run_uid}:
+    get:
+      operationId: get_document_alignment_run
+      summary: Get a formal document alignment workflow business status
+      description: Available to administrators and authorized teachers. Students are denied. Transport ownership details are not returned.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: run_uid
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        "200":
+          description: Safe workflow status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/ApiSuccess"}
+                  - type: object
+                    properties:
+                      data: {$ref: "#/components/schemas/DocumentAlignmentWorkflowRun"}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+        "404": {$ref: "#/components/responses/Error404"}
+        "500": {$ref: "#/components/responses/Error500"}
+  /api/document-alignment-runs/{run_uid}/items:
+    get:
+      operationId: list_document_alignment_run_items
+      summary: List a formal workflow's safe item summaries
+      description: Results are database-paginated and visible only to administrators and authorized teachers. Students are denied.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: run_uid
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 64}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: page_size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [candidate, evidence_ready, draft_created, verification_completed, needs_review, blocked, failed]
+        - name: reviewable_only
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        "200":
+          description: Safe paginated workflow item summaries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/ApiSuccess"}
+                  - type: object
+                    properties:
+                      data: {$ref: "#/components/schemas/DocumentAlignmentWorkflowItemPage"}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+        "404": {$ref: "#/components/responses/Error404"}
+        "500": {$ref: "#/components/responses/Error500"}
   /api/auth/register:
     post:
       security: []
