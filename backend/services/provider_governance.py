@@ -119,6 +119,14 @@ def builtin_local_policy(provider_name: str) -> dict[str, Any] | None:
         "allowed_roles": ["student", "teacher", "admin"],
         "builtin": True,
     })
+    if provider == "mock-rule-v1":
+        data.update({
+            "allowed_courses": ["*"],
+            "max_calls_per_day": 100,
+            "max_calls_per_month": 1000,
+            "max_estimated_cost_per_call": 0.0,
+            "max_estimated_cost_per_day": 0.0,
+        })
     return data
 
 
@@ -266,7 +274,7 @@ def check_course_scope(policy: dict[str, Any], course: str) -> tuple[bool, str]:
     allowed = set(normalize_list(policy.get("allowed_courses", [])))
     if course_name and course_name in blocked:
         return False, "course_blocked"
-    if allowed and course_name not in allowed:
+    if allowed and "*" not in allowed and course_name not in allowed:
         return False, "course_not_allowed"
     return True, ""
 

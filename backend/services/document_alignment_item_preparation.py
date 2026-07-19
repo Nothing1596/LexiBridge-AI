@@ -6,11 +6,17 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from services import alignment_providers
 from services.alignment_output_parser import OUTPUT_SCHEMA_VERSION, PARSER_VERSION
 from services.bilingual_evidence_workflow import BILINGUAL_RETRIEVAL_VERSION, BilingualEvidenceResult
 from services.document_alignment_item_verification_adapter import (
     PreparedEvidenceSnippet,
     PreparedFormalItemVerificationInput,
+)
+from services.formal_document_alignment_provider_selection import (
+    FORMAL_DEFAULT_PROVIDER_NAME,
+    FormalDocumentAlignmentProviderSelectionError,
+    validate_formal_document_alignment_provider_selection,
 )
 
 
@@ -19,6 +25,8 @@ PREPARATION_OUTCOME_EVIDENCE_INSUFFICIENT = "evidence_insufficient"
 PREPARATION_OUTCOME_CHINESE_CANDIDATE_UNAVAILABLE = "chinese_candidate_unavailable"
 PREPARATION_OUTCOME_SOURCE_CHANGED = "source_changed"
 PREPARATION_OUTCOME_CHUNK_NOT_AVAILABLE = "chunk_not_available"
+PREPARATION_OUTCOME_PROVIDER_SELECTION_MISSING = "provider_selection_missing"
+PREPARATION_OUTCOME_PROVIDER_SELECTION_INVALID = "provider_selection_invalid"
 PREPARATION_OUTCOME_FAILED = "preparation_failed"
 
 _SAFE_MARKERS = (
@@ -121,9 +129,6 @@ class DocumentAlignmentItemPreparationDependencies:
     candidate_generator: Callable[..., Any]
     evidence_retriever: Callable[..., BilingualEvidenceResult]
     retrieval_version: str = ""
-    provider_name: str = "mock-rule-v1"
-    model_identity: str = "mock-rule-v1:v1"
-    prompt_version: str = "alignment-verification-v1"
     parser_version: str = PARSER_VERSION
     output_schema_version: str = OUTPUT_SCHEMA_VERSION
     evidence_limit: int = 5
@@ -131,9 +136,6 @@ class DocumentAlignmentItemPreparationDependencies:
 
     def __post_init__(self):
         for name in (
-            "provider_name",
-            "model_identity",
-            "prompt_version",
             "parser_version",
             "output_schema_version",
         ):
@@ -258,6 +260,33 @@ def _load_scope(command, dependencies):
     return (run, item, source, tuple(chunks) if valid else ())
 
 
+def _persisted_provider_selection(run: Any) -> tuple[str, str, str]:
+    provider_name = str(getattr(run, "provider_preference", "") or "").strip()
+    model_identity = str(getattr(run, "model_preference", "") or "").strip()
+    prompt_version = str(getattr(run, "prompt_version", "") or "").strip()
+    if not all((provider_name, model_identity, prompt_version)):
+        raise LookupError("Formal workflow provider selection is missing.")
+    try:
+        provider = alignment_providers.get_alignment_provider(provider_name)
+    except alignment_providers.AlignmentProviderError as exc:
+        raise ValueError("Formal workflow provider selection is invalid.") from exc
+    if (
+        provider.provider_type not in {"mock", "fake_llm", "replay_llm"}
+        or bool(getattr(provider, "supports_external_calls", False))
+    ):
+        raise ValueError("Formal workflow provider selection is invalid.")
+    if provider_name == FORMAL_DEFAULT_PROVIDER_NAME:
+        try:
+            validate_formal_document_alignment_provider_selection(
+                provider_name=provider_name,
+                model_identity=model_identity,
+                prompt_version=prompt_version,
+            )
+        except FormalDocumentAlignmentProviderSelectionError as exc:
+            raise ValueError("Formal workflow provider selection is invalid.") from exc
+    return provider_name, model_identity, prompt_version
+
+
 def validate_document_alignment_prepared_scope(
     command: PrepareDocumentAlignmentItemCommand,
     dependencies: DocumentAlignmentItemPreparationDependencies,
@@ -312,6 +341,25 @@ def prepare_document_alignment_item(
                 PREPARATION_OUTCOME_CHUNK_NOT_AVAILABLE,
                 error_code="DOCUMENT_ALIGNMENT_CHUNK_NOT_AVAILABLE",
                 error_message="Governed source chunk scope is not available.",
+            )
+
+        try:
+            provider_name, model_identity, prompt_version = _persisted_provider_selection(run)
+        except LookupError:
+            session.rollback()
+            return _result(
+                command,
+                PREPARATION_OUTCOME_PROVIDER_SELECTION_MISSING,
+                error_code="DOCUMENT_ALIGNMENT_PROVIDER_SELECTION_MISSING",
+                error_message="Formal workflow provider selection is missing.",
+            )
+        except ValueError:
+            session.rollback()
+            return _result(
+                command,
+                PREPARATION_OUTCOME_PROVIDER_SELECTION_INVALID,
+                error_code="DOCUMENT_ALIGNMENT_PROVIDER_SELECTION_INVALID",
+                error_message="Formal workflow provider selection is invalid.",
             )
 
         candidate_result = dependencies.candidate_generator(
@@ -399,9 +447,9 @@ def prepare_document_alignment_item(
                 or dependencies.retrieval_version
                 or BILINGUAL_RETRIEVAL_VERSION
             ),
-            provider_name=str(run.provider_preference or dependencies.provider_name),
-            model_identity=str(run.model_preference or dependencies.model_identity),
-            prompt_version=str(run.prompt_version or dependencies.prompt_version),
+            provider_name=provider_name,
+            model_identity=model_identity,
+            prompt_version=prompt_version,
             parser_version=dependencies.parser_version,
             output_schema_version=dependencies.output_schema_version,
             risk_labels=risk_labels,

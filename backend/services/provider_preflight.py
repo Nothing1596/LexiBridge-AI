@@ -173,7 +173,12 @@ def check_policy_readiness(policy: Any, course: str | None = None) -> dict[str, 
         _append_unique(blocking, BLOCK_COURSE_SCOPE_MISSING)
     if course_name and course_name in blocked_courses:
         _append_unique(blocking, BLOCK_COURSE_BLOCKED)
-    elif course_name and allowed_courses and course_name not in allowed_courses:
+    elif (
+        course_name
+        and allowed_courses
+        and "*" not in allowed_courses
+        and course_name not in allowed_courses
+    ):
         _append_unique(blocking, BLOCK_COURSE_NOT_ALLOWED)
 
     budget = check_budget_limits(data)
@@ -358,7 +363,11 @@ def run_provider_preflight(
     provider = _text(provider_name)
     course_name = _text(course)
     provider_check = check_provider_config(provider)
-    raw_policy = provider_governance.get_provider_policy(session, policy_model, provider)
+    raw_policy = provider_governance.get_effective_provider_policy(
+        session,
+        policy_model,
+        provider,
+    )
     policy_data = _safe_policy_summary(raw_policy)
     policy_check = check_policy_readiness(raw_policy, course_name)
     config = provider_check.get("config", {})

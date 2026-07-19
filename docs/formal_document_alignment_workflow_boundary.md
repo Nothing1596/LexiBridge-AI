@@ -13,6 +13,7 @@ Status:
 - `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
 - `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
+- `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
 - `FORMAL_API_E2E_NOT_COMPLETED`
 - `FRONTEND_NOT_MIGRATED`
 - `LEGACY_REPLACEMENT_NOT_IMPLEMENTED`
@@ -20,9 +21,9 @@ Status:
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.5F
-Implementation update: formal start/run/items routes and OpenAPI established; formal API E2E/frontend remain absent
-Baseline: `0bfacc6b0cdc883958dbbf7a2e099df883997276`
+Task: 9C.5F.1
+Implementation update: server-owned provider selection is frozen at admission and aligned with preparation, governance, preflight, verification, and attach; full formal API E2E/frontend remain absent
+Baseline: `672a0c79f3cb6d7b38535012fe5b6985cde4b3e5`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -31,9 +32,9 @@ Background job policy: `BACKGROUND_JOB_AS_TRANSPORT_ONLY`
 
 This document defines the formal document-alignment workflow contract and the
 implemented model, admission, execution-ownership, item bootstrap,
-per-item verification, document processing, and local worker boundaries. It
-does not implement query services, routes, frontend changes, OpenAPI changes,
-or a production migration/runtime framework. Legacy
+per-item verification, document processing, local worker, query, and HTTP
+boundaries. It does not implement frontend changes, full formal API E2E, or a
+production migration/runtime framework. Legacy
 `POST /api/alignment/run` remains temporary frontend
 compatibility with external execution disabled.
 
@@ -380,6 +381,34 @@ StartDocumentAlignmentWorkflowResult(
 
 The result is not an HTTP response and contains no ORM object, raw exception,
 database ID, credential, full payload, or route envelope.
+
+## Server-Owned Provider Selection
+
+Task 9C.5F.1 establishes one selection source in
+`services/formal_document_alignment_provider_selection.py`. The small-pilot
+default is deterministic local `mock-rule-v1`, model identity
+`mock-rule-v1:v1`, prompt `alignment-v1`, plus the existing parser and output
+schema versions. The selector validates that the provider registry and
+sanitized provider config agree, that the provider is enabled locally, and
+that it has no external transport, credential requirement, API-key variable,
+or base URL.
+
+Admission resolves this selection only after checking for an existing
+source-scoped idempotent Run. A new Run persists provider, model, and prompt in
+the same root/job/audit transaction. Replay returns the original frozen values
+and does not overwrite them when server defaults later change. The HTTP body
+continues to accept only `source_uid`; clients cannot choose these identities.
+
+Item preparation uses only the persisted Run values. It has no provider,
+model, or prompt fallback. Missing historical values fail closed with
+`DOCUMENT_ALIGNMENT_PROVIDER_SELECTION_MISSING`; unregistered, external, or
+identity-drifted values fail with
+`DOCUMENT_ALIGNMENT_PROVIDER_SELECTION_INVALID`. Neither path calls a
+provider, creates usage, or backfills old data. Governance evaluation,
+preflight, and attach resolve the same effective built-in local policy for the
+default mock provider. That policy is bounded, course-scoped by a server-only
+wildcard, requires human review, allows no external call or production result,
+and never enables auto-approval.
 
 ## Admission Transaction
 
@@ -1137,7 +1166,9 @@ provider preflight -> formal verification -> formal parser -> formal attach
 gate. The workflow default provider is deterministic `mock-rule-v1`; fake and
 replay providers are permitted only when policy and preflight allow them.
 External/live provider remains disabled by default and is not enabled by this
-design.
+design. New formal Runs freeze `mock-rule-v1`, `mock-rule-v1:v1`, and
+`alignment-v1` during admission; preparation cannot substitute another
+identity when those fields are absent.
 
 The current alignment verification execution service evaluates provider
 policy but does not call `run_provider_preflight`; the processing collaborator

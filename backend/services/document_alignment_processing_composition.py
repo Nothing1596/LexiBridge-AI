@@ -168,7 +168,13 @@ def build_document_alignment_processing_dependencies(
             provider_type_for=provider_governance.provider_type_for,
             evaluate_policy=provider_governance.evaluate_provider_request,
             run_preflight=provider_preflight.run_provider_preflight,
-            can_attach=provider_governance.can_attach_verification_to_card,
+            can_attach=lambda verification, policy: provider_governance.can_attach_verification_to_card(
+                verification,
+                policy
+                or provider_governance.builtin_local_policy(
+                    getattr(verification, "provider_name", "")
+                ),
+            ),
         ),
         verification=adapter.VerificationCollaborator(
             resolve_provider=alignment_providers.get_alignment_provider,

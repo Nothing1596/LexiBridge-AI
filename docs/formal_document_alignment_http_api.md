@@ -35,10 +35,20 @@ Unknown fields, body actor/role values, body idempotency values, malformed JSON,
 and non-JSON content are rejected. Workflow version, provider, candidate limit,
 job type, worker, and execution settings are server-owned.
 
+The server resolves and freezes the deterministic local provider identity when
+Admission creates a Run. The current pilot identity is `mock-rule-v1`, model
+`mock-rule-v1:v1`, and prompt `alignment-v1`; none is accepted from HTTP input
+or exposed as credential-bearing provider configuration. Historical Runs
+without a frozen selection fail closed during processing and are not silently
+backfilled.
+
 Creation and replay both return `202`, the canonical status `Location`, fixed
 `Retry-After: 2`, `X-Request-ID`, and the normal API envelope. Replay returns
 the same run with `reused: true`; canonical payload drift under the same scope
-returns `409`. The response never includes a job UID or transport state.
+returns `409`. The scope is requesting actor + source UID + workflow version +
+Idempotency-Key. Reusing the same key for a different source creates a distinct
+Run rather than a conflict. The response never includes a job UID or transport
+state.
 
 ## Read Contract
 

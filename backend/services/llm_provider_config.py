@@ -45,6 +45,25 @@ class LLMProviderConfigError(ValueError):
 
 
 DEFAULT_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
+    "mock-rule-v1": {
+        "provider_name": "mock-rule-v1",
+        "provider_type": "mock",
+        "model_name": "mock-rule-v1",
+        "model_identity": "mock-rule-v1:v1",
+        "base_url": "",
+        "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+        "max_retries": 0,
+        "max_prompt_chars": DEFAULT_MAX_PROMPT_CHARS,
+        "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
+        "cost_per_1k_input_tokens": 0.0,
+        "cost_per_1k_output_tokens": 0.0,
+        "max_estimated_cost": 0.0,
+        "enabled": True,
+        "replay_mode": True,
+        "transport_mode": "local",
+        "requires_credentials": False,
+        "api_key_env_name": "",
+    },
     DISABLED_EXTERNAL_PROVIDER_NAME: {
         "provider_name": DISABLED_EXTERNAL_PROVIDER_NAME,
         "provider_type": "external_llm",
@@ -163,7 +182,10 @@ def get_llm_provider_config(provider_name: str, overrides: dict[str, Any] | None
     config["max_retries"] = normalize_provider_retry_policy(config.get("max_retries")).get("max_retries", 0)
     config["max_prompt_chars"] = max(500, int(config.get("max_prompt_chars") or DEFAULT_MAX_PROMPT_CHARS))
     config["max_output_chars"] = max(500, int(config.get("max_output_chars") or DEFAULT_MAX_OUTPUT_CHARS))
-    config["enabled"] = bool(config.get("enabled")) and is_external_llm_enabled()
+    if config.get("provider_type") == "external_llm":
+        config["enabled"] = bool(config.get("enabled")) and is_external_llm_enabled()
+    else:
+        config["enabled"] = bool(config.get("enabled"))
     config["replay_mode"] = bool(config.get("replay_mode"))
     return config
 

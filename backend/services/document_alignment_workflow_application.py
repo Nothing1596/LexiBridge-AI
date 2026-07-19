@@ -20,6 +20,9 @@ from services.document_alignment_workflow_contract import (
     ROOT_STAGE_QUEUED,
     ROOT_STATUS_QUEUED,
 )
+from services.formal_document_alignment_provider_selection import (
+    resolve_default_formal_document_alignment_provider_selection,
+)
 
 
 OUTCOME_CREATED = "created"
@@ -30,11 +33,13 @@ OUTCOME_SOURCE_NOT_GOVERNED = "source_not_governed"
 OUTCOME_PARSE_BLOCKED = "parse_blocked"
 OUTCOME_NO_USABLE_CHUNKS = "no_usable_chunks"
 OUTCOME_IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+OUTCOME_PROVIDER_SELECTION_UNAVAILABLE = "provider_selection_unavailable"
 OUTCOME_PERSISTENCE_ERROR = "persistence_error"
 
 ERROR_INVALID_REQUEST = "DOCUMENT_ALIGNMENT_INVALID_REQUEST"
 ERROR_SOURCE_NOT_AVAILABLE = "DOCUMENT_ALIGNMENT_SOURCE_NOT_AVAILABLE"
 ERROR_IDEMPOTENCY_CONFLICT = "DOCUMENT_ALIGNMENT_IDEMPOTENCY_CONFLICT"
+ERROR_PROVIDER_SELECTION_UNAVAILABLE = "DOCUMENT_ALIGNMENT_PROVIDER_SELECTION_UNAVAILABLE"
 ERROR_PERSISTENCE = "DOCUMENT_ALIGNMENT_PERSISTENCE_ERROR"
 
 
@@ -197,6 +202,9 @@ class DocumentAlignmentWorkflowApplicationDependencies:
     source_admission_checker: Callable[[GovernedKnowledgeSourceSnapshot], DocumentAlignmentSourceAdmissionDecision]
     current_time_factory: Callable[[], str]
     uid_factory: Callable[[], str]
+    provider_selection_resolver: Callable[[], Any] = (
+        resolve_default_formal_document_alignment_provider_selection
+    )
     workflow_version: str = FORMAL_DOCUMENT_ALIGNMENT_WORKFLOW_VERSION
     audit_recorder: Callable[[Any, Any, DocumentAlignmentRequestedAudit], Any] = record_document_alignment_requested_audit
     integrity_error_type: type[BaseException] = IntegrityError
@@ -385,6 +393,17 @@ def start_document_alignment_workflow(
             return _reused_result(command, dependencies, existing)
         return _conflict_result(command)
 
+    try:
+        selection = dependencies.provider_selection_resolver()
+    except Exception:
+        dependencies.session.rollback()
+        return StartDocumentAlignmentWorkflowResult(
+            outcome=OUTCOME_PROVIDER_SELECTION_UNAVAILABLE,
+            request_id=command.request_id,
+            error_code=ERROR_PROVIDER_SELECTION_UNAVAILABLE,
+            error_message="Formal document alignment provider selection is unavailable.",
+        )
+
     now = dependencies.current_time_factory()
     run = dependencies.workflow_run_model(
         run_uid=dependencies.uid_factory(),
@@ -398,6 +417,9 @@ def start_document_alignment_workflow(
         idempotency_key=command.idempotency_key,
         idempotency_fingerprint=fingerprint,
         workflow_version=dependencies.workflow_version,
+        provider_preference=selection.provider_name,
+        model_preference=selection.model_identity,
+        prompt_version=selection.prompt_version,
         status=ROOT_STATUS_QUEUED,
         stage=ROOT_STAGE_QUEUED,
         total_items=0,

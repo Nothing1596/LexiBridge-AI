@@ -16,11 +16,13 @@ from services.document_alignment_workflow_contract import (
     ROOT_STAGE_TERMINAL,
     ROOT_STATUS_READY_FOR_REVIEW,
 )
-from services.provider_governance import create_or_update_provider_policy
+from services.formal_document_alignment_provider_selection import (
+    FORMAL_DEFAULT_MODEL_IDENTITY,
+    FORMAL_DEFAULT_PROVIDER_NAME,
+)
 
 
 PREFIX = "formal-worker-integration-9c5d"
-PROVIDER = "external-llm-replay-v1"
 
 
 @pytest.fixture(autouse=True)
@@ -35,15 +37,27 @@ def _app_context(app_module):
 
 def _cleanup(app_module):
     app_module.db.session.rollback()
-    run_ids = [
-        row.id
-        for row in app_module.DocumentAlignmentWorkflowRun.query.filter(
-            app_module.DocumentAlignmentWorkflowRun.run_uid.like(f"{PREFIX}%")
-        ).all()
-    ]
-    mappings = app_module.DocumentAlignmentItemVerificationExecution.query.filter(
-        app_module.DocumentAlignmentItemVerificationExecution.workflow_run_uid.like(f"{PREFIX}%")
+    runs = app_module.DocumentAlignmentWorkflowRun.query.filter(
+        app_module.DocumentAlignmentWorkflowRun.run_uid.like(f"{PREFIX}%")
+        | app_module.DocumentAlignmentWorkflowRun.source_uid.like(f"{PREFIX}%")
     ).all()
+    run_ids = [row.id for row in runs]
+    run_uids = [row.run_uid for row in runs]
+    items = (
+        app_module.DocumentAlignmentWorkflowItem.query.filter(
+            app_module.DocumentAlignmentWorkflowItem.workflow_run_id.in_(run_ids)
+        ).all()
+        if run_ids
+        else []
+    )
+    item_uids = [item.item_uid for item in items]
+    mappings = (
+        app_module.DocumentAlignmentItemVerificationExecution.query.filter(
+            app_module.DocumentAlignmentItemVerificationExecution.workflow_run_uid.in_(run_uids)
+        ).all()
+        if run_uids
+        else []
+    )
     execution_keys = [row.execution_key for row in mappings]
     if execution_keys:
         app_module.AlignmentProviderUsageRecord.query.filter(
@@ -55,18 +69,21 @@ def _cleanup(app_module):
         app_module.AlignmentProviderPreflightRun.query.filter(
             app_module.AlignmentProviderPreflightRun.execution_key.in_(execution_keys)
         ).delete(synchronize_session=False)
-    app_module.AuditRecord.query.filter(app_module.AuditRecord.target_uid.like(f"{PREFIX}%")).delete(
-        synchronize_session=False
-    )
-    app_module.DocumentAlignmentItemVerificationExecution.query.filter(
-        app_module.DocumentAlignmentItemVerificationExecution.workflow_run_uid.like(f"{PREFIX}%")
-    ).delete(synchronize_session=False)
+    if run_uids:
+        app_module.AuditRecord.query.filter(
+            app_module.AuditRecord.target_uid.in_(run_uids + item_uids)
+            | app_module.AuditRecord.target_uid.like(f"{PREFIX}%")
+        ).delete(synchronize_session=False)
+        app_module.DocumentAlignmentItemVerificationExecution.query.filter(
+            app_module.DocumentAlignmentItemVerificationExecution.workflow_run_uid.in_(run_uids)
+        ).delete(synchronize_session=False)
     if run_ids:
         app_module.DocumentAlignmentWorkflowItem.query.filter(
             app_module.DocumentAlignmentWorkflowItem.workflow_run_id.in_(run_ids)
         ).delete(synchronize_session=False)
     app_module.DocumentAlignmentWorkflowRun.query.filter(
         app_module.DocumentAlignmentWorkflowRun.run_uid.like(f"{PREFIX}%")
+        | app_module.DocumentAlignmentWorkflowRun.source_uid.like(f"{PREFIX}%")
     ).delete(synchronize_session=False)
     app_module.ConceptAlignmentCard.query.filter(
         app_module.ConceptAlignmentCard.course.like(f"{PREFIX}%")
@@ -74,7 +91,6 @@ def _cleanup(app_module):
     app_module.BackgroundJob.query.filter_by(job_type=FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE).delete(
         synchronize_session=False
     )
-    app_module.AlignmentProviderPolicy.query.filter_by(provider_name=PROVIDER).delete(synchronize_session=False)
     app_module.KnowledgeChunk.query.filter(
         app_module.KnowledgeChunk.source_uid.like(f"{PREFIX}%")
     ).delete(synchronize_session=False)
@@ -216,34 +232,6 @@ def _setup_source(app_module):
             )
         )
     app_module.db.session.commit()
-    create_or_update_provider_policy(
-        app_module.db.session,
-        app_module.AlignmentProviderPolicy,
-        PROVIDER,
-        {
-            "provider_type": "replay_llm",
-            "enabled": True,
-            "status": "active",
-            "replay_only": True,
-            "allow_external_calls": False,
-            "allow_attach_to_card": True,
-            "allow_production_result": False,
-            "allow_auto_approve": False,
-            "require_human_review": True,
-            "allowed_courses": [course],
-            "allowed_roles": ["teacher"],
-            "max_calls_per_day": 20,
-            "max_calls_per_month": 100,
-            "max_estimated_cost_per_call": 0.25,
-            "max_estimated_cost_per_day": 1.0,
-            "max_prompt_chars": 8000,
-            "max_output_chars": 4000,
-            "timeout_seconds": 30,
-            "max_retries": 0,
-        },
-        now_fn=app_module.current_time_text,
-        commit=True,
-    )
     return source_en
 
 
@@ -273,10 +261,9 @@ def test_admission_job_is_claimed_and_processed_by_real_formal_worker(app_module
         _admission_dependencies(app_module),
     )
     run = app_module.DocumentAlignmentWorkflowRun.query.filter_by(run_uid=created.run_uid).one()
-    run.provider_preference = PROVIDER
-    run.model_preference = "replay-llm:v1"
-    run.prompt_version = "alignment-verification-v1"
-    app_module.db.session.commit()
+    assert run.provider_preference == FORMAL_DEFAULT_PROVIDER_NAME
+    assert run.model_preference == FORMAL_DEFAULT_MODEL_IDENTITY
+    assert run.prompt_version == "alignment-v1"
     legacy_before = {
         "runs": app_module.AlignmentRun.query.count(),
         "cards": app_module.TerminologyCard.query.count(),

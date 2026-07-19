@@ -1,6 +1,6 @@
 # LexiBridge-AI Architecture Map
 
-Updated: 2026-07-18
+Updated: 2026-07-19
 
 This map describes the current implemented pilot architecture. It is not a future-state product plan.
 
@@ -17,6 +17,7 @@ This map describes the current implemented pilot architecture. It is not a futur
 - `DocumentAlignmentItemVerificationExecution`: Task 9C.5B.1 persistence mapping for one logical formal item verification execution. It stores a stable execution key, workflow/item identity, versioned safe-input fingerprint, recovery status, safe errors, and optional draft/preflight/verification UIDs without raw evidence, prompt, output, credentials, or worker lease data.
 - `backend/services/document_alignment_workflow_application.py`: formal document-alignment admission/start service added in Task 9C.4X. It is HTTP-neutral, validates explicit governed-source/permission/admission decisions, resolves idempotency, creates `DocumentAlignmentWorkflowRun`, queues a transport-only `BackgroundJob`, writes `document_alignment_requested` audit, commits once, and rolls back persistence failures. It does not process terms, evidence, cards, verification, providers, workers, routes, or frontend state.
 - Task 9C.4Y characterizes the formal processing boundary. Task 9C.4Z adds `backend/services/formal_background_job_execution.py` and additive BackgroundJob lease fields for formal jobs only. Task 9C.5A adds pure governed chunk-scoped candidates and `backend/services/document_alignment_item_bootstrap.py`: `item-key-v1` identity, active-attempt transaction fencing, source/chunk drift checks, idempotent item creation/reuse, and root transition to processing. Task 9C.5B.1 adds `backend/services/formal_item_verification_identity.py`, the execution mapping table, and nullable unique verification/preflight/usage/audit identities. Task 9C.5B (retry) adds `backend/services/document_alignment_item_verification_adapter.py`: job/run-bound, lease-fenced draft/preflight/verification/usage/audit/attach recovery with one selected candidate, conditional approved-card protection, provider completion checkpoints, and reference-only persistence. Task 9C.5C adds governed item preparation plus a sequential, lease-fenced document processing orchestrator. Task 9C.5D adds explicit production composition, strict formal job handling, CAS-only dispatch, retry/root finalization mapping, and local formal/legacy worker rotation. Task 9C.5E adds `backend/services/document_alignment_workflow_queries.py`: anti-enumerating teacher/admin authorization, safe run summaries, SQL-paginated item summaries, computed business progress, consistency warnings, and fixed query-count boundaries. Task 9C.5F adds `backend/routes/document_alignment_workflow_routes.py`, production admission composition, and parsed OpenAPI contracts for asynchronous start, run status, and item pagination. This remains local-pilot `AT_LEAST_ONCE_TRANSPORT`, not a frontend workflow, formal API browser-E2E proof, production daemon, PostgreSQL proof, or exactly-once provider system.
+- Task 9C.5F.1 adds `backend/services/formal_document_alignment_provider_selection.py`: Admission freezes `mock-rule-v1`, `mock-rule-v1:v1`, and `alignment-v1`; preparation has no provider/model/prompt fallback; governance, preflight, verification, and attach resolve the same bounded local policy. Historical null selections fail closed without backfill or provider usage. Full formal API E2E is still not complete.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.
@@ -230,8 +231,10 @@ Legacy alignment run:
   and internal document processing/root finalization. Task 9C.5D establishes
   local formal worker dispatch and transport mapping. Task 9C.5E adds internal
   run/item query services. Task 9C.5F adds formal start/run/items routes and
-  OpenAPI while hiding transport ownership. Formal API E2E, frontend cutover,
-  and a production worker runtime do not exist yet.
+  OpenAPI while hiding transport ownership. Task 9C.5F.1 aligns Admission's
+  frozen local provider identity with preparation, policy, preflight, and
+  attach. Formal API E2E, frontend cutover, and a production worker runtime do
+  not exist yet.
 
 ## Permission Boundaries
 

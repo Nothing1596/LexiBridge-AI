@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current implementation conclusion:
-FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED
+FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED
 
-Implementation status after Task 9C.5F:
+Implementation status after Task 9C.5F.1:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -24,6 +24,7 @@ Implementation status after Task 9C.5F:
 - `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
 - `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
+- `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
 - `FORMAL_API_E2E_NOT_COMPLETED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
@@ -53,9 +54,11 @@ execution path. Task 9C.4X establishes the first application slice:
 workflow admission and start. That service validates a governed source through
 explicit loaders/decisions, resolves idempotency, creates the workflow root,
 creates a transport-only BackgroundJob, records `document_alignment_requested`,
-and commits once. Processing orchestration, the local-pilot worker, and
-HTTP-neutral read-only run/item query services are now implemented; routes,
-OpenAPI, and frontend cutover are not.
+and commits once. Processing orchestration, the local-pilot worker,
+HTTP-neutral read-only run/item query services, and formal HTTP/OpenAPI routes
+are implemented. Task 9C.5F.1 aligns the server-owned deterministic provider
+selection across admission, preparation, governance, preflight, verification,
+and attach. Full formal API E2E and frontend cutover remain incomplete.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
 Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,

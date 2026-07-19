@@ -4,6 +4,13 @@ from scripts import pilot_readiness_check
 
 
 EXPECTED_CONDITIONS = {
+    "FORMAL_WORKFLOW_PROVIDER_SELECTION_POLICY_PRESENT",
+    "FORMAL_ADMISSION_PROVIDER_SELECTION_FROZEN",
+    "FORMAL_DEFAULT_DETERMINISTIC_PROVIDER_CONFIGURED",
+    "FORMAL_DEFAULT_PROVIDER_POLICY_ALLOWED",
+    "FORMAL_DEFAULT_PROVIDER_PREFLIGHT_PASSED",
+    "FORMAL_ITEM_PREPARATION_NO_SILENT_PROVIDER_FALLBACK",
+    "FORMAL_LEGACY_NULL_SELECTION_FAILS_CLOSED",
     "FORMAL_BACKGROUND_JOB_LEASE_FOUNDATION_PRESENT",
     "FORMAL_CHUNK_SCOPED_TERM_CANDIDATES_PRESENT",
     "FORMAL_WORKFLOW_ITEM_BOOTSTRAP_PRESENT",
@@ -124,6 +131,11 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_workflow_openapi.py" in source
     assert "tests/test_document_alignment_workflow_route_security.py" in source
     assert "tests/test_document_alignment_workflow_route_integration.py" in source
+    assert "formal document alignment provider selection" in source
+    assert "tests/test_formal_document_alignment_provider_selection.py" in source
+    assert "tests/test_document_alignment_admission_provider_selection.py" in source
+    assert "tests/test_document_alignment_provider_preflight_contract.py" in source
+    assert "tests/test_document_alignment_http_default_provider_flow.py" in source
 
 
 def test_readiness_no_longer_reports_query_service_as_missing():
