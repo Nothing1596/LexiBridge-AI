@@ -93,6 +93,35 @@ from services.document_alignment_workflow_contract import (
     ITEM_VERIFICATION_EXECUTION_STATUS_PREPARED,
     WORKFLOW_VERSION_V1,
 )
+from services.document_alignment_processing_composition import (
+    DocumentAlignmentProcessingCompositionModels,
+    build_document_alignment_processing_dependencies,
+)
+from services.document_alignment_processing_orchestrator import (
+    finalize_document_alignment_workflow_failure,
+    process_document_alignment_workflow,
+)
+from services.document_alignment_worker_handler import (
+    DocumentAlignmentWorkerHandlerDependencies,
+    FormalDocumentAlignmentJobSnapshot,
+    FormalDocumentAlignmentRunSnapshot,
+    FormalJobOwnershipCollaborator,
+    FormalProcessingCollaborator,
+    run_claimed_formal_document_alignment_job,
+)
+from services.formal_background_job_dispatch import (
+    FormalBackgroundJobDispatchDependencies,
+    run_one_formal_document_alignment_job,
+)
+from services.formal_background_job_execution import (
+    FormalBackgroundJobExecutionDependencies,
+    claim_next_formal_background_job,
+    complete_formal_background_job,
+    fail_formal_background_job,
+    heartbeat_formal_background_job,
+    requeue_formal_background_job,
+    validate_active_formal_job_lease,
+)
 from services.ai_provider import provider_from_selection
 from services.prompt_registry import (
     DEFAULT_PROMPTS,
@@ -7122,6 +7151,111 @@ def run_worker_once(worker_id=JOB_WORKER_ID):
     if job is None:
         return None
     return run_background_job(job.id, worker_id=worker_id)
+
+
+def _formal_processing_composition_models():
+    return DocumentAlignmentProcessingCompositionModels(
+        workflow_run=DocumentAlignmentWorkflowRun,
+        workflow_item=DocumentAlignmentWorkflowItem,
+        item_execution=DocumentAlignmentItemVerificationExecution,
+        background_job=BackgroundJob,
+        audit_record=AuditRecord,
+        parse_record=DocumentParseRecord,
+        knowledge_source=KnowledgeSource,
+        knowledge_chunk=KnowledgeChunk,
+        concept_card=ConceptAlignmentCard,
+        provider_policy=AlignmentProviderPolicy,
+        preflight_run=AlignmentProviderPreflightRun,
+        verification_run=AlignmentVerificationRun,
+        provider_usage=AlignmentProviderUsageRecord,
+    )
+
+
+def _formal_job_execution_dependencies():
+    return FormalBackgroundJobExecutionDependencies(
+        session=db.session,
+        job_model=BackgroundJob,
+        current_time_factory=datetime.utcnow,
+    )
+
+
+def _formal_worker_handler_dependencies(lease):
+    processing_dependencies = build_document_alignment_processing_dependencies(
+        session=db.session,
+        models=_formal_processing_composition_models(),
+        lease=lease,
+        term_extractor=extract_terms_from_text,
+        current_time_factory=datetime.utcnow,
+    )
+
+    def load_job(job_uid):
+        job = BackgroundJob.query.filter_by(job_uid=job_uid).one_or_none()
+        if job is None:
+            return None
+        return FormalDocumentAlignmentJobSnapshot(
+            job_uid=str(job.job_uid or ""),
+            job_type=str(job.job_type or ""),
+            status=str(job.status or ""),
+            input_payload=job.input_json,
+            attempt_count=int(job.attempt_count or 0),
+            max_attempts=int(job.max_attempts or 1),
+        )
+
+    def load_run(run_uid):
+        run = DocumentAlignmentWorkflowRun.query.filter_by(run_uid=run_uid).one_or_none()
+        if run is None:
+            return None
+        return FormalDocumentAlignmentRunSnapshot(
+            run_uid=str(run.run_uid),
+            workflow_version=str(run.workflow_version),
+            status=str(run.status),
+            stage=str(run.stage),
+            error_code=str(run.error_code or ""),
+        )
+
+    return DocumentAlignmentWorkerHandlerDependencies(
+        load_job=load_job,
+        load_run=load_run,
+        ownership=FormalJobOwnershipCollaborator(
+            validate=lambda active_lease: validate_active_formal_job_lease(
+                active_lease, _formal_job_execution_dependencies()
+            ),
+            heartbeat=lambda active_lease: heartbeat_formal_background_job(
+                active_lease, _formal_job_execution_dependencies()
+            ),
+            complete=lambda active_lease: complete_formal_background_job(
+                active_lease, _formal_job_execution_dependencies()
+            ),
+            requeue=lambda active_lease, code, message: requeue_formal_background_job(
+                active_lease, _formal_job_execution_dependencies(), code, message
+            ),
+            fail=lambda active_lease, code, message: fail_formal_background_job(
+                active_lease, _formal_job_execution_dependencies(), code, message
+            ),
+        ),
+        processing=FormalProcessingCollaborator(
+            execute=lambda command: process_document_alignment_workflow(
+                command, processing_dependencies
+            ),
+            finalize_failure=lambda command, code, message: finalize_document_alignment_workflow_failure(
+                command, processing_dependencies, code, message
+            ),
+        ),
+    )
+
+
+def run_formal_worker_once(worker_id=JOB_WORKER_ID):
+    return run_one_formal_document_alignment_job(
+        worker_id,
+        FormalBackgroundJobDispatchDependencies(
+            claim=lambda active_worker_id: claim_next_formal_background_job(
+                active_worker_id, _formal_job_execution_dependencies()
+            ),
+            handle=lambda lease: run_claimed_formal_document_alignment_job(
+                lease, _formal_worker_handler_dependencies(lease)
+            ),
+        ),
+    )
 
 
 def serialize_model_registry(registry):

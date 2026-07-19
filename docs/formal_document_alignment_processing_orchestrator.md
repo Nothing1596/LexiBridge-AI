@@ -6,9 +6,9 @@ Task: 9C.5C
 
 Baseline: `ff1b543d71454667f7bc4a0bd72a0b756d94ab12`
 
-Scope: internal local-pilot application service. No worker registration,
-route, OpenAPI contract, frontend caller, external provider, or production
-migration is established by this task.
+Scope: internal local-pilot application service. Task 9C.5D now invokes this
+service through the formal worker; no route, OpenAPI contract, frontend caller,
+external provider, production daemon, or production migration is established.
 
 ## Service Boundary
 
@@ -26,10 +26,10 @@ active formal BackgroundJob lease
 -> return typed result
 ```
 
-`document_alignment_processing_orchestrator.py` is HTTP-neutral and
-worker-neutral. A future formal worker owns claim/reclaim and maps the typed
-result to BackgroundJob complete, fail, or requeue. The orchestrator does not
-mutate a job's terminal state or clear its lease.
+`document_alignment_processing_orchestrator.py` remains HTTP-neutral and
+worker-neutral. Task 9C.5D's handler owns claim-result mapping to BackgroundJob
+complete, fail, or requeue. The orchestrator does not mutate a job's terminal
+state or clear its lease.
 
 ## Contracts
 
@@ -64,7 +64,8 @@ credentials, legacy services, or an unrestricted application registry.
 | Draft/preflight/verification/attach | `execute_document_alignment_item_verification` | per-item adapter | per-item adapter |
 | Progress recount | processing orchestrator | processing orchestrator | processing orchestrator |
 | Root finalization/audit | processing orchestrator | processing orchestrator | processing orchestrator |
-| BackgroundJob terminal mapping | not implemented | future formal worker | future formal worker |
+| BackgroundJob terminal mapping | `document_alignment_worker_handler.py` | formal ownership service | formal ownership service |
+| Retry-exhausted root finalization | processing orchestrator public helper | processing orchestrator | processing orchestrator |
 
 There are no unknown transaction owners in the composed V1 path. Collaborator
 commits remain explicit boundaries: bootstrap and the per-item adapter own their
@@ -152,12 +153,12 @@ The concurrency result proves database identity convergence for this SQLite
 test shape. It does not establish safe parallel item scheduling, provider
 exactly-once, PostgreSQL locking behavior, multi-host worker operation, or
 production recovery. Formal migration, PostgreSQL verification, monitoring,
-worker dispatch, query services, routes, OpenAPI, and frontend cutover remain
-required.
+query services, routes, OpenAPI, and frontend cutover remain required. The
+local worker dispatch added by Task 9C.5D is not a production runtime.
 
-Next permitted task:
+Task 9C.5D now provides the formal dispatcher and worker handler described by
+the earlier plan. Next permitted task:
 
 ```text
-Task 9C.5D: Formal Document Alignment Worker Handler,
-Job Finalization and Retry Mapping
+Task 9C.5E: Formal Document Alignment Query Services
 ```

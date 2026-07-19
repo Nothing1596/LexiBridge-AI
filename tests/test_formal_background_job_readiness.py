@@ -25,11 +25,20 @@ EXPECTED_CONDITIONS = {
     "FORMAL_ROOT_AUDIT_IDEMPOTENCY_PRESENT",
     "FORMAL_PROCESSING_PARTIAL_FAILURE_PRESENT",
     "FORMAL_PROCESSING_RESUME_PRESENT",
-    "FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED",
+    "FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_PRESENT",
+    "FORMAL_DOCUMENT_ALIGNMENT_JOB_DISPATCH_PRESENT",
+    "FORMAL_WORKER_RESULT_MAPPING_PRESENT",
+    "FORMAL_WORKER_RETRY_MAPPING_PRESENT",
+    "FORMAL_WORKER_STALE_RECOVERY_PRESENT",
+    "FORMAL_ROOT_JOB_TERMINAL_CONSISTENCY_PRESENT",
+    "FORMAL_JOB_NO_LEGACY_DISPATCH_PRESENT",
+    "FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED",
     "FORMAL_ROUTES_NOT_IMPLEMENTED",
     "FRONTEND_NOT_MIGRATED",
     "POSTGRESQL_PROCESSING_NOT_VERIFIED",
     "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
+    "POSTGRESQL_WORKER_NOT_VERIFIED",
+    "PRODUCTION_WORKER_RUNTIME_NOT_ESTABLISHED",
     "FORMAL_ITEM_EXECUTION_IDENTITY_SCHEMA_PRESENT",
     "FORMAL_VERIFICATION_EXECUTION_KEY_UNIQUENESS_PRESENT",
     "FORMAL_PREFLIGHT_EXECUTION_KEY_UNIQUENESS_PRESENT",
@@ -72,3 +81,11 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_processing_concurrency.py" in source
     assert "tests/test_document_alignment_processing_security.py" in source
     assert "tests/test_document_alignment_processing_fault_recovery.py" in source
+    assert "formal document alignment worker handler" in source
+    assert "tests/test_document_alignment_worker_handler.py" in source
+    assert "tests/test_document_alignment_worker_result_mapping.py" in source
+    assert "tests/test_document_alignment_worker_integration.py" in source
+    assert "tests/test_document_alignment_worker_retry_recovery.py" in source
+    assert "tests/test_document_alignment_worker_concurrency.py" in source
+    assert "tests/test_document_alignment_worker_legacy_compatibility.py" in source
+    assert "tests/test_document_alignment_worker_security.py" in source

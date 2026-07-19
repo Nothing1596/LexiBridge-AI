@@ -127,7 +127,7 @@ Stale-running reclaim additionally compares the observed attempt and token and
 requires `lease_expires_at <= now`. A successful claim or reclaim:
 
 - increments `execution_attempt` exactly once;
-- increments `attempt_count` exactly once;
+- does not increment `attempt_count`;
 - creates a new unpredictable lease token;
 - replaces worker ownership;
 - updates claim, heartbeat, and expiry times;
@@ -176,10 +176,12 @@ name cannot revive an old attempt.
 ## Fenced Finalization And Retry
 
 Completion, permanent failure, and requeue all require the active lease
-predicate. Completion writes `completed`; permanent failure writes `failed`
-with a bounded safe error; retryable failure writes `retrying` while the retry
-budget remains, otherwise `failed`. Requeue does not create a second job or
-change the formal payload.
+predicate. Completion writes `completed` without consuming business retry
+budget. Permanent failure writes `failed` and increments `attempt_count` once.
+A successful requeue writes `retrying` and increments `attempt_count` once.
+When the next requeue would exhaust the budget, the ownership service returns
+`retry_exhausted` without mutating the job so the worker can first terminalize
+the workflow root. Requeue does not create a second job or change the payload.
 
 Active token and worker fields are cleared on requeue/terminal transition;
 `execution_attempt` remains as the monotonic fence. Existing terminal statuses
@@ -211,9 +213,9 @@ query-first worker excludes that type. The formal type remains absent from the
 legacy dispatcher, and direct legacy dispatch returns it untouched. Legacy job
 ordering, retry, and execution behavior otherwise remain unchanged.
 
-This isolation remains required after the processing orchestrator is
-established because `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED` is still true and
-the generic legacy dispatcher must never claim formal jobs.
+Task 9C.5D adds a separate formal dispatcher and handler while preserving this
+isolation. The generic legacy dispatcher still never claims formal jobs, and
+the formal CAS dispatcher never claims legacy jobs.
 
 ## Concurrency Evidence
 

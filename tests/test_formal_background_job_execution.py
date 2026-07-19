@@ -179,7 +179,7 @@ def test_claim_is_formal_only_and_populates_attempt_owned_lease(app_module):
         assert claimed.status == "running"
         assert claimed.locked_by == "worker-a"
         assert claimed.execution_attempt == 1
-        assert claimed.attempt_count == 1
+        assert claimed.attempt_count == 0
         assert claimed.lease_token == "lease-token-9c4z"
         assert untouched.status == "queued"
 
@@ -322,6 +322,9 @@ def test_expired_lease_reclaim_fences_every_old_attempt_operation(app_module):
         ).lease
         assert new_lease.execution_attempt == 2
         assert new_lease.lease_token == "new-token-9c4z"
+        app_module.db.session.expire_all()
+        reclaimed = app_module.BackgroundJob.query.filter_by(job_uid=new_lease.job_uid).one()
+        assert reclaimed.attempt_count == 0
 
         for operation in (
             heartbeat_formal_background_job,
@@ -377,12 +380,34 @@ def test_fail_retry_max_attempts_and_safe_error_boundary(app_module):
         app_module.db.session.expire_all()
         stored = app_module.BackgroundJob.query.filter_by(job_uid=second.job_uid).one()
 
-        assert exhausted.outcome == LEASE_OUTCOME_ACCEPTED
-        assert exhausted.status == "failed"
-        assert stored.status == "failed"
-        assert stored.attempt_count == 2
+        assert exhausted.outcome == "retry_exhausted"
+        assert exhausted.status == "running"
+        assert stored.status == "running"
+        assert stored.attempt_count == 1
         assert sentinel not in stored.error_message
         assert sentinel not in exhausted.error_message
+        _cleanup(app_module)
+
+
+def test_permanent_failure_consumes_one_business_attempt(app_module):
+    with app_module.app.app_context():
+        _cleanup(app_module)
+        app_module.db.session.add(_formal_job(app_module, max_attempts=3))
+        app_module.db.session.commit()
+        lease = claim_next_formal_background_job("worker-a", _dependencies(app_module)).lease
+
+        failed = fail_formal_background_job(
+            lease,
+            _dependencies(app_module, now=NOW + timedelta(seconds=1)),
+            "SAFE_FAILURE",
+            "safe failure",
+        )
+        app_module.db.session.expire_all()
+        stored = app_module.BackgroundJob.query.filter_by(job_uid=lease.job_uid).one()
+
+        assert failed.outcome == LEASE_OUTCOME_ACCEPTED
+        assert stored.status == "failed"
+        assert stored.attempt_count == 1
         _cleanup(app_module)
 
 

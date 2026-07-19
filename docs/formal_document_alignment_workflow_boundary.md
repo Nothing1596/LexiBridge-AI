@@ -10,7 +10,8 @@ Status:
 - `FORMAL_CHUNK_SCOPED_TERM_BOOTSTRAP_ESTABLISHED`
 - `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
-- `FORMAL_WORKER_NOT_IMPLEMENTED`
+- `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
+- `FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
 - `LEGACY_REPLACEMENT_NOT_IMPLEMENTED`
@@ -18,9 +19,9 @@ Status:
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.5C
-Implementation update: sequential document processing and root finalization established; worker/routes/frontend remain absent
-Baseline: `ff1b543d71454667f7bc4a0bd72a0b756d94ab12`
+Task: 9C.5D
+Implementation update: formal local-pilot worker dispatch and job mapping established; query/routes/frontend remain absent
+Baseline: `0ad0636d1c9c833a58418009ad504a676ae22bcb`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -29,9 +30,9 @@ Background job policy: `BACKGROUND_JOB_AS_TRANSPORT_ONLY`
 
 This document defines the formal document-alignment workflow contract and the
 implemented model, admission, execution-ownership, item bootstrap,
-per-item verification, and document processing boundaries. It does not
-implement routes, worker dispatch/final job mapping, frontend changes,
-OpenAPI changes, or a production migration framework. Legacy
+per-item verification, document processing, and local worker boundaries. It
+does not implement query services, routes, frontend changes, OpenAPI changes,
+or a production migration/runtime framework. Legacy
 `POST /api/alignment/run` remains temporary frontend
 compatibility with external execution disabled.
 
@@ -1527,7 +1528,8 @@ Current status:
 ```text
 FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED
 FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED
-FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED
+FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED
+FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED
 FORMAL_ROUTES_NOT_IMPLEMENTED
 FRONTEND_NOT_MIGRATED
 ```
@@ -1572,4 +1574,27 @@ processing and not PostgreSQL proof. The declared policy remains
 `SINGLE_SEQUENTIAL_ORCHESTRATOR_PER_LEASE` and provider execution remains
 at-least-once for deterministic providers.
 
-Next permitted slice: `NEXT_FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER`.
+## Task 9C.5D Formal Worker Handler
+
+Task 9C.5D adds `document_alignment_processing_composition.py`,
+`document_alignment_worker_handler.py`, and
+`formal_background_job_dispatch.py`. The formal dispatcher uses the existing
+CAS ownership service and never calls the generic claim. The handler validates
+the exact two-field job payload, builds the established processing command,
+invokes the orchestrator once, reloads root state, and maps typed outcomes to
+attempt-fenced complete, requeue, or fail operations.
+
+Claim/reclaim advances only `execution_attempt`. Requeue and permanent fail
+consume `attempt_count` once. Retry exhaustion first invokes the lease-fenced
+root failure finalizer, then fails the job. A reclaimed attempt recognizes a
+root already failed by retry exhaustion and completes the pending job failure
+rather than incorrectly marking the transport completed.
+
+The local worker script alternates first opportunity between formal and legacy
+dispatch while processing at most one job per iteration. This is local pilot
+fairness, not a durable scheduler or production daemon. Formal/legacy
+dispatch isolation, approved-card immutability, no dual write, no network,
+ten dispatcher claim races, and crash/requeue recovery are covered by worker
+tests. PostgreSQL worker semantics remain unverified.
+
+Next permitted slice: `Task 9C.5E: Formal Document Alignment Query Services`.

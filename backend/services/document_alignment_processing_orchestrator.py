@@ -693,6 +693,72 @@ def _finalize_root(command, dependencies, processed: int, reused: int):
     )
 
 
+def finalize_document_alignment_workflow_failure(
+    command: ProcessDocumentAlignmentWorkflowCommand,
+    dependencies: DocumentAlignmentProcessingDependencies,
+    error_code: str,
+    error_message: str,
+) -> ProcessDocumentAlignmentWorkflowResult:
+    """Persist a lease-fenced terminal root failure without mutating its job."""
+
+    session = dependencies.session
+    safe_code = _required_text(error_code, "error_code", 120)
+    safe_message = _safe_error_message(error_message) or "Document alignment processing failed safely."
+    try:
+        run, _, identity_error = _job_and_run(command, dependencies)
+        session.rollback()
+        if identity_error:
+            return _result(
+                command,
+                dependencies,
+                OUTCOME_INVALID_RUN_STATE,
+                run=run,
+                error_code=identity_error,
+                error_message="Workflow run and formal job identity do not match.",
+            )
+        if run.status in _ROOT_TERMINAL_STATUSES:
+            return _result(command, dependencies, OUTCOME_ALREADY_TERMINAL, run=run)
+
+        ownership = _fence(command, dependencies)
+        if getattr(ownership, "outcome", "") != LEASE_OUTCOME_ACCEPTED:
+            session.rollback()
+            outcome, code, message, retryable = _lease_outcome(ownership)
+            return _result(
+                command,
+                dependencies,
+                outcome,
+                retryable=retryable,
+                error_code=code,
+                error_message=message,
+            )
+
+        run = session.query(dependencies.models.workflow_run).filter_by(
+            run_uid=command.workflow_run_uid
+        ).one()
+        items = session.query(dependencies.models.workflow_item).filter_by(
+            workflow_run_id=run.id
+        ).all()
+        _apply_progress(run, _progress_values(items))
+        run.status = ROOT_STATUS_FAILED
+        run.stage = ROOT_STAGE_TERMINAL
+        run.error_code = safe_code
+        run.error_message = safe_message
+        run.finished_at = _time_text(dependencies.current_time_factory())
+        _record_root_audit_once(dependencies, run, "document_alignment_failed", result="error")
+        session.commit()
+        return _result(command, dependencies, OUTCOME_FAILED, run=run)
+    except Exception:
+        session.rollback()
+        return _result(
+            command,
+            dependencies,
+            OUTCOME_PERSISTENCE_ERROR,
+            retryable=True,
+            error_code="DOCUMENT_ALIGNMENT_PERSISTENCE_FAILED",
+            error_message="Root failure finalization could not be persisted.",
+        )
+
+
 def process_document_alignment_workflow(
     command: ProcessDocumentAlignmentWorkflowCommand,
     dependencies: DocumentAlignmentProcessingDependencies,

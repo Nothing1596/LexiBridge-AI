@@ -24,15 +24,36 @@ def main():
     with app_module.app.app_context():
         app_module.db.create_all()
         app_module.ensure_schema_columns()
+        prefer_formal = True
         while True:
-            job = app_module.run_worker_once(worker_id=args.worker_id)
-            if job is None:
+            formal_result = None
+            legacy_job = None
+            if prefer_formal:
+                formal_result = app_module.run_formal_worker_once(worker_id=args.worker_id)
+                if formal_result.outcome == "no_job_available":
+                    legacy_job = app_module.run_worker_once(worker_id=args.worker_id)
+            else:
+                legacy_job = app_module.run_worker_once(worker_id=args.worker_id)
+                if legacy_job is None:
+                    formal_result = app_module.run_formal_worker_once(worker_id=args.worker_id)
+            prefer_formal = not prefer_formal
+
+            if legacy_job is None and (formal_result is None or formal_result.outcome == "no_job_available"):
                 if args.once:
                     print("no queued jobs")
                     return
                 time.sleep(args.interval)
                 continue
-            print(f"processed job_id={job.id} type={job.job_type} status={job.status}")
+            if legacy_job is not None:
+                print(f"processed job_id={legacy_job.id} type={legacy_job.job_type} status={legacy_job.status}")
+            else:
+                print(
+                    "processed formal "
+                    f"job_uid={formal_result.job_uid} "
+                    f"run_uid={formal_result.workflow_run_uid} "
+                    f"status={formal_result.job_status} "
+                    f"outcome={formal_result.outcome}"
+                )
             if args.once:
                 return
 

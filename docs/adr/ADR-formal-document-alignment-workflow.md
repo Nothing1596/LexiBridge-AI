@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current processing-planning conclusion:
-FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED
+FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED
 
-Implementation status after Task 9C.5C:
+Implementation status after Task 9C.5D:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -21,7 +21,8 @@ Implementation status after Task 9C.5C:
 - `FORMAL_ITEM_EXECUTION_IDEMPOTENCY_SCHEMA_ESTABLISHED`
 - `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
-- `FORMAL_WORKER_HANDLER_NOT_IMPLEMENTED`
+- `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
+- `FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
@@ -51,8 +52,8 @@ execution path. Task 9C.4X establishes the first application slice:
 workflow admission and start. That service validates a governed source through
 explicit loaders/decisions, resolves idempotency, creates the workflow root,
 creates a transport-only BackgroundJob, records `document_alignment_requested`,
-and commits once. Processing orchestration, route, worker, and frontend cutover
-are still not implemented.
+and commits once. Processing orchestration and the local-pilot worker are now
+implemented; query service, routes, OpenAPI, and frontend cutover are not.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
 Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
@@ -683,9 +684,16 @@ blocks and source drift, stops on infrastructure or lease failures, and leaves
 BackgroundJob completion/failure/requeue to the future formal worker handler.
 The V1 execution policy is `SINGLE_SEQUENTIAL_ORCHESTRATOR_PER_LEASE`.
 
-This establishes an internal processing application service, not an exposed
-workflow. There is no formal worker registration, status/items query service,
-HTTP route, OpenAPI operation, or frontend caller. Deterministic provider
+Task 9C.5D adds a separate formal dispatcher, strict payload handler, explicit
+production dependency composition, typed result-to-job mapping,
+retry-exhaustion root finalization, stale-reclaim recovery, and local worker
+rotation. Claim/reclaim advance only `execution_attempt`; requeue or permanent
+failure consumes `attempt_count` once. Completion requires a matching terminal
+root, and the generic legacy worker continues to exclude formal jobs.
+
+This establishes an executable local-pilot admission-to-worker path, not an
+exposed workflow. There is no status/items query service, HTTP route, OpenAPI
+operation, frontend caller, or supervised production runtime. Deterministic provider
 replay remains at-least-once after the existing provider-started crash point.
 The concurrent duplicate-invocation tests use SQLite and independent sessions;
 PostgreSQL locking, migration, and operational recovery remain unverified.
@@ -709,14 +717,12 @@ PostgreSQL locking, migration, and operational recovery remain unverified.
 
 The model, admission, formal BackgroundJob ownership, chunk-scoped item
 bootstrap, execution identities, lease-fenced per-item verification adapter,
-and document-level processing/root finalization service are implemented for
-the local pilot. The next permitted slice may connect the orchestrator to the
-formal BackgroundJob worker and map typed outcomes to job completion,
-failure, or requeue; it must not add routes or frontend cutover in the same
-task:
+document processing/root finalization, and formal local-pilot worker handler
+are implemented. The next permitted slice establishes read-only run/item query
+services before any HTTP route or frontend cutover:
 
 ```text
-NEXT_FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER
+Task 9C.5E: Formal Document Alignment Query Services
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still
@@ -726,7 +732,8 @@ cutover, HTTP 410, and legacy path removal remain later phases.
 ## Pilot Limitations
 
 This ADR is not production-ready. It does not enable real providers, does not
-add the new API or worker, and does not migrate frontend callers. The formal
+add the new API, and does not migrate frontend callers. The local worker is not
+a supervised production daemon. The formal
 tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
 claim/locking and idempotency-constraint validation remain required. Provider
 success followed by persistence failure is recoverable only by deterministic

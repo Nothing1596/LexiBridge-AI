@@ -32,6 +32,7 @@ LEASE_OUTCOME_LEASE_EXPIRED = "lease_expired"
 LEASE_OUTCOME_STALE_ATTEMPT = "stale_attempt"
 LEASE_OUTCOME_TERMINAL_IMMUTABLE = "terminal_immutable"
 LEASE_OUTCOME_INVALID_STATE = "invalid_state"
+LEASE_OUTCOME_RETRY_EXHAUSTED = "retry_exhausted"
 LEASE_OUTCOME_PERSISTENCE_ERROR = "persistence_error"
 
 ERROR_CLAIM_CONFLICT = "FORMAL_JOB_WORKER_CLAIM_CONFLICT"
@@ -40,6 +41,7 @@ ERROR_LEASE_NOT_OWNED = "FORMAL_JOB_LEASE_NOT_OWNED"
 ERROR_LEASE_EXPIRED = "FORMAL_JOB_LEASE_EXPIRED"
 ERROR_TERMINAL_IMMUTABLE = "FORMAL_JOB_TERMINAL_IMMUTABLE"
 ERROR_INVALID_STATE = "FORMAL_JOB_INVALID_STATE"
+ERROR_RETRY_EXHAUSTED = "FORMAL_JOB_RETRY_EXHAUSTED"
 ERROR_PERSISTENCE = "FORMAL_JOB_EXECUTION_OWNERSHIP_PERSISTENCE_FAILED"
 
 _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -285,7 +287,6 @@ def claim_next_formal_background_job(
             "lease_token": token,
             "heartbeat_at": now_text,
             "lease_expires_at": expiry_text,
-            "attempt_count": func.coalesce(model.attempt_count, 0) + 1,
             "started_at": case(
                 (or_(model.started_at.is_(None), model.started_at == ""), now_text),
                 else_=model.started_at,
@@ -529,6 +530,7 @@ def _fenced_status_update(
     error_code: str = "",
     error_message: str = "",
     progress_message: str,
+    increment_attempt_count: bool = False,
 ) -> FormalJobLeaseOperationResult:
     now = _as_utc(dependencies.current_time_factory())
     now_text = _time_text(now)
@@ -545,6 +547,8 @@ def _fenced_status_update(
     }
     if status in FORMAL_JOB_TERMINAL_STATUSES:
         values["finished_at"] = now_text
+    if increment_attempt_count:
+        values["attempt_count"] = func.coalesce(model.attempt_count, 0) + 1
     try:
         result = dependencies.session.execute(
             update(model).where(_active_predicate(model, lease, now_text)).values(**values)
@@ -586,6 +590,7 @@ def fail_formal_background_job(lease, dependencies, error_code, error_message):
         error_code=error_code,
         error_message=error_message,
         progress_message="Failed",
+        increment_attempt_count=True,
     )
 
 
@@ -595,26 +600,19 @@ def requeue_formal_background_job(lease, dependencies, error_code, error_message
     model = dependencies.job_model
     safe_code = _safe_error_code(error_code)
     safe_message = _safe_error_message(error_message)
-    retry_status = case(
-        (func.coalesce(model.attempt_count, 0) < func.coalesce(model.max_attempts, 1), "retrying"),
-        else_="failed",
-    )
     try:
         result = dependencies.session.execute(
             update(model)
-            .where(_active_predicate(model, lease, now_text))
+            .where(
+                _active_predicate(model, lease, now_text),
+                func.coalesce(model.attempt_count, 0) + 1 < func.coalesce(model.max_attempts, 1),
+            )
             .values(
-                status=retry_status,
+                status="retrying",
+                attempt_count=func.coalesce(model.attempt_count, 0) + 1,
                 error_code=safe_code,
                 error_message=safe_message,
-                progress_message=case(
-                    (func.coalesce(model.attempt_count, 0) < func.coalesce(model.max_attempts, 1), "Retry scheduled"),
-                    else_="Failed",
-                ),
-                finished_at=case(
-                    (func.coalesce(model.attempt_count, 0) < func.coalesce(model.max_attempts, 1), model.finished_at),
-                    else_=now_text,
-                ),
+                progress_message="Retry scheduled",
                 updated_at=now_text,
                 locked_by="",
                 lease_token="",
@@ -623,14 +621,28 @@ def requeue_formal_background_job(lease, dependencies, error_code, error_message
             )
         )
         if result.rowcount != 1:
-            return _rejection_after_rollback(lease, dependencies, now)
+            dependencies.session.rollback()
+            rejection = _rejection_result(lease, dependencies, now)
+            if rejection.outcome == LEASE_OUTCOME_INVALID_STATE:
+                budget = (
+                    dependencies.session.query(model.attempt_count, model.max_attempts)
+                    .filter(model.job_uid == lease.job_uid)
+                    .first()
+                )
+                dependencies.session.rollback()
+                if budget is not None and int(budget.attempt_count or 0) + 1 >= int(budget.max_attempts or 1):
+                    return FormalJobLeaseOperationResult(
+                        outcome=LEASE_OUTCOME_RETRY_EXHAUSTED,
+                        job_uid=lease.job_uid,
+                        execution_attempt=lease.execution_attempt,
+                        status="running",
+                        error_code=ERROR_RETRY_EXHAUSTED,
+                        error_message="Formal job retry budget is exhausted.",
+                    )
+            else:
+                dependencies.session.rollback()
+            return rejection
         dependencies.session.commit()
-        stored_status = (
-            dependencies.session.query(model.status)
-            .filter(model.job_uid == lease.job_uid)
-            .scalar()
-        )
-        dependencies.session.rollback()
     except Exception:
         dependencies.session.rollback()
         return FormalJobLeaseOperationResult(
@@ -644,7 +656,7 @@ def requeue_formal_background_job(lease, dependencies, error_code, error_message
         outcome=LEASE_OUTCOME_ACCEPTED,
         job_uid=lease.job_uid,
         execution_attempt=lease.execution_attempt,
-        status=str(stored_status or ""),
+        status="retrying",
         error_code=safe_code,
         error_message=safe_message,
     )

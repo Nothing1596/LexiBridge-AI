@@ -129,13 +129,14 @@ def test_background_job_formal_path_has_attempt_fenced_lease_contract(app_module
     assert "update(" in formal_claim
 
 
-def test_formal_job_has_no_worker_dispatch_or_route_yet(app_module):
+def test_formal_job_has_dedicated_worker_dispatch_but_no_route_yet(app_module):
     app_source = APP_PATH.read_text(encoding="utf-8")
     job_type = document_alignment_workflow_contract.FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE
 
     assert job_type not in app_module.JOB_TYPES
     assert f'job.job_type == "{job_type}"' not in app_source
-    assert "process_document_alignment_workflow" not in app_source
+    assert "run_formal_worker_once" in app_source
+    assert "process_document_alignment_workflow" in app_source
 
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}
     assert "/api/document-alignment-runs" not in rules
@@ -187,7 +188,7 @@ def test_processing_boundary_docs_freeze_contracts_state_machines_and_transactio
     required_terms = (
         "PROCESSING_BOUNDARY_CHARACTERIZED",
         "FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED",
-        "FORMAL_WORKER_NOT_IMPLEMENTED",
+        "FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED",
         "FORMAL_ROUTES_NOT_IMPLEMENTED",
         "FRONTEND_NOT_MIGRATED",
         "ProcessDocumentAlignmentWorkflowCommand",
