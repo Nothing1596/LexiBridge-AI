@@ -15,16 +15,16 @@ Status:
 - `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
 - `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
 - `FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED`
-- `FORMAL_API_E2E_NOT_COMPLETED`
+- `FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED`
 - `FRONTEND_NOT_MIGRATED`
 - `LEGACY_REPLACEMENT_NOT_IMPLEMENTED`
 - `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.5F.2
-Implementation update: formal retry budget is frozen at Admission and real HTTP-created jobs can requeue and resume; full formal API E2E/frontend remain absent
-Baseline: `1648f71e5d6973fda65262a100d7730648e420fa`
+Task: 9C.5G v3
+Implementation update: authenticated local HTTP start, formal worker processing, polling, pagination, source-scoped concurrent replay, recovery, and browser API access are verified; frontend remains absent
+Baseline: `9a2556f1e626fef9521d8b598c138f50407d9e03`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -1584,7 +1584,7 @@ FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED
 FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED
 FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED
 FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED
-FORMAL_API_E2E_NOT_COMPLETED
+FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED
 FRONTEND_NOT_MIGRATED
 ```
 
@@ -1658,4 +1658,4 @@ dispatch isolation, approved-card immutability, no dual write, no network,
 ten dispatcher claim races, and crash/requeue recovery are covered by worker
 tests. PostgreSQL worker semantics remain unverified.
 
-Next permitted slice: `Task 9C.5G v3: Formal Document Alignment API End-to-End, Polling and Recovery Verification`.
+Next permitted slice: `Task 9C.5H: Formal Workflow Frontend Cutover and Legacy-Independent Teacher Experience`.

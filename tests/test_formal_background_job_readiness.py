@@ -62,9 +62,23 @@ EXPECTED_CONDITIONS = {
     "FORMAL_WORKFLOW_HTTP_BACKGROUND_JOB_HIDDEN",
     "FORMAL_WORKFLOW_OPENAPI_PRESENT",
     "FORMAL_WORKFLOW_OPENAPI_RUNTIME_PARITY_PRESENT",
-    "FORMAL_API_E2E_NOT_COMPLETED",
+    "FORMAL_PRODUCTION_DEFAULT_CONTRACT_VERIFIED",
+    "FORMAL_API_E2E_PRESENT",
+    "FORMAL_API_HTTP_START_VERIFIED",
+    "FORMAL_API_WORKER_EXECUTION_VERIFIED",
+    "FORMAL_API_POLLING_VERIFIED",
+    "FORMAL_API_ITEM_QUERY_VERIFIED",
+    "FORMAL_API_SOURCE_SCOPED_IDEMPOTENCY_VERIFIED",
+    "FORMAL_API_CONCURRENT_REPLAY_VERIFIED",
+    "FORMAL_API_PARTIAL_FAILURE_VERIFIED",
+    "FORMAL_API_ALL_BLOCKED_VERIFIED",
+    "FORMAL_API_RETRYABLE_RECOVERY_VERIFIED",
+    "FORMAL_API_STALE_RECOVERY_VERIFIED",
+    "FORMAL_API_TERMINAL_RECOVERY_VERIFIED",
+    "FORMAL_API_STUDENT_DENIAL_VERIFIED",
     "FRONTEND_NOT_MIGRATED",
     "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+    "POSTGRESQL_API_E2E_NOT_VERIFIED",
     "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
     "POSTGRESQL_QUERY_NOT_VERIFIED",
     "POSTGRESQL_PROCESSING_NOT_VERIFIED",
@@ -84,6 +98,7 @@ EXPECTED_CONDITIONS = {
 def test_small_pilot_readiness_exposes_formal_job_ownership_conditions():
     conditions = set(pilot_readiness_check.default_conditions("small-pilot"))
     assert EXPECTED_CONDITIONS <= conditions
+    assert "FORMAL_API_BROWSER_SESSION_VERIFIED" not in conditions
 
 
 def test_readiness_runs_explicit_formal_job_ownership_gate():
@@ -148,9 +163,18 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_http_retry_recovery_contract.py" in source
     assert "tests/test_document_alignment_retry_exhaustion_contract.py" in source
     assert "tests/test_document_alignment_retry_crash_semantics.py" in source
+    assert "formal document alignment API end to end" in source
+    assert "tests/test_document_alignment_production_contract_convergence.py" in source
+    assert "tests/test_document_alignment_formal_api_e2e.py" in source
+    assert "tests/test_document_alignment_formal_api_idempotency.py" in source
+    assert "tests/test_document_alignment_formal_api_recovery.py" in source
+    assert "formal document alignment browser API e2e" in source
+    assert "scripts/run_formal_document_alignment_browser_e2e.py" in source
+    assert 'conditions.append("FORMAL_API_BROWSER_SESSION_VERIFIED")' in source
 
 
 def test_readiness_no_longer_reports_query_service_as_missing():
     for profile in ("local-demo", "small-pilot"):
         assert "FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED" not in pilot_readiness_check.default_conditions(profile)
         assert "FORMAL_ROUTES_NOT_IMPLEMENTED" not in pilot_readiness_check.default_conditions(profile)
+        assert "FORMAL_API_E2E_NOT_COMPLETED" not in pilot_readiness_check.default_conditions(profile)

@@ -101,7 +101,7 @@ def test_formal_and_generic_claims_exclude_the_other_job_family(app_module):
             status="queued",
             priority=1,
             created_by=1,
-            input_json='{"workflow_run_uid":"legacy-compat-formal","workflow_version":"formal-document-alignment-workflow-v1"}',
+            input_json='{"workflow_run_uid":"legacy-compat-formal","workflow_version":"formal-document-alignment-v1"}',
             result_json="{}",
             attempt_count=0,
             max_attempts=2,

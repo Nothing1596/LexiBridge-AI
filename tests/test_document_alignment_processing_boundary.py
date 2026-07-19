@@ -192,7 +192,7 @@ def test_processing_boundary_docs_freeze_contracts_state_machines_and_transactio
         "FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED",
         "FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED",
         "FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED",
-        "FORMAL_API_E2E_NOT_COMPLETED",
+        "FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED",
         "FRONTEND_NOT_MIGRATED",
         "ProcessDocumentAlignmentWorkflowCommand",
         "ProcessDocumentAlignmentWorkflowResult",
@@ -213,6 +213,7 @@ def test_processing_boundary_docs_freeze_contracts_state_machines_and_transactio
     )
     for term in required_terms:
         assert term in combined
+    assert "FORMAL_API_E2E_NOT_COMPLETED" not in combined
 
     for transition in (
         "queued -> validating",

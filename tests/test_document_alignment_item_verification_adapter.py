@@ -29,7 +29,7 @@ def _prepared_input(**overrides):
         "source_version": "1",
         "course": "Signals",
         "chapter": "Frequency",
-        "workflow_version": "formal-document-alignment-workflow-v1",
+        "workflow_version": "formal-document-alignment-v1",
         "retrieval_version": "governed-bilingual-v1",
         "provider_name": "mock-rule-v1",
         "model_identity": "mock-rule-v1:v1",

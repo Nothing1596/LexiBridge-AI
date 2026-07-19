@@ -36,7 +36,7 @@ The only accepted payload is:
 ```json
 {
   "workflow_run_uid": "...",
-  "workflow_version": "formal-document-alignment-workflow-v1"
+  "workflow_version": "formal-document-alignment-v1"
 }
 ```
 
@@ -171,15 +171,14 @@ TerminologyCard, legacy UsageRecord, or AICallLog.
   supervised production runtime.
 - no multi-host scheduler, lease heartbeat thread, metrics, alerting, or stale
   job operations dashboard exists.
-- formal query services and HTTP/OpenAPI adapters exist, but formal API browser
-  E2E and a frontend caller do not.
+- formal query services, HTTP/OpenAPI adapters, and authenticated browser API
+  E2E exist, but a formal frontend caller does not.
 - live/external providers remain disabled and real credentials are not read.
 
 Next permitted task:
 
 ```text
-Task 9C.5E establishes HTTP-neutral formal run/item query services and Task
-9C.5F adds thin routes/OpenAPI without changing worker behavior. The next slice
-is Task 9C.5G: Formal Document Alignment API End-to-End, Polling and Recovery
-Verification.
+Task 9C.5G v3 verifies the local authenticated HTTP-to-worker-to-polling path.
+The next slice is Task 9C.5H: Formal Workflow Frontend Cutover and
+Legacy-Independent Teacher Experience.
 ```

@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current implementation conclusion:
-FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED
+FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED
 
-Implementation status after Task 9C.5F.2:
+Implementation status after Task 9C.5G v3:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -26,7 +26,7 @@ Implementation status after Task 9C.5F.2:
 - `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
 - `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
 - `FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED`
-- `FORMAL_API_E2E_NOT_COMPLETED`
+- `FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
@@ -60,8 +60,11 @@ HTTP-neutral read-only run/item query services, and formal HTTP/OpenAPI routes
 are implemented. Task 9C.5F.1 aligns the server-owned deterministic provider
 selection across admission, preparation, governance, preflight, verification,
 and attach. Task 9C.5F.2 freezes a three-count processing-failure budget for
-new formal jobs and proves the HTTP Admission-to-requeue-to-resume path. Full
-formal API E2E and frontend cutover remain incomplete.
+new formal jobs and proves the HTTP Admission-to-requeue-to-resume path. Task
+9C.5G v3 proves the local SQLite formal API from authenticated HTTP admission
+through the formal worker, polling, pagination, partial/all-blocked outcomes,
+source-scoped concurrent replay, retry/crash recovery, and authenticated
+browser fetch. Frontend cutover remains incomplete.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
 Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
@@ -761,12 +764,12 @@ PostgreSQL locking, migration, and operational recovery remain unverified.
 The model, admission, formal BackgroundJob ownership, chunk-scoped item
 bootstrap, execution identities, lease-fenced per-item verification adapter,
 document processing/root finalization, formal local-pilot worker handler,
-read-only query services, and narrow formal HTTP/OpenAPI adapters are
-implemented. The next permitted slice verifies the complete API polling and
-recovery path:
+read-only query services, narrow formal HTTP/OpenAPI adapters, and local API
+polling/recovery/browser-session verification are implemented. The next
+permitted slice moves the teacher workflow off the legacy endpoint:
 
 ```text
-Task 9C.5G: Formal Document Alignment API End-to-End, Polling and Recovery Verification
+Task 9C.5H: Formal Workflow Frontend Cutover and Legacy-Independent Teacher Experience
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still
@@ -775,9 +778,9 @@ cutover, HTTP 410, and legacy path removal remain later phases.
 
 ## Pilot Limitations
 
-This ADR is not production-ready. It does not enable real providers, does not
-complete formal API browser E2E, and does not migrate frontend callers. The local worker is not
-a supervised production daemon. The formal
+This ADR is not production-ready. It does not enable real providers and does
+not migrate frontend callers. The local worker is not a supervised production
+daemon. The formal
 tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
 claim/locking and idempotency-constraint validation remain required. Provider
 success followed by persistence failure is recoverable only by deterministic

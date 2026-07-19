@@ -96,9 +96,23 @@ PROFILE_CONDITIONS = {
         "FORMAL_WORKFLOW_HTTP_BACKGROUND_JOB_HIDDEN",
         "FORMAL_WORKFLOW_OPENAPI_PRESENT",
         "FORMAL_WORKFLOW_OPENAPI_RUNTIME_PARITY_PRESENT",
-        "FORMAL_API_E2E_NOT_COMPLETED",
+        "FORMAL_PRODUCTION_DEFAULT_CONTRACT_VERIFIED",
+        "FORMAL_API_E2E_PRESENT",
+        "FORMAL_API_HTTP_START_VERIFIED",
+        "FORMAL_API_WORKER_EXECUTION_VERIFIED",
+        "FORMAL_API_POLLING_VERIFIED",
+        "FORMAL_API_ITEM_QUERY_VERIFIED",
+        "FORMAL_API_SOURCE_SCOPED_IDEMPOTENCY_VERIFIED",
+        "FORMAL_API_CONCURRENT_REPLAY_VERIFIED",
+        "FORMAL_API_PARTIAL_FAILURE_VERIFIED",
+        "FORMAL_API_ALL_BLOCKED_VERIFIED",
+        "FORMAL_API_RETRYABLE_RECOVERY_VERIFIED",
+        "FORMAL_API_STALE_RECOVERY_VERIFIED",
+        "FORMAL_API_TERMINAL_RECOVERY_VERIFIED",
+        "FORMAL_API_STUDENT_DENIAL_VERIFIED",
         "FRONTEND_NOT_MIGRATED",
         "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+        "POSTGRESQL_API_E2E_NOT_VERIFIED",
         "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
         "POSTGRESQL_QUERY_NOT_VERIFIED",
         "POSTGRESQL_WORKER_NOT_VERIFIED",
@@ -179,9 +193,23 @@ PROFILE_CONDITIONS = {
         "FORMAL_WORKFLOW_HTTP_BACKGROUND_JOB_HIDDEN",
         "FORMAL_WORKFLOW_OPENAPI_PRESENT",
         "FORMAL_WORKFLOW_OPENAPI_RUNTIME_PARITY_PRESENT",
-        "FORMAL_API_E2E_NOT_COMPLETED",
+        "FORMAL_PRODUCTION_DEFAULT_CONTRACT_VERIFIED",
+        "FORMAL_API_E2E_PRESENT",
+        "FORMAL_API_HTTP_START_VERIFIED",
+        "FORMAL_API_WORKER_EXECUTION_VERIFIED",
+        "FORMAL_API_POLLING_VERIFIED",
+        "FORMAL_API_ITEM_QUERY_VERIFIED",
+        "FORMAL_API_SOURCE_SCOPED_IDEMPOTENCY_VERIFIED",
+        "FORMAL_API_CONCURRENT_REPLAY_VERIFIED",
+        "FORMAL_API_PARTIAL_FAILURE_VERIFIED",
+        "FORMAL_API_ALL_BLOCKED_VERIFIED",
+        "FORMAL_API_RETRYABLE_RECOVERY_VERIFIED",
+        "FORMAL_API_STALE_RECOVERY_VERIFIED",
+        "FORMAL_API_TERMINAL_RECOVERY_VERIFIED",
+        "FORMAL_API_STUDENT_DENIAL_VERIFIED",
         "FRONTEND_NOT_MIGRATED",
         "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+        "POSTGRESQL_API_E2E_NOT_VERIFIED",
         "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
         "POSTGRESQL_QUERY_NOT_VERIFIED",
         "POSTGRESQL_WORKER_NOT_VERIFIED",
@@ -714,6 +742,9 @@ def main() -> int:
         restored_db = temp_root / "restored" / "restored.db"
         restored_uploads = temp_root / "restored" / "uploads"
         browser_e2e_json = temp_root / "browser-e2e-result.json"
+        formal_api_e2e_json = temp_root / "formal-api-e2e-result.json"
+        formal_recovery_json = temp_root / "formal-api-recovery-result.json"
+        formal_browser_api_json = temp_root / "formal-browser-api-result.json"
         browser_e2e_result: dict | None = None
 
         phases: list[PhaseResult] = []
@@ -966,6 +997,39 @@ print("restored database integrity ok")
             env,
             timeout=300,
         ))
+        phases.append(run_command(
+            "formal document alignment API end to end",
+            [
+                PYTHON_CMD,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_document_alignment_production_contract_convergence.py",
+                "tests/test_document_alignment_formal_api_e2e.py",
+                "tests/test_document_alignment_formal_api_polling.py",
+                "tests/test_document_alignment_formal_api_idempotency.py",
+                "tests/test_document_alignment_formal_api_permissions.py",
+                "tests/test_document_alignment_formal_api_pagination.py",
+                "tests/test_document_alignment_formal_api_partial_failure.py",
+                "tests/test_document_alignment_formal_api_recovery.py",
+                "tests/test_document_alignment_formal_api_security.py",
+            ],
+            env,
+            timeout=600,
+        ))
+        phases.append(run_command(
+            "formal document alignment API artifact",
+            [
+                PYTHON_CMD,
+                "scripts/run_formal_document_alignment_api_e2e.py",
+                "--json-output",
+                str(formal_api_e2e_json),
+                "--recovery-json-output",
+                str(formal_recovery_json),
+            ],
+            env,
+            timeout=600,
+        ))
         phases.append(run_command("critical e2e workflow", [PYTHON_CMD, "-m", "pytest", "-q", "tests/test_pilot_end_to_end.py"], env, timeout=300))
         browser_phase = run_command(
             "browser e2e",
@@ -988,6 +1052,32 @@ print("restored database integrity ok")
         if browser_phase.get("condition") and browser_phase["condition"] not in conditions:
             conditions.append(browser_phase["condition"])
             warnings.append(browser_phase["condition"])
+        formal_browser_phase = run_command(
+            "formal document alignment browser API e2e",
+            [
+                PYTHON_CMD,
+                "scripts/run_formal_document_alignment_browser_e2e.py",
+                "--json-output",
+                str(formal_browser_api_json),
+            ],
+            env,
+            timeout=600,
+            condition_returncodes={
+                E2E_ENVIRONMENT_UNAVAILABLE: (
+                    "UNAVAILABLE",
+                    "formal_browser_api_e2e_not_executed",
+                )
+            },
+        )
+        phases.append(formal_browser_phase)
+        if (
+            formal_browser_phase.get("status") == "PASS"
+            and "FORMAL_API_BROWSER_SESSION_VERIFIED" not in conditions
+        ):
+            conditions.append("FORMAL_API_BROWSER_SESSION_VERIFIED")
+        if formal_browser_phase.get("condition") and formal_browser_phase["condition"] not in conditions:
+            conditions.append(formal_browser_phase["condition"])
+            warnings.append(formal_browser_phase["condition"])
         phases.append(run_python_snippet("lightweight performance smoke", performance_smoke_code(), env, timeout=120))
         phases.append(
             run_python_snippet(

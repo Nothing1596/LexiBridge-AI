@@ -93,13 +93,14 @@ contradictions. It does not repair counts, statuses, or references. Queries use
 
 ## Limitations
 
-- Task 9C.5F now exposes these DTOs through formal HTTP routes and OpenAPI, but
-  formal API E2E and frontend polling are not complete.
+- Task 9C.5F exposes these DTOs through formal HTTP routes and OpenAPI. Task
+  9C.5G v3 verifies HTTP polling and browser-session access; frontend polling
+  is not complete.
 - SQLite query behavior is covered; PostgreSQL plans and permissions are not.
 - No admin transport diagnostics are exposed.
 - The local worker is not a supervised production runtime.
 - Production migrations, live providers, and multi-host operation remain out
   of scope.
 
-The next permitted slice is Task 9C.5G, Formal Document Alignment API
-End-to-End, Polling and Recovery Verification.
+The next permitted slice is Task 9C.5H, Formal Workflow Frontend Cutover and
+Legacy-Independent Teacher Experience.

@@ -1,10 +1,10 @@
 # Formal Document Alignment HTTP API
 
-Status: `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
+Status: `FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED`
 
 Scope: SQLite, single-node, deterministic-provider small pilot. This document
-does not claim frontend cutover, formal API browser E2E, PostgreSQL validation,
-live-provider readiness, or production deployment.
+does not claim frontend cutover, PostgreSQL validation, live-provider
+readiness, distributed-worker behavior, or production deployment.
 
 ## Endpoints
 
@@ -103,10 +103,11 @@ flush, repair progress, run a worker, or invoke a provider.
 and safe errors. Parsed-YAML tests compare these operations to Flask runtime
 registration and formal constants.
 
-Task 9C.5G must still validate real HTTP start, worker execution, polling,
-partial failure, retry/recovery, idempotent replay, terminal consistency, and
-student denial as one formal API E2E workflow. The frontend continues to use
-the contained legacy endpoint until a later cutover task.
+Task 9C.5G v3 validates real HTTP start, formal worker execution, polling,
+pagination, source-scoped and concurrent replay, partial/all-blocked outcomes,
+retry/crash/terminal recovery, permissions, and authenticated same-origin
+browser fetch. The evidence is local SQLite and single-node only. The frontend
+continues to use the contained legacy endpoint until a later cutover task.
 
 ## Transport Retry Policy
 
