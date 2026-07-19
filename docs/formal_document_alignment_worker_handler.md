@@ -156,5 +156,7 @@ TerminologyCard, legacy UsageRecord, or AICallLog.
 Next permitted task:
 
 ```text
-Task 9C.5E: Formal Document Alignment Query Services
+Task 9C.5E establishes the HTTP-neutral formal run/item query services without
+changing worker behavior. The next slice is Task 9C.5F: Formal Document
+Alignment Routes and OpenAPI Contract.
 ```

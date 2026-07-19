@@ -8,10 +8,10 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
-Current processing-planning conclusion:
-FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED
+Current implementation conclusion:
+FORMAL_DOCUMENT_ALIGNMENT_QUERY_SERVICES_ESTABLISHED
 
-Implementation status after Task 9C.5D:
+Implementation status after Task 9C.5E:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -22,8 +22,9 @@ Implementation status after Task 9C.5D:
 - `FORMAL_ITEM_VERIFICATION_TRANSACTION_ADAPTER_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_PROCESSING_ORCHESTRATOR_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_WORKER_HANDLER_ESTABLISHED`
-- `FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED`
+- `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
 - `FORMAL_ROUTES_NOT_IMPLEMENTED`
+- `FORMAL_OPENAPI_NOT_IMPLEMENTED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
@@ -52,8 +53,9 @@ execution path. Task 9C.4X establishes the first application slice:
 workflow admission and start. That service validates a governed source through
 explicit loaders/decisions, resolves idempotency, creates the workflow root,
 creates a transport-only BackgroundJob, records `document_alignment_requested`,
-and commits once. Processing orchestration and the local-pilot worker are now
-implemented; query service, routes, OpenAPI, and frontend cutover are not.
+and commits once. Processing orchestration, the local-pilot worker, and
+HTTP-neutral read-only run/item query services are now implemented; routes,
+OpenAPI, and frontend cutover are not.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
 Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
@@ -691,9 +693,15 @@ rotation. Claim/reclaim advance only `execution_attempt`; requeue or permanent
 failure consumes `attempt_count` once. Completion requires a matching terminal
 root, and the generic legacy worker continues to exclude formal jobs.
 
-This establishes an executable local-pilot admission-to-worker path, not an
-exposed workflow. There is no status/items query service, HTTP route, OpenAPI
-operation, frontend caller, or supervised production runtime. Deterministic provider
+Task 9C.5E adds permission-gated run summaries and database-paginated item
+summaries. Admins, requesters, and authorized course teachers may read them;
+students, anonymous users, and unrelated teachers cannot. Transport ownership,
+raw content, and internal execution identities are excluded, and queries do
+not write or repair state.
+
+This establishes an executable and internally queryable local-pilot path, not
+an exposed workflow. There is no HTTP route, OpenAPI operation, frontend
+caller, or supervised production runtime. Deterministic provider
 replay remains at-least-once after the existing provider-started crash point.
 The concurrent duplicate-invocation tests use SQLite and independent sessions;
 PostgreSQL locking, migration, and operational recovery remain unverified.
@@ -718,11 +726,11 @@ PostgreSQL locking, migration, and operational recovery remain unverified.
 The model, admission, formal BackgroundJob ownership, chunk-scoped item
 bootstrap, execution identities, lease-fenced per-item verification adapter,
 document processing/root finalization, and formal local-pilot worker handler
-are implemented. The next permitted slice establishes read-only run/item query
-services before any HTTP route or frontend cutover:
+and read-only query services are implemented. The next permitted slice exposes
+the already-tested admission/query boundary through narrow HTTP adapters:
 
 ```text
-Task 9C.5E: Formal Document Alignment Query Services
+Task 9C.5F: Formal Document Alignment Routes and OpenAPI Contract
 ```
 
 The legacy endpoint remains active only as temporary compatibility and still

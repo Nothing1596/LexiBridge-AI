@@ -32,9 +32,17 @@ EXPECTED_CONDITIONS = {
     "FORMAL_WORKER_STALE_RECOVERY_PRESENT",
     "FORMAL_ROOT_JOB_TERMINAL_CONSISTENCY_PRESENT",
     "FORMAL_JOB_NO_LEGACY_DISPATCH_PRESENT",
-    "FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED",
+    "FORMAL_WORKFLOW_RUN_QUERY_SERVICE_PRESENT",
+    "FORMAL_WORKFLOW_ITEM_QUERY_SERVICE_PRESENT",
+    "FORMAL_WORKFLOW_QUERY_PERMISSION_ENFORCED",
+    "FORMAL_WORKFLOW_QUERY_STUDENT_DENIED",
+    "FORMAL_WORKFLOW_QUERY_BACKGROUND_JOB_HIDDEN",
+    "FORMAL_WORKFLOW_QUERY_SAFE_ERROR_PRESENT",
+    "FORMAL_WORKFLOW_QUERY_PAGINATION_PRESENT",
+    "FORMAL_WORKFLOW_QUERY_NO_WRITE_PRESENT",
     "FORMAL_ROUTES_NOT_IMPLEMENTED",
     "FRONTEND_NOT_MIGRATED",
+    "POSTGRESQL_QUERY_NOT_VERIFIED",
     "POSTGRESQL_PROCESSING_NOT_VERIFIED",
     "POSTGRESQL_LEASE_SEMANTICS_NOT_VERIFIED",
     "POSTGRESQL_WORKER_NOT_VERIFIED",
@@ -89,3 +97,15 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_worker_concurrency.py" in source
     assert "tests/test_document_alignment_worker_legacy_compatibility.py" in source
     assert "tests/test_document_alignment_worker_security.py" in source
+    assert "formal document alignment query services" in source
+    assert "tests/test_document_alignment_workflow_query_permissions.py" in source
+    assert "tests/test_document_alignment_workflow_run_query.py" in source
+    assert "tests/test_document_alignment_workflow_item_query.py" in source
+    assert "tests/test_document_alignment_workflow_query_integration.py" in source
+    assert "tests/test_document_alignment_workflow_query_performance.py" in source
+    assert "tests/test_document_alignment_workflow_query_security.py" in source
+
+
+def test_readiness_no_longer_reports_query_service_as_missing():
+    for profile in ("local-demo", "small-pilot"):
+        assert "FORMAL_QUERY_SERVICE_NOT_IMPLEMENTED" not in pilot_readiness_check.default_conditions(profile)
