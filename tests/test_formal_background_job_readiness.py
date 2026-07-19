@@ -39,6 +39,12 @@ EXPECTED_CONDITIONS = {
     "FORMAL_WORKER_STALE_RECOVERY_PRESENT",
     "FORMAL_ROOT_JOB_TERMINAL_CONSISTENCY_PRESENT",
     "FORMAL_JOB_NO_LEGACY_DISPATCH_PRESENT",
+    "FORMAL_WORKFLOW_RETRY_BUDGET_POLICY_PRESENT",
+    "FORMAL_ADMISSION_MAX_ATTEMPTS_FROZEN",
+    "FORMAL_HTTP_RETRYABLE_REQUEUE_VERIFIED",
+    "FORMAL_RETRY_NEXT_CLAIM_RECOVERY_VERIFIED",
+    "FORMAL_RETRY_EXHAUSTION_ORDER_VERIFIED",
+    "FORMAL_STALE_RECLAIM_DOES_NOT_CONSUM_RETRY_BUDGET",
     "FORMAL_WORKFLOW_RUN_QUERY_SERVICE_PRESENT",
     "FORMAL_WORKFLOW_ITEM_QUERY_SERVICE_PRESENT",
     "FORMAL_WORKFLOW_QUERY_PERMISSION_ENFORCED",
@@ -136,6 +142,12 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "tests/test_document_alignment_admission_provider_selection.py" in source
     assert "tests/test_document_alignment_provider_preflight_contract.py" in source
     assert "tests/test_document_alignment_http_default_provider_flow.py" in source
+    assert "formal document alignment retry budget" in source
+    assert "tests/test_formal_document_alignment_retry_budget_contract.py" in source
+    assert "tests/test_document_alignment_admission_retry_budget.py" in source
+    assert "tests/test_document_alignment_http_retry_recovery_contract.py" in source
+    assert "tests/test_document_alignment_retry_exhaustion_contract.py" in source
+    assert "tests/test_document_alignment_retry_crash_semantics.py" in source
 
 
 def test_readiness_no_longer_reports_query_service_as_missing():

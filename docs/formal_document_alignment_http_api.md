@@ -107,3 +107,15 @@ Task 9C.5G must still validate real HTTP start, worker execution, polling,
 partial failure, retry/recovery, idempotent replay, terminal consistency, and
 student denial as one formal API E2E workflow. The frontend continues to use
 the contained legacy endpoint until a later cutover task.
+
+## Transport Retry Policy
+
+The POST body remains limited to `source_uid`. Clients cannot choose or inspect
+`max_attempts`, `attempt_count`, `execution_attempt`, worker identity, or lease
+state. Admission freezes new formal V1 jobs at three counted
+processing-failure outcomes, allowing at most two successful requeues. Idempotent replay
+reuses the original job and never resets its stored policy or counters.
+Historical jobs keep their creation-time value. Pre-outcome crash/reclaim
+generations are not counted and have no separate V1 persisted cap. This local
+policy does not make provider execution exactly-once and remains unverified on
+PostgreSQL and distributed workers.

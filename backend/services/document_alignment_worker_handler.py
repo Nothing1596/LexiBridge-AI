@@ -20,6 +20,7 @@ from services.document_alignment_processing_orchestrator import (
 )
 from services.document_alignment_workflow_contract import (
     FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
+    FORMAL_DOCUMENT_ALIGNMENT_MAX_ATTEMPTS_V1,
     ROOT_STAGE_TERMINAL,
     ROOT_STATUS_BLOCKED,
     ROOT_STATUS_COMPLETED_WITH_WARNINGS,
@@ -48,6 +49,7 @@ ERROR_PAYLOAD_INVALID = "FORMAL_DOCUMENT_JOB_PAYLOAD_INVALID"
 ERROR_JOB_MISMATCH = "DOCUMENT_ALIGNMENT_JOB_MISMATCH"
 ERROR_WORKFLOW_VERSION_MISMATCH = "DOCUMENT_ALIGNMENT_WORKFLOW_VERSION_MISMATCH"
 ERROR_JOB_FINALIZATION_FAILED = "DOCUMENT_ALIGNMENT_JOB_FINALIZATION_FAILED"
+ERROR_PROCESSING_OUTCOME_INVALID = "DOCUMENT_ALIGNMENT_PROCESSING_OUTCOME_INVALID"
 ERROR_INTERNAL_WORKER = "DOCUMENT_ALIGNMENT_INTERNAL_WORKER_FAILED"
 
 _TERMINAL_ROOT_STATUSES = frozenset({
@@ -121,7 +123,7 @@ class FormalDocumentAlignmentJobSnapshot:
     status: str
     input_payload: Any = field(repr=False)
     attempt_count: int = 0
-    max_attempts: int = 1
+    max_attempts: int = FORMAL_DOCUMENT_ALIGNMENT_MAX_ATTEMPTS_V1
 
 
 @dataclass(frozen=True)
@@ -377,9 +379,7 @@ def run_claimed_formal_document_alignment_job(
             orchestrator_outcome=processing.outcome,
             completed=True,
         )
-    if getattr(processing, "outcome", "") in _RETRYABLE_ORCHESTRATOR_OUTCOMES or bool(
-        getattr(processing, "retryable", False)
-    ):
+    if getattr(processing, "outcome", "") in _RETRYABLE_ORCHESTRATOR_OUTCOMES:
         code = str(getattr(processing, "error_code", "") or "DOCUMENT_ALIGNMENT_PROCESSING_INTERRUPTED")
         message = str(getattr(processing, "error_message", "") or "Formal processing was interrupted safely.")
         retry_exhausted = int(job.attempt_count or 0) + 1 >= max(1, int(job.max_attempts or 1))
@@ -456,15 +456,53 @@ def run_claimed_formal_document_alignment_job(
             error_code=code,
             error_message=message,
         )
+    invalid_message = "Formal workflow returned an unsupported processing outcome."
+    finalized = dependencies.processing.finalize_failure(
+        command,
+        ERROR_PROCESSING_OUTCOME_INVALID,
+        invalid_message,
+    )
+    finalized_run = dependencies.load_run(payload.workflow_run_uid)
+    if (
+        getattr(finalized, "outcome", "") not in {ORCHESTRATOR_OUTCOME_FAILED, OUTCOME_ALREADY_TERMINAL}
+        or finalized_run is None
+        or finalized_run.status != ROOT_STATUS_FAILED
+        or finalized_run.stage != ROOT_STAGE_TERMINAL
+    ):
+        return _result(
+            lease,
+            OUTCOME_PERSISTENCE_ERROR,
+            workflow_run_uid=payload.workflow_run_uid,
+            job_status=job.status,
+            run_status=finalized_run.status if finalized_run else "",
+            run_stage=finalized_run.stage if finalized_run else "",
+            orchestrator_outcome=str(getattr(processing, "outcome", "") or ""),
+            retryable=True,
+            error_code=ERROR_JOB_FINALIZATION_FAILED,
+            error_message="Unsupported processing outcome could not safely finalize the workflow run.",
+        )
+    failed = dependencies.ownership.fail(
+        lease,
+        ERROR_PROCESSING_OUTCOME_INVALID,
+        invalid_message,
+    )
+    ownership_failure = _ownership_result(
+        lease,
+        failed,
+        workflow_run_uid=payload.workflow_run_uid,
+        orchestrator_outcome=str(getattr(processing, "outcome", "") or ""),
+    )
+    if ownership_failure is not None:
+        return ownership_failure
     return _result(
         lease,
-        OUTCOME_PERSISTENCE_ERROR,
+        OUTCOME_FAILED,
         workflow_run_uid=payload.workflow_run_uid,
-        job_status=job.status,
-        run_status=current_run.status if current_run else "",
-        run_stage=current_run.stage if current_run else "",
+        job_status="failed",
+        run_status=finalized_run.status,
+        run_stage=finalized_run.stage,
         orchestrator_outcome=str(getattr(processing, "outcome", "") or ""),
-        retryable=True,
-        error_code=ERROR_JOB_FINALIZATION_FAILED,
-        error_message="Formal workflow result could not be mapped safely.",
+        failed=True,
+        error_code=ERROR_PROCESSING_OUTCOME_INVALID,
+        error_message=invalid_message,
     )

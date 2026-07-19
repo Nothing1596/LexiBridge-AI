@@ -14,6 +14,7 @@ Status:
 - `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
 - `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
+- `FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED`
 - `FORMAL_API_E2E_NOT_COMPLETED`
 - `FRONTEND_NOT_MIGRATED`
 - `LEGACY_REPLACEMENT_NOT_IMPLEMENTED`
@@ -21,9 +22,9 @@ Status:
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
-Task: 9C.5F.1
-Implementation update: server-owned provider selection is frozen at admission and aligned with preparation, governance, preflight, verification, and attach; full formal API E2E/frontend remain absent
-Baseline: `672a0c79f3cb6d7b38535012fe5b6985cde4b3e5`
+Task: 9C.5F.2
+Implementation update: formal retry budget is frozen at Admission and real HTTP-created jobs can requeue and resume; full formal API E2E/frontend remain absent
+Baseline: `1648f71e5d6973fda65262a100d7730648e420fa`
 Workflow: `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`
 Canonical input: `GOVERNED_KNOWLEDGE_SOURCE`
 Execution model: `ASYNC_JOB_ORCHESTRATION`
@@ -1231,10 +1232,27 @@ work.
 
 ### Retry, Resume, And Repeated Execution
 
-Job retry is attempt-scoped and capped by `max_attempts` (current default 3).
+New formal jobs freeze `max_attempts=3`, meaning three counted
+processing-failure outcomes and at most two successful requeues. The
+authoritative constants are `FORMAL_DOCUMENT_ALIGNMENT_MAX_ATTEMPTS_V1` and
+`FORMAL_DOCUMENT_ALIGNMENT_MAX_REQUEUES_V1`.
 V1 exposes no item or root retry API. Generic cancel/retry endpoints must not
 mutate a formal job until the claim task defines formal cancellation and retry
 rules.
+
+`execution_attempt` identifies lease ownership generations and increments on
+queued/retrying claim or stale-running reclaim. Heartbeat and requeue do not
+change it. `attempt_count` starts at zero; claim, heartbeat, stale reclaim, and
+completion do not consume it. Requeue consumes one count, and
+retry-exhausted/permanent failure consumes the final count. Historical jobs
+retain their stored budget; Admission replay never overwrites policy or
+counters.
+
+If a claim or stale reclaim crashes or loses ownership before returning a typed
+processing outcome, it does not consume `attempt_count`. Therefore
+`execution_attempt` may exceed `max_attempts`, and V1 does not persist a
+separate crash/reclaim-generation cap. This is an explicit single-node pilot
+limitation, not a bounded total-execution guarantee.
 
 - a `needs_review item` is terminal and is never reprocessed;
 - a `blocked non-retryable item` is terminal and is never reprocessed;
@@ -1626,6 +1644,13 @@ root failure finalizer, then fails the job. A reclaimed attempt recognizes a
 root already failed by retry exhaustion and completes the pending job failure
 rather than incorrectly marking the transport completed.
 
+The worker requeue allowlist is outcome-based: only
+`retryable_interruption` and `persistence_error` qualify. Ownership loss,
+lease expiry, invalid state, terminal state, business blocks, and unknown
+outcomes cannot become requeueable through a standalone boolean flag. Unknown
+outcomes instead follow the permanent fail-closed path, with Root finalization
+persisted before BackgroundJob failure.
+
 The local worker script alternates first opportunity between formal and legacy
 dispatch while processing at most one job per iteration. This is local pilot
 fairness, not a durable scheduler or production daemon. Formal/legacy
@@ -1633,4 +1658,4 @@ dispatch isolation, approved-card immutability, no dual write, no network,
 ten dispatcher claim races, and crash/requeue recovery are covered by worker
 tests. PostgreSQL worker semantics remain unverified.
 
-Next permitted slice: `Task 9C.5E: Formal Document Alignment Query Services`.
+Next permitted slice: `Task 9C.5G v3: Formal Document Alignment API End-to-End, Polling and Recovery Verification`.

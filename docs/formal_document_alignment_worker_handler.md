@@ -108,6 +108,27 @@ and never mutates BackgroundJob.
 | after requeue | next dispatcher claim advances only `execution_attempt` |
 | after terminal job | terminal immutability prevents reclaim |
 
+## Retry Budget
+
+Admission freezes formal V1 jobs with `max_attempts=3`: three counted
+processing-failure outcomes and two possible requeues. `execution_attempt`
+advances on claim and stale reclaim only. `attempt_count` advances once on a
+successful requeue and once on permanent or retry-exhausted failure; claim,
+heartbeat, stale reclaim, ownership loss, and completion do not consume it.
+
+A worker crash or ownership loss before a typed processing outcome therefore
+does not consume the failure budget. `execution_attempt` can exceed
+`max_attempts`, and V1 has no separate persisted cap for repeated stale
+reclaims. This contract protects ownership and counts confirmed processing
+failures; it does not guarantee a maximum number of process invocations.
+
+Only `retryable_interruption` and `persistence_error` orchestrator outcomes may
+enter requeue mapping. The handler does not trust an isolated `retryable=True`
+flag. Unknown outcomes are permanent fail-closed results: the handler finalizes
+the Root before failing the BackgroundJob. On the third retryable failure it
+uses the same Root-first ordering. Existing jobs keep their stored
+`max_attempts`; no runtime or schema backfill changes historical behavior.
+
 Provider work remains at-least-once. Only deterministic/mock/fake/replay/local
 providers are allowed by the existing item adapter; external/live/custom paths
 remain fail-closed. A crash after `provider_started` can replay deterministic

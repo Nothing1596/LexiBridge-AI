@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current implementation conclusion:
-FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED
+FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED
 
-Implementation status after Task 9C.5F.1:
+Implementation status after Task 9C.5F.2:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -25,6 +25,7 @@ Implementation status after Task 9C.5F.1:
 - `FORMAL_WORKFLOW_QUERY_SERVICES_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_ROUTES_AND_OPENAPI_ESTABLISHED`
 - `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
+- `FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED`
 - `FORMAL_API_E2E_NOT_COMPLETED`
 - `FRONTEND_NOT_MIGRATED`
 - `PILOT_CREATE_ALL_ONLY`
@@ -58,7 +59,9 @@ and commits once. Processing orchestration, the local-pilot worker,
 HTTP-neutral read-only run/item query services, and formal HTTP/OpenAPI routes
 are implemented. Task 9C.5F.1 aligns the server-owned deterministic provider
 selection across admission, preparation, governance, preflight, verification,
-and attach. Full formal API E2E and frontend cutover remain incomplete.
+and attach. Task 9C.5F.2 freezes a three-count processing-failure budget for
+new formal jobs and proves the HTTP Admission-to-requeue-to-resume path. Full
+formal API E2E and frontend cutover remain incomplete.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
 Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
@@ -430,6 +433,30 @@ a persistence-plan boundary that prevents uncontrolled nested transactions.
 
 Worker infrastructure retry covers crash, transient database errors, and
 temporary infrastructure failures.
+
+Formal document-alignment V1 freezes `max_attempts=3` when Admission creates a
+BackgroundJob. This means at most three counted processing-failure outcomes
+and two requeues. `execution_attempt` is the lease ownership generation and
+advances on claim or stale reclaim. `attempt_count` is the consumed business
+failure budget: claim, heartbeat, and stale reclaim do not change it; requeue
+increments it once; retry-exhausted failure consumes the final count. Existing
+jobs retain their creation-time `max_attempts`, including historical value
+`1`; no backfill is performed.
+
+A claim or stale reclaim that loses ownership or crashes before producing a
+typed processing outcome does not consume `attempt_count`. Consequently,
+`execution_attempt` may exceed `max_attempts`; V1 has no separate persisted cap
+on repeated pre-outcome crash/reclaim generations. The retry budget is not a
+bound on every process invocation. A supervised production runtime must add an
+operational crash-loop policy and alerting before this can be treated as a
+bounded distributed execution guarantee.
+
+Only typed outcomes `retryable_interruption` and `persistence_error` may
+requeue. A bare `retryable=True` cannot override invalid state, ownership loss,
+terminal state, or a business block. Unknown processing outcomes fail closed:
+the handler finalizes the Root as failed before failing the still lease-owned
+BackgroundJob. Exhaustion uses the same Root-first ordering, including count
+recomputation and idempotent failure audit.
 
 Item retry covers retryable provider or retrieval failures only if the item key
 prevents duplicate draft or verification creation. Non-retryable blocked states

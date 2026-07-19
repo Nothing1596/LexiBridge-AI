@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 
 from services.document_alignment_workflow_contract import (
     FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
+    FORMAL_DOCUMENT_ALIGNMENT_MAX_ATTEMPTS_V1,
     FORMAL_DOCUMENT_ALIGNMENT_WORKFLOW_VERSION,
     ROOT_STAGE_QUEUED,
     ROOT_STATUS_QUEUED,
@@ -342,7 +343,7 @@ def _build_background_job(dependencies, command, source_snapshot, run):
         error_code="",
         error_message="",
         attempt_count=0,
-        max_attempts=1,
+        max_attempts=FORMAL_DOCUMENT_ALIGNMENT_MAX_ATTEMPTS_V1,
         created_at=now,
         updated_at=now,
     )
