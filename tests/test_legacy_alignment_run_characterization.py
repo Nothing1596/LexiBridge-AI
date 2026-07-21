@@ -213,8 +213,11 @@ def test_legacy_alignment_run_route_registration_frontend_and_openapi(app_module
     assert "LEGACY_ALIGNMENT_RUN_DEPRECATED" in description
     assert "not HTTP 410" in description
     frontend = FRONTEND.read_text(encoding="utf-8")
-    assert 'api("/api/alignment/run"' in frontend
-    assert "runAlignmentForDocument" in frontend
+    formal_module = (ROOT / "frontend" / "js" / "formal-workflow.js").read_text(encoding="utf-8")
+    assert 'api("/api/alignment/run"' not in frontend
+    assert "startFormalAlignmentForDocument" in frontend
+    assert "/api/document-alignment-runs" in formal_module
+    assert "/api/alignment/run" not in formal_module
 
 
 def test_legacy_alignment_run_deprecation_policy_matches_current_compatibility_state(app_module):
@@ -239,8 +242,8 @@ def test_legacy_alignment_run_deprecation_policy_matches_current_compatibility_s
 
     assert routes[("/api/alignment/run", "POST")] == ["run_alignment"]
     assert "LEGACY_ALIGNMENT_RUN_DEPRECATED" not in app_source
-    assert "/api/alignment/run" in frontend
-    assert "runAlignmentForDocument" in frontend
+    assert 'api("/api/alignment/run"' not in frontend
+    assert "startFormalAlignmentForDocument" in frontend
     assert "/api/alignment/run" in boundary
     assert "Frontend Migration Checklist" in boundary
     assert "Task 9C.4U" in adr

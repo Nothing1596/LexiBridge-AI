@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LexiBridge AI | Bilingual Course Knowledge Alignment</title>
   <script src="./js/config.js"></script>
+  <script src="./js/formal-workflow.js"></script>
   <style>
     :root {
       --navy: #07172c;
@@ -222,6 +223,25 @@
       border-radius: var(--radius);
       padding: 16px;
     }
+
+    .formal-alignment-panel {
+      margin-top: 18px;
+      padding: 18px 0 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .formal-alignment-items {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .formal-alignment-item {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .formal-alignment-item:last-child { border-bottom: 0; }
 
     .card h3, .card h4 { margin: 0 0 8px; }
     .stack { display: grid; gap: 14px; }
@@ -517,6 +537,17 @@
       pendingVerification: null,
       pendingReset: null,
       systemStatus: null,
+      formalAlignment: {
+        mode: "idle",
+        run: null,
+        items: [],
+        pagination: null,
+        error: null,
+        source_uid: "",
+        submitting: false,
+        polling: false,
+        loading_items: false
+      },
       cache: {
         courses: [],
         myCourses: [],
@@ -674,6 +705,7 @@
       let payload = {};
       try { payload = await response.json(); } catch (error) { payload = { status: "error", message: response.statusText }; }
       if (response.status === 401) {
+        formalWorkflow.clear();
         localStorage.removeItem("lexibridge_token");
         state.token = "";
         state.user = null;
@@ -687,6 +719,24 @@
       }
       return payload;
     }
+
+    const formalWorkflow = window.LexiFormalWorkflow.createController({
+      baseUrl: API_BASE,
+      fetchImpl: (...args) => fetch(...args),
+      storage: window.sessionStorage,
+      cryptoApi: window.crypto,
+      getToken: () => state.token,
+      onChange: snapshot => {
+        state.formalAlignment = snapshot;
+        if (document.getElementById("app")) render();
+      },
+      onAuthFailure: () => {
+        localStorage.removeItem("lexibridge_token");
+        state.token = "";
+        state.user = null;
+        state.page = "login";
+      }
+    });
 
     async function loadMe() {
       if (!state.token) return null;
@@ -1158,8 +1208,85 @@
 	        <div class="notice">${bilingual("自动专业知识库抓取需要生产级受控来源 connector：例如开放许可百科、公开课程资料 API、学校/图书馆/出版社授权接口。未配置时，对齐结果必须标记为证据不足或待审核。", "Automatic domain KB acquisition requires production-grade governed source connectors, such as open-license encyclopedias, public course APIs, or authorized school/library/publisher connectors. If not configured, alignment results must remain needs-evidence or review-needed.")}</div>
 	        <div class="notice">${bilingual("PDF、PPTX、DOCX、TXT 会做基础文本解析；图片或扫描型 PDF 会调用配置的 OCR Provider。OCR 不可用时不会生成伪造文本或术语卡片。", "PDF, PPTX, DOCX, and TXT use native text parsing; images or scanned PDFs call the configured OCR Provider. If OCR is unavailable, the system does not fabricate text or terminology cards.")}</div>
 	        <div class="stack">${renderDocuments(state.cache.documents)}</div>
+	        ${!isPersonal ? renderFormalAlignmentPanel() : ""}
 	      `);
 	    }
+
+    function governedSourceForDocument(documentId) {
+      return (state.cache.sources || []).find(
+        source => Number(source.document_id) === Number(documentId) && Boolean(source.source_uid)
+      ) || null;
+    }
+
+    function formalStatusLabel(status, mode) {
+      const labels = {
+        queued: bilingual("已排队", "Queued"),
+        validating: bilingual("正在校验", "Validating"),
+        processing: bilingual("处理中", "Processing"),
+        ready_for_review: bilingual("可供审核", "Ready for review"),
+        completed_with_warnings: bilingual("完成但有警告", "Completed with warnings"),
+        blocked: bilingual("业务条件阻断", "Blocked"),
+        failed: bilingual("处理失败", "Failed"),
+        connection_error: bilingual("连接中断", "Connection interrupted"),
+        pending_submit: bilingual("等待继续提交", "Waiting to continue submission"),
+        source_changed: bilingual("资料状态已变化", "Source changed"),
+        request_blocked: bilingual("请求被业务规则阻止", "Request blocked")
+      };
+      return labels[status] || labels[mode] || bilingual("尚未开始", "Not started");
+    }
+
+    function renderFormalAlignmentItem(item) {
+      const risks = Array.isArray(item.risk_labels) ? item.risk_labels : [];
+      const confidence = item.confidence_summary
+        ? escapeHtml(item.confidence_summary)
+        : item.confidence_score === null || item.confidence_score === undefined
+          ? bilingual("未提供", "Not provided")
+          : escapeHtml(item.confidence_score);
+      return `
+        <article class="formal-alignment-item">
+          <div class="between">
+            <strong>${escapeHtml(item.candidate_term || item.normalized_term || "-")}</strong>
+            ${statusBadge(item.status || "unknown", "job")}
+          </div>
+          ${item.normalized_term ? `<p class="muted">${bilingual("规范术语", "Normalized term")}: ${escapeHtml(item.normalized_term)}</p>` : ""}
+          <p class="muted">${bilingual("阶段", "Stage")}: ${escapeHtml(item.stage || "-")} · ${bilingual("来源片段", "Source chunks")}: ${Number(item.source_chunk_count || 0)} · ${bilingual("置信度", "Confidence")}: ${confidence}</p>
+          ${risks.length ? `<p>${risks.map(risk => `<span class="badge warn">${escapeHtml(risk)}</span>`).join(" ")}</p>` : ""}
+          ${item.recommendation ? `<p>${escapeHtml(item.recommendation)}</p>` : ""}
+          ${item.safe_error_message ? `<div class="notice">${escapeHtml(item.safe_error_message)}</div>` : ""}
+        </article>
+      `;
+    }
+
+    function renderFormalAlignmentPanel() {
+      const active = state.formalAlignment || {};
+      const run = active.run || {};
+      const items = Array.isArray(active.items) ? active.items : [];
+      const pagination = active.pagination || {};
+      const status = run.status || active.last_status || active.mode;
+      const hasActiveRun = Boolean(active.source_uid || active.run_uid || active.mode !== "idle");
+      const progress = Number(run.progress_percent || 0);
+      const error = active.error || {};
+      const canResume = ["connection_error", "pending_submit"].includes(active.mode);
+      return `
+        <section class="formal-alignment-panel" aria-live="polite">
+          <div class="between">
+            <div>
+              <h3>${bilingual("正式术语对齐", "Formal Terminology Alignment")}</h3>
+              <div data-testid="formal-alignment-status">${formalStatusLabel(status, active.mode)}</div>
+            </div>
+            ${canResume ? `<button type="button" class="secondary small" data-testid="formal-alignment-resume" onclick="Lexi.resumeFormalAlignment()">${bilingual("继续查询", "Continue")}</button>` : `<button type="button" class="secondary small" data-testid="formal-alignment-resume" disabled>${bilingual("继续查询", "Continue")}</button>`}
+          </div>
+          <div data-testid="formal-alignment-progress" class="muted">${hasActiveRun ? `${bilingual("业务进度", "Business progress")}: ${Math.max(0, Math.min(100, progress))}% · ${bilingual("总项数", "Total items")}: ${Number(run.total_items || 0)} · ${bilingual("待审核", "Ready")}: ${Number(run.ready_for_review_items || 0)} · ${bilingual("阻断", "Blocked")}: ${Number(run.blocked_items || 0)} · ${bilingual("失败", "Failed")}: ${Number(run.failed_items || 0)} · ${bilingual("警告", "Warnings")}: ${Number(run.warning_count || 0)}` : bilingual("选择已完成治理入库的课程资料开始。", "Choose governed course material to begin.")}</div>
+          <div data-testid="formal-alignment-error">${error.message ? `<div class="notice error">${active.mode === "source_changed" ? bilingual("资料状态已变化，请重新开始处理。", "The source changed; start again explicitly.") : escapeHtml(error.message)}${error.request_id ? ` · request_id=${escapeHtml(error.request_id)}` : ""}</div>` : ""}</div>
+          <div data-testid="formal-alignment-items" class="formal-alignment-items">${items.map(renderFormalAlignmentItem).join("")}</div>
+          <div class="between">
+            <button type="button" class="secondary small" data-testid="formal-alignment-prev" onclick="Lexi.loadFormalAlignmentItems(${Math.max(1, Number(pagination.page || 1) - 1)})" ${!pagination.has_previous || active.loading_items ? "disabled" : ""}>${bilingual("上一页", "Previous")}</button>
+            <span class="muted">${bilingual("第", "Page")} ${Number(pagination.page || 1)} / ${Number(pagination.total_pages || 0)} · ${bilingual("共", "Total")} ${Number(pagination.total_items || 0)}</span>
+            <button type="button" class="secondary small" data-testid="formal-alignment-next" onclick="Lexi.loadFormalAlignmentItems(${Number(pagination.page || 1) + 1})" ${!pagination.has_next || active.loading_items ? "disabled" : ""}>${bilingual("下一页", "Next")}</button>
+          </div>
+        </section>
+      `;
+    }
 
     function renderDocuments(documents) {
 	      if (!documents.length) return `<p class="muted">${bilingual("暂无文档。", "No documents loaded.")}</p>`;
@@ -1173,7 +1300,7 @@
 	          ${job ? `<p>${statusBadge(job.status, "job")} <span class="badge">Job #${job.id}</span> <span class="badge">${bilingual(`进度 ${job.progress_percent || 0}%`, `Progress ${job.progress_percent || 0}%`)}</span></p>` : ""}
 	          ${doc.ocr_error ? `<div class="notice error">${escapeHtml(doc.ocr_error)}</div>` : ""}
 	          ${(doc.formula_status && !["ok", "not_required"].includes(doc.formula_status)) ? `<div class="notice">${bilingual("检测到公式区域，但当前公式 OCR 未完全可用。", "Formula regions were detected, but Formula OCR is not fully available.")}</div>` : ""}
-	          ${["teacher", "admin"].includes(state.user.role) && doc.scope_type === "course" ? `<div class="row"><button class="small secondary" onclick="Lexi.runAlignmentForDocument(${doc.id}, ${doc.course_id || "null"}, '${doc.scope_type}')">${bilingual("触发术语对齐", "Run Alignment")}</button></div>` : ""}
+	          ${["teacher", "admin"].includes(state.user.role) && doc.scope_type === "course" ? `<div class="row"><button type="button" class="small secondary" data-testid="formal-alignment-start" data-document-id="${Number(doc.id)}" onclick="Lexi.startFormalAlignmentForDocument(${Number(doc.id)})" ${state.formalAlignment.submitting || state.formalAlignment.polling ? "disabled" : ""}>${bilingual("开始正式术语对齐", "Start Formal Alignment")}</button></div>` : ""}
 	        </div>
       `}).join("");
     }
@@ -2966,6 +3093,8 @@
         }
       },
       async logout() {
+        formalWorkflow.cancel();
+        formalWorkflow.clear();
         try { await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) }); } catch (error) {}
         state.token = "";
         state.user = null;
@@ -3090,27 +3219,34 @@
           setMessage(`${error.message} OCR：${doc.ocr_status || "not_required"}；公式 OCR：${formulaStatus}；公式块：${formulaCount}${warnings ? `；警告：${warnings}` : ""} / Upload failed. OCR: ${doc.ocr_status || "not_required"}; Formula OCR: ${formulaStatus}; Formula blocks: ${formulaCount}${warnings ? `; Warnings: ${warnings}` : ""}`, "notice error");
         }
       },
-      async runAlignmentForDocument(documentId, courseId, scopeType) {
-        try {
-          const payload = await api("/api/alignment/run", {
-            method: "POST",
-            body: JSON.stringify({
-              document_id: documentId,
-              course_id: courseId || undefined,
-              scope_type: scopeType || "course"
-            })
-          });
-          await loadJobs();
-          await loadAlignmentRuns();
-          const data = payload.data || {};
-          if (data.job_id) {
-            setMessage(`术语对齐任务 #${data.job_id} 已排队。/ Alignment job #${data.job_id} has been queued.`, "success");
-          } else {
-            setMessage("术语对齐已完成。/ Alignment completed.", "success");
+	      async startFormalAlignmentForDocument(documentId) {
+	        if (!state.user || !["teacher", "admin"].includes(state.user.role)) return;
+          if (state.formalAlignment.submitting || state.formalAlignment.polling) return;
+          const documentRecord = state.cache.documents.find(item => Number(item.id) === Number(documentId));
+          if (!documentRecord || documentRecord.scope_type !== "course") {
+            setMessage("只能处理当前教师可见的课程资料。 / Only visible course material can be processed.", "notice error");
+            return;
           }
-        } catch (error) {
-          setMessage(`${error.message} / Alignment failed.`, "notice error");
-        }
+	        try {
+            await loadKnowledge();
+            const source = governedSourceForDocument(documentId);
+            if (!source || !source.source_uid) {
+              setMessage("资料尚未完成治理入库，请等待文档任务完成后重试。 / The governed source is not ready; wait for document ingestion to complete.", "notice error");
+              return;
+            }
+            state.page = "courseUpload";
+            await formalWorkflow.start(source.source_uid);
+	        } catch (error) {
+            setMessage(`${formatApiError(error, "Formal alignment failed")} / 正式对齐启动失败。`, "notice error");
+	        }
+	      },
+      async resumeFormalAlignment() {
+        const mode = state.formalAlignment.mode;
+        if (mode === "pending_submit") await formalWorkflow.resumeSubmission();
+        else await formalWorkflow.retryPolling();
+      },
+      async loadFormalAlignmentItems(page) {
+        await formalWorkflow.loadItems(page);
       },
       async cancelJob(jobId) {
         try {
@@ -3247,6 +3383,12 @@
         if (user) {
           state.page = defaultPageForRole(user.role);
           await loadEverything();
+          const resumePromise = formalWorkflow.resume();
+          if (formalWorkflow.getState().source_uid && ["teacher", "admin"].includes(user.role)) {
+            state.page = "courseUpload";
+            render();
+          }
+          await resumePromise;
         }
       }
       render();
@@ -3255,6 +3397,7 @@
       state.messageType = "notice error";
       render();
     });
+    window.addEventListener("beforeunload", () => formalWorkflow.cancel());
   </script>
 </body>
 </html>

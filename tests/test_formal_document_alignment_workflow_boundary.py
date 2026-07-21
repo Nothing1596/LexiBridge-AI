@@ -142,14 +142,15 @@ def test_no_auto_approve_and_student_approved_only_boundaries_remain_visible():
     assert "card_model.status == APPROVED_STATUS" in student_service_source
 
 
-def test_frontend_still_uses_legacy_alignment_run_while_formal_routes_exist(app_module):
+def test_frontend_uses_formal_routes_while_legacy_route_remains_registered(app_module):
     frontend = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    formal_module = (ROOT / "frontend" / "js" / "formal-workflow.js").read_text(encoding="utf-8")
     openapi = (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")
 
-    assert "runAlignmentForDocument" in frontend
-    assert 'api("/api/alignment/run"' in frontend
-    assert "loadJobs()" in frontend
-    assert "loadAlignmentRuns()" in frontend
+    assert "startFormalAlignmentForDocument" in frontend
+    assert 'api("/api/alignment/run"' not in frontend
+    assert "/api/document-alignment-runs" in formal_module
+    assert "/api/alignment/run" not in formal_module
     assert "/api/document-alignment-runs" in openapi
 
     rules = {rule.rule for rule in app_module.app.url_map.iter_rules()}

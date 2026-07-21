@@ -112,6 +112,14 @@ def start_server(app_module: Any, port: int):
                 mimetype="application/javascript",
             )
 
+    if "pilot_browser_e2e_formal_workflow" not in app_module.app.view_functions:
+        @app_module.app.route("/js/formal-workflow.js", endpoint="pilot_browser_e2e_formal_workflow")
+        def pilot_browser_e2e_formal_workflow():
+            return Response(
+                (ROOT / "frontend" / "js" / "formal-workflow.js").read_text(encoding="utf-8"),
+                mimetype="application/javascript",
+            )
+
     if "pilot_browser_e2e_favicon" not in app_module.app.view_functions:
         @app_module.app.route("/favicon.ico", endpoint="pilot_browser_e2e_favicon")
         def pilot_browser_e2e_favicon():

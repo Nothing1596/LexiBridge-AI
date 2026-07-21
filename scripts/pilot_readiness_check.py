@@ -110,8 +110,21 @@ PROFILE_CONDITIONS = {
         "FORMAL_API_STALE_RECOVERY_VERIFIED",
         "FORMAL_API_TERMINAL_RECOVERY_VERIFIED",
         "FORMAL_API_STUDENT_DENIAL_VERIFIED",
-        "FRONTEND_NOT_MIGRATED",
+        "FORMAL_FRONTEND_CUTOVER_PRESENT",
+        "FORMAL_FRONTEND_START_USES_FORMAL_API",
+        "FORMAL_FRONTEND_RUN_POLLING_PRESENT",
+        "FORMAL_FRONTEND_ITEMS_QUERY_PRESENT",
+        "FORMAL_FRONTEND_ITEMS_PAGINATION_PRESENT",
+        "FORMAL_FRONTEND_RELOAD_RESUME_PRESENT",
+        "FORMAL_FRONTEND_DUPLICATE_START_PREVENTED",
+        "FORMAL_FRONTEND_TEACHER_GATED",
+        "FORMAL_FRONTEND_LEGACY_ALIGNMENT_NOT_CALLED",
+        "FORMAL_FRONTEND_NO_LEGACY_FALLBACK",
         "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+        "FRONTEND_VISUAL_REDESIGN_NOT_COMPLETED",
+        "HISTORICAL_RUN_LIST_NOT_IMPLEMENTED",
+        "FULL_REVIEW_WORKBENCH_NOT_IMPLEMENTED",
+        "POSTGRESQL_UI_FLOW_NOT_VERIFIED",
         "POSTGRESQL_API_E2E_NOT_VERIFIED",
         "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
         "POSTGRESQL_QUERY_NOT_VERIFIED",
@@ -207,8 +220,21 @@ PROFILE_CONDITIONS = {
         "FORMAL_API_STALE_RECOVERY_VERIFIED",
         "FORMAL_API_TERMINAL_RECOVERY_VERIFIED",
         "FORMAL_API_STUDENT_DENIAL_VERIFIED",
-        "FRONTEND_NOT_MIGRATED",
+        "FORMAL_FRONTEND_CUTOVER_PRESENT",
+        "FORMAL_FRONTEND_START_USES_FORMAL_API",
+        "FORMAL_FRONTEND_RUN_POLLING_PRESENT",
+        "FORMAL_FRONTEND_ITEMS_QUERY_PRESENT",
+        "FORMAL_FRONTEND_ITEMS_PAGINATION_PRESENT",
+        "FORMAL_FRONTEND_RELOAD_RESUME_PRESENT",
+        "FORMAL_FRONTEND_DUPLICATE_START_PREVENTED",
+        "FORMAL_FRONTEND_TEACHER_GATED",
+        "FORMAL_FRONTEND_LEGACY_ALIGNMENT_NOT_CALLED",
+        "FORMAL_FRONTEND_NO_LEGACY_FALLBACK",
         "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+        "FRONTEND_VISUAL_REDESIGN_NOT_COMPLETED",
+        "HISTORICAL_RUN_LIST_NOT_IMPLEMENTED",
+        "FULL_REVIEW_WORKBENCH_NOT_IMPLEMENTED",
+        "POSTGRESQL_UI_FLOW_NOT_VERIFIED",
         "POSTGRESQL_API_E2E_NOT_VERIFIED",
         "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
         "POSTGRESQL_QUERY_NOT_VERIFIED",
@@ -745,6 +771,8 @@ def main() -> int:
         formal_api_e2e_json = temp_root / "formal-api-e2e-result.json"
         formal_recovery_json = temp_root / "formal-api-recovery-result.json"
         formal_browser_api_json = temp_root / "formal-browser-api-result.json"
+        formal_frontend_e2e_json = temp_root / "formal-frontend-e2e-result.json"
+        formal_frontend_resume_json = temp_root / "formal-frontend-resume-result.json"
         browser_e2e_result: dict | None = None
 
         phases: list[PhaseResult] = []
@@ -1078,6 +1106,55 @@ print("restored database integrity ok")
         if formal_browser_phase.get("condition") and formal_browser_phase["condition"] not in conditions:
             conditions.append(formal_browser_phase["condition"])
             warnings.append(formal_browser_phase["condition"])
+        phases.append(run_command(
+            "formal workflow frontend cutover",
+            [
+                PYTHON_CMD,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_formal_workflow_frontend_cutover_contract.py",
+                "tests/test_formal_workflow_frontend_state_contract.py",
+                "tests/test_formal_workflow_frontend_e2e_runner.py",
+                "tests/test_formal_workflow_frontend_security.py",
+            ],
+            env,
+            timeout=180,
+        ))
+        formal_frontend_phase = run_command(
+            "formal workflow frontend UI e2e",
+            [
+                PYTHON_CMD,
+                "scripts/run_formal_workflow_frontend_e2e.py",
+                "--json-output",
+                str(formal_frontend_e2e_json),
+            ],
+            env,
+            timeout=600,
+        )
+        phases.append(formal_frontend_phase)
+        if (
+            formal_frontend_phase.get("status") == "PASS"
+            and "FORMAL_FRONTEND_UI_E2E_VERIFIED" not in conditions
+        ):
+            conditions.append("FORMAL_FRONTEND_UI_E2E_VERIFIED")
+        formal_frontend_resume_phase = run_command(
+            "formal workflow frontend resume e2e",
+            [
+                PYTHON_CMD,
+                "scripts/run_formal_workflow_frontend_resume_e2e.py",
+                "--json-output",
+                str(formal_frontend_resume_json),
+            ],
+            env,
+            timeout=600,
+        )
+        phases.append(formal_frontend_resume_phase)
+        if (
+            formal_frontend_resume_phase.get("status") == "PASS"
+            and "FORMAL_FRONTEND_RESUME_E2E_VERIFIED" not in conditions
+        ):
+            conditions.append("FORMAL_FRONTEND_RESUME_E2E_VERIFIED")
         phases.append(run_python_snippet("lightweight performance smoke", performance_smoke_code(), env, timeout=120))
         phases.append(
             run_python_snippet(

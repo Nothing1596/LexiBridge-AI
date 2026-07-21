@@ -76,8 +76,21 @@ EXPECTED_CONDITIONS = {
     "FORMAL_API_STALE_RECOVERY_VERIFIED",
     "FORMAL_API_TERMINAL_RECOVERY_VERIFIED",
     "FORMAL_API_STUDENT_DENIAL_VERIFIED",
-    "FRONTEND_NOT_MIGRATED",
+    "FORMAL_FRONTEND_CUTOVER_PRESENT",
+    "FORMAL_FRONTEND_START_USES_FORMAL_API",
+    "FORMAL_FRONTEND_RUN_POLLING_PRESENT",
+    "FORMAL_FRONTEND_ITEMS_QUERY_PRESENT",
+    "FORMAL_FRONTEND_ITEMS_PAGINATION_PRESENT",
+    "FORMAL_FRONTEND_RELOAD_RESUME_PRESENT",
+    "FORMAL_FRONTEND_DUPLICATE_START_PREVENTED",
+    "FORMAL_FRONTEND_TEACHER_GATED",
+    "FORMAL_FRONTEND_LEGACY_ALIGNMENT_NOT_CALLED",
+    "FORMAL_FRONTEND_NO_LEGACY_FALLBACK",
     "LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT",
+    "FRONTEND_VISUAL_REDESIGN_NOT_COMPLETED",
+    "HISTORICAL_RUN_LIST_NOT_IMPLEMENTED",
+    "FULL_REVIEW_WORKBENCH_NOT_IMPLEMENTED",
+    "POSTGRESQL_UI_FLOW_NOT_VERIFIED",
     "POSTGRESQL_API_E2E_NOT_VERIFIED",
     "POSTGRESQL_HTTP_FLOW_NOT_VERIFIED",
     "POSTGRESQL_QUERY_NOT_VERIFIED",
@@ -99,6 +112,9 @@ def test_small_pilot_readiness_exposes_formal_job_ownership_conditions():
     conditions = set(pilot_readiness_check.default_conditions("small-pilot"))
     assert EXPECTED_CONDITIONS <= conditions
     assert "FORMAL_API_BROWSER_SESSION_VERIFIED" not in conditions
+    assert "FORMAL_FRONTEND_UI_E2E_VERIFIED" not in conditions
+    assert "FORMAL_FRONTEND_RESUME_E2E_VERIFIED" not in conditions
+    assert "FRONTEND_NOT_MIGRATED" not in conditions
 
 
 def test_readiness_runs_explicit_formal_job_ownership_gate():
@@ -171,6 +187,12 @@ def test_readiness_runs_explicit_formal_job_ownership_gate():
     assert "formal document alignment browser API e2e" in source
     assert "scripts/run_formal_document_alignment_browser_e2e.py" in source
     assert 'conditions.append("FORMAL_API_BROWSER_SESSION_VERIFIED")' in source
+    assert "formal workflow frontend cutover" in source
+    assert "scripts/run_formal_workflow_frontend_e2e.py" in source
+    assert "formal workflow frontend resume" in source
+    assert "scripts/run_formal_workflow_frontend_resume_e2e.py" in source
+    assert 'conditions.append("FORMAL_FRONTEND_UI_E2E_VERIFIED")' in source
+    assert 'conditions.append("FORMAL_FRONTEND_RESUME_E2E_VERIFIED")' in source
 
 
 def test_readiness_no_longer_reports_query_service_as_missing():

@@ -174,12 +174,16 @@ def test_characterized_local_candidate_and_key_paths_do_not_use_network(monkeypa
     ).startswith("item-key-v1:")
 
 
-def test_frontend_still_uses_legacy_alignment_while_formal_http_contract_exists():
+def test_frontend_uses_formal_alignment_while_legacy_contract_remains_documented():
     frontend = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    formal_module = (ROOT / "frontend" / "js" / "formal-workflow.js").read_text(encoding="utf-8")
     openapi = (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")
 
-    assert "runAlignmentForDocument" in frontend
-    assert 'api("/api/alignment/run"' in frontend
+    assert "startFormalAlignmentForDocument" in frontend
+    assert 'api("/api/alignment/run"' not in frontend
+    assert "/api/document-alignment-runs" in formal_module
+    assert "/api/alignment/run" not in formal_module
+    assert "/api/alignment/run" in openapi
     assert "/api/document-alignment-runs" in openapi
 
 

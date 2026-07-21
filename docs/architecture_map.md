@@ -18,7 +18,8 @@ This map describes the current implemented pilot architecture. It is not a futur
 - `backend/services/document_alignment_workflow_application.py`: formal document-alignment admission/start service added in Task 9C.4X. It is HTTP-neutral, validates explicit governed-source/permission/admission decisions, resolves idempotency, creates `DocumentAlignmentWorkflowRun`, queues a transport-only `BackgroundJob`, writes `document_alignment_requested` audit, commits once, and rolls back persistence failures. It does not process terms, evidence, cards, verification, providers, workers, routes, or frontend state.
 - Task 9C.4Y characterizes the formal processing boundary. Task 9C.4Z adds `backend/services/formal_background_job_execution.py` and additive BackgroundJob lease fields for formal jobs only. Task 9C.5A adds pure governed chunk-scoped candidates and `backend/services/document_alignment_item_bootstrap.py`: `item-key-v1` identity, active-attempt transaction fencing, source/chunk drift checks, idempotent item creation/reuse, and root transition to processing. Task 9C.5B.1 adds `backend/services/formal_item_verification_identity.py`, the execution mapping table, and nullable unique verification/preflight/usage/audit identities. Task 9C.5B (retry) adds `backend/services/document_alignment_item_verification_adapter.py`: job/run-bound, lease-fenced draft/preflight/verification/usage/audit/attach recovery with one selected candidate, conditional approved-card protection, provider completion checkpoints, and reference-only persistence. Task 9C.5C adds governed item preparation plus a sequential, lease-fenced document processing orchestrator. Task 9C.5D adds explicit production composition, strict formal job handling, CAS-only dispatch, retry/root finalization mapping, and local formal/legacy worker rotation. Task 9C.5E adds `backend/services/document_alignment_workflow_queries.py`: anti-enumerating teacher/admin authorization, safe run summaries, SQL-paginated item summaries, computed business progress, consistency warnings, and fixed query-count boundaries. Task 9C.5F adds `backend/routes/document_alignment_workflow_routes.py`, production admission composition, and parsed OpenAPI contracts for asynchronous start, run status, and item pagination. This remains local-pilot `AT_LEAST_ONCE_TRANSPORT`, not a frontend workflow, formal API browser-E2E proof, production daemon, PostgreSQL proof, or exactly-once provider system.
 - Task 9C.5F.1 adds `backend/services/formal_document_alignment_provider_selection.py`: Admission freezes `mock-rule-v1`, `mock-rule-v1:v1`, and `alignment-v1`; preparation has no provider/model/prompt fallback; governance, preflight, verification, and attach resolve the same bounded local policy. Historical null selections fail closed without backfill or provider usage. Task 9C.5G v3 subsequently verifies that default identity through the real local HTTP/worker flow.
-- Task 9C.5F.2 adds authoritative formal retry-budget constants and makes Admission freeze new document-alignment jobs at three counted processing-failure outcomes. Claim and stale reclaim advance lease generation without consuming business retry budget; two requeues are possible; exhaustion and unsupported outcomes finalize Root before Job. Because pre-outcome crash/reclaim generations are uncounted, `execution_attempt` can exceed `max_attempts` and V1 has no separate crash-loop cap. Historical jobs are not backfilled. Task 9C.5G v3 verifies the authenticated HTTP-to-worker-to-polling chain, pagination, source-scoped concurrent replay, business partial/all-blocked outcomes, retry/crash/terminal recovery, browser-session access, and response/artifact redaction on local SQLite. Frontend cutover, PostgreSQL, distributed workers, live providers, and production supervision remain unverified.
+- Task 9C.5F.2 adds authoritative formal retry-budget constants and makes Admission freeze new document-alignment jobs at three counted processing-failure outcomes. Claim and stale reclaim advance lease generation without consuming business retry budget; two requeues are possible; exhaustion and unsupported outcomes finalize Root before Job. Because pre-outcome crash/reclaim generations are uncounted, `execution_attempt` can exceed `max_attempts` and V1 has no separate crash-loop cap. Historical jobs are not backfilled. Task 9C.5G v3 verifies the authenticated HTTP-to-worker-to-polling chain, pagination, source-scoped concurrent replay, business partial/all-blocked outcomes, retry/crash/terminal recovery, browser-session access, and response/artifact redaction on local SQLite.
+- Task 9C.5H adds `frontend/js/formal-workflow.js` and connects the existing teacher course-document action to the formal start/run/items API. Governed source identity is mapped from the server source list, start keys use browser crypto, one active poll is persisted in a strict versioned `sessionStorage` schema, reload resumes the same Run, and item pages remain server-paginated. The formal path has no legacy POST fallback. The legacy backend route and old run-list compatibility view remain for consumer audit; a historical formal run center, full review workbench, visual redesign, PostgreSQL proof, distributed workers, live providers, and production supervision remain absent.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.
@@ -205,9 +206,10 @@ Provider verification:
 - Mock/fake/replay/disabled runs never set production approval and never write `ConceptAlignmentCard.confidence_score`.
 
 Legacy alignment run:
-- `POST /api/alignment/run` is still an active frontend compatibility surface,
-  but Task 9C.4S characterizes it as a legacy execution path, not the formal
-  verification path.
+- `POST /api/alignment/run` remains registered pending a consumer audit, but
+  Task 9C.5H removes it from the teacher document-alignment start, polling,
+  item-loading, and reload-recovery paths. Task 9C.4S characterizes it as a
+  legacy execution path, not the formal verification path.
 - It writes `AlignmentRun`, `BackgroundJob`, `TerminologyCard`, legacy
   `UsageRecord`, and `AICallLog` paths rather than `AlignmentVerificationRun`
   and `AlignmentProviderUsageRecord`.
@@ -215,10 +217,10 @@ Legacy alignment run:
   formal parser, and attach gates.
 - Task 9C.4U blocks live/external legacy execution before HTTP route writes,
   worker execution, queued-job retry, and direct helper transport intent.
-- The route is still active frontend compatibility, not a formal verification
-  workflow. It still requires replacement
-  `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION` before frontend cutover, disabled
-  response, and final removal.
+- The route is not a formal verification workflow. The replacement
+  `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION` is now the teacher-facing start
+  path, but HTTP 410 and final removal require a separate remaining-consumer
+  audit.
 - Task 9C.4V defines that replacement contract as an async document workflow
   with canonical `GOVERNED_KNOWLEDGE_SOURCE` input, `Idempotency-Key`, formal
   root/item models, formal provider policy/preflight/verification, and
@@ -234,8 +236,8 @@ Legacy alignment run:
   run/item query services. Task 9C.5F adds formal start/run/items routes and
   OpenAPI while hiding transport ownership. Task 9C.5F.1 aligns Admission's
   frozen local provider identity with preparation, policy, preflight, and
-  attach. Formal API E2E, frontend cutover, and a production worker runtime do
-  not exist yet.
+  attach. Task 9C.5G v3 supplies the formal API E2E, and Task 9C.5H supplies the
+  minimal teacher frontend cutover. A production worker runtime does not exist.
 
 ## Permission Boundaries
 

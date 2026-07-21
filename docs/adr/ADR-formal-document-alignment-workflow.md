@@ -9,9 +9,9 @@ Workflow name: FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION
 Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 
 Current implementation conclusion:
-FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED
+FORMAL_WORKFLOW_FRONTEND_CUTOVER_ESTABLISHED
 
-Implementation status after Task 9C.5G v3:
+Implementation status after Task 9C.5H:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -27,7 +27,11 @@ Implementation status after Task 9C.5G v3:
 - `FORMAL_WORKFLOW_PROVIDER_SELECTION_CONTRACT_ESTABLISHED`
 - `FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED`
-- `FRONTEND_NOT_MIGRATED`
+- `FORMAL_WORKFLOW_FRONTEND_CUTOVER_ESTABLISHED`
+- `LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT`
+- `FRONTEND_VISUAL_REDESIGN_NOT_COMPLETED`
+- `HISTORICAL_RUN_LIST_NOT_IMPLEMENTED`
+- `FULL_REVIEW_WORKBENCH_NOT_IMPLEMENTED`
 - `PILOT_CREATE_ALL_ONLY`
 - `FORMAL_MIGRATION_REQUIRED_BEFORE_PRODUCTION`
 
@@ -39,9 +43,10 @@ Task 9C.4S characterized legacy `POST /api/alignment/run` and concluded
 execution containment for the legacy endpoint, worker, retry, queued job, and
 direct-helper paths.
 
-The legacy route still exists for current frontend document-alignment
-compatibility. It can run local deterministic compatibility behavior, but
-external/live/custom legacy execution is blocked with
+The legacy route still exists pending the consumer audit and retirement
+boundary, but the teacher document-alignment start path no longer calls it.
+It can still run local deterministic compatibility behavior for unknown
+remaining consumers, while external/live/custom legacy execution is blocked with
 `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`.
 
 The formal system already has governed document ingestion, parse quality gates,
@@ -64,7 +69,9 @@ new formal jobs and proves the HTTP Admission-to-requeue-to-resume path. Task
 9C.5G v3 proves the local SQLite formal API from authenticated HTTP admission
 through the formal worker, polling, pagination, partial/all-blocked outcomes,
 source-scoped concurrent replay, retry/crash recovery, and authenticated
-browser fetch. Frontend cutover remains incomplete.
+browser fetch. Task 9C.5H adds the minimal teacher-facing formal start,
+polling, paginated items, refresh recovery, and duplicate-start prevention
+without changing the formal backend contract.
 
 Task 9C.4Y characterizes the processing boundary without implementing it. The
 Task 9C.4Z then establishes a dedicated formal-job CAS claim, 30-second lease,
@@ -600,17 +607,18 @@ No error includes a raw exception.
 
 ## Frontend Cutover
 
-The replacement frontend migration is:
+Task 9C.5H completes the minimal replacement frontend migration:
 
 1. replacement backend route and service available;
 2. contract tests and worker tests pass;
-3. replacement E2E covers start, polling, item results, warnings, review links,
-   and errors;
+3. replacement E2E covers start, polling, item results, warnings, blocked
+   outcomes, refresh recovery, pagination, and errors;
 4. document action switches from `/api/alignment/run` to the new start API;
 5. frontend polls the workflow status and item endpoints;
 6. static scan proves `/api/alignment/run` frontend references are zero;
 7. dynamic E2E proves legacy route call count is zero;
-8. only then can the legacy endpoint move toward HTTP 410.
+8. only then can the legacy endpoint move toward a separate consumer audit and
+   HTTP 410 readiness decision.
 
 ## Readiness And Observability
 
@@ -737,12 +745,13 @@ students, anonymous users, and unrelated teachers cannot. Transport ownership,
 raw content, and internal execution identities are excluded, and queries do
 not write or repair state.
 
-This establishes an executable and internally queryable local-pilot path, not
-an exposed workflow. There is no HTTP route, OpenAPI operation, frontend
-caller, or supervised production runtime. Deterministic provider
-replay remains at-least-once after the existing provider-started crash point.
-The concurrent duplicate-invocation tests use SQLite and independent sessions;
-PostgreSQL locking, migration, and operational recovery remain unverified.
+This establishes an executable and teacher-facing local-pilot path with formal
+HTTP/OpenAPI and a minimal frontend caller. There is still no supervised
+production runtime, formal historical run list, or full review workbench.
+Deterministic provider replay remains at-least-once after the existing
+provider-started crash point. The concurrent duplicate-invocation tests use
+SQLite and independent sessions; PostgreSQL locking, migration, and
+operational recovery remain unverified.
 
 ## Rejected Alternatives
 
@@ -765,22 +774,23 @@ The model, admission, formal BackgroundJob ownership, chunk-scoped item
 bootstrap, execution identities, lease-fenced per-item verification adapter,
 document processing/root finalization, formal local-pilot worker handler,
 read-only query services, narrow formal HTTP/OpenAPI adapters, and local API
-polling/recovery/browser-session verification are implemented. The next
-permitted slice moves the teacher workflow off the legacy endpoint:
+polling/recovery/browser-session verification, and the minimal teacher
+frontend cutover are implemented. The next permitted slice audits remaining
+legacy consumers before any retirement action:
 
 ```text
-Task 9C.5H: Formal Workflow Frontend Cutover and Legacy-Independent Teacher Experience
+Task 9C.5I: Legacy Alignment Consumer Audit, Deprecation Boundary and 410 Readiness
 ```
 
-The legacy endpoint remains active only as temporary compatibility and still
-has external execution disabled. Replacement workflow implementation, frontend
-cutover, HTTP 410, and legacy path removal remain later phases.
+The legacy endpoint remains active pending that audit and still has external
+execution disabled. HTTP 410 and legacy path removal remain later decisions.
+A formal historical run list, complete review workbench, and visual redesign
+are outside the minimal cutover.
 
 ## Pilot Limitations
 
-This ADR is not production-ready. It does not enable real providers and does
-not migrate frontend callers. The local worker is not a supervised production
-daemon. The formal
+This ADR is not production-ready. It does not enable real providers. The local
+worker is not a supervised production daemon. The formal
 tables are still `PILOT_CREATE_ALL_ONLY`; production migrations and PostgreSQL
 claim/locking and idempotency-constraint validation remain required. Provider
 success followed by persistence failure is recoverable only by deterministic
