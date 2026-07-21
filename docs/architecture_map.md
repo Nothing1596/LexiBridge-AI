@@ -4,6 +4,10 @@ Updated: 2026-07-21
 
 This map describes the current implemented pilot architecture. It is not a future-state product plan.
 
+Release baseline: `LexiBridge AI Pilot v1.0 Candidate`, a Controlled Academic
+Pilot Release established from
+`8ba533ab43fc36e952268c5ea385397778b6fbd5`. It is not production-ready.
+
 ## Core Data Objects
 
 - `DocumentParseRecord`: per-upload parse summary with `parse_uid`, parse status, quality status, quality flags, OCR/formula indicators, warnings, and error fields.
@@ -21,6 +25,7 @@ This map describes the current implemented pilot architecture. It is not a futur
 - Task 9C.5F.2 adds authoritative formal retry-budget constants and makes Admission freeze new document-alignment jobs at three counted processing-failure outcomes. Claim and stale reclaim advance lease generation without consuming business retry budget; two requeues are possible; exhaustion and unsupported outcomes finalize Root before Job. Because pre-outcome crash/reclaim generations are uncounted, `execution_attempt` can exceed `max_attempts` and V1 has no separate crash-loop cap. Historical jobs are not backfilled. Task 9C.5G v3 verifies the authenticated HTTP-to-worker-to-polling chain, pagination, source-scoped concurrent replay, business partial/all-blocked outcomes, retry/crash/terminal recovery, browser-session access, and response/artifact redaction on local SQLite.
 - Task 9C.5H adds `frontend/js/formal-workflow.js` and connects the existing teacher course-document action to the formal start/run/items API. Governed source identity is mapped from the server source list, start keys use browser crypto, one active poll is persisted in a strict versioned `sessionStorage` schema, reload resumes the same Run, and item pages remain server-paginated. The formal path has no legacy POST fallback. The legacy backend route and old run-list compatibility view remain for consumer audit; a historical formal run center, full review workbench, visual redesign, PostgreSQL proof, distributed workers, live providers, and production supervision remain absent.
 - Task 9C.5K re-verifies the 9C.5H cutover as a Pilot Release Candidate baseline without changing the production frontend or backend contracts. The real browser gates cover duplicate-click suppression, `ready_for_review`, `completed_with_warnings`, and `blocked` terminal outcomes, server-authoritative item counts and pagination, reload recovery of the same Run, allowlisted `sessionStorage`, zero legacy alignment POSTs, zero external provider requests, and zero console/page errors. The E2E runner now reads `run.total_items` instead of assuming one workflow item per source phrase.
+- Task 9C.5L establishes `release/pilot-v1-candidate` and audits every in-repository `/api/alignment/run` reference. The production frontend has no legacy POST consumer and the formal workflow is independent. The legacy route remains an active compatibility surface for its legacy worker, tests, safety probes, OpenAPI contract, and unknown external clients; no route, permission, response, parameter, schema, provider, or frontend behavior changes in this release-governance task.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.

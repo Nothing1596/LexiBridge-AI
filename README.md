@@ -1,4 +1,4 @@
-# LexiBridge AI Local MVP v0.8
+# LexiBridge AI Pilot v1.0 Candidate
 
 LexiBridge AI is an AI-powered bilingual course knowledge alignment platform for Sino-foreign cooperative education.
 
@@ -6,7 +6,9 @@ LexiBridge AI 是一个面向中外合作办学课程的 AI 双语课程知识�
 
 ## Current Scope
 
-This repository is a local MVP / course demo release:
+This repository is a Controlled Academic Pilot Release Candidate. It is suitable
+for a governed local pilot with the documented conditions; it is not a public,
+commercial, or production deployment:
 
 - Backend: Flask + SQLite.
 - Frontend: single-page HTML/CSS/JavaScript.
@@ -794,7 +796,7 @@ Content-Type: application/json
 - `deepseek-alignment-v1-disabled`: disabled external LLM adapter. It is registered so the API and audit path can handle a real-provider name, but external calls are blocked by default and return `provider_disabled`.
 - `external-llm-replay-v1`: replay adapter that returns local fixture output through the same prompt/parser path. It never calls a real model and returns `provider_response_status=replayed`.
 
-No provider calls DeepSeek, OpenAI, Claude, a translation API, embeddings, a vector database, a reranker, or any external network service in the current baseline. No real API key is read or required by tests. Legacy `POST /api/alignment/run` remains registered pending a consumer audit, but the Task 9C.5H teacher start path no longer calls it and external/live provider intent is blocked at route, worker, retry, queued-job, and direct-helper boundaries with `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`.
+No provider calls DeepSeek, OpenAI, Claude, a translation API, embeddings, a vector database, a reranker, or any external network service in the current baseline. No real API key is read or required by tests. Task 9C.5L confirms that the production teacher workflow no longer calls legacy `POST /api/alignment/run`; the route remains an active compatibility surface because legacy worker/tests/safety probes and unknown external consumers still require a deprecation decision. External/live provider intent remains blocked at route, worker, retry, queued-job, and direct-helper boundaries with `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`.
 
 External provider configuration lives in `services/llm_provider_config.py`. External LLM access is disabled unless a future task explicitly enables it through configuration. API keys may only be referenced by environment variable name, such as `DEEPSEEK_API_KEY`; key values are not stored in code, README, fixtures, `AlignmentVerificationRun`, or `AuditRecord`. `sanitize_provider_config()` removes `api_key` values and strips sensitive URL userinfo/query data. Timeout, retry, max prompt length, max output length, and rough cost-estimate gates are normalized before a provider can run.
 
@@ -1253,7 +1255,8 @@ The release checker rejects `.git`, `.env`, database files, uploads, derived ima
 
 ## Deployment Readiness
 
-LexiBridge AI is currently v1.0 Core Engine / local pilot-ready. It is not production-ready.
+LexiBridge AI is currently the LexiBridge AI Pilot v1.0 Candidate, classified as
+a Controlled Academic Pilot Release. It is not production-ready.
 
 Environment templates:
 
@@ -1474,8 +1477,8 @@ recovery, and same-origin browser API access on local SQLite. Task 9C.5H adds
 the minimal teacher frontend cutover: server-issued governed source identity,
 crypto-backed Idempotency-Key handling, formal POST/run polling, API-paginated
 items, duplicate-start prevention, and sessionStorage reload recovery. The
-legacy route remains registered pending a separate consumer audit. Legacy
-disablement, a historical formal run center, a full review workbench,
+legacy route remains registered after Task 9C.5L identifies its remaining
+compatibility boundary. Legacy deprecation/410, a historical formal run center, a full review workbench,
 PostgreSQL, a supervised worker, and live-provider operation remain future
 work.
 
@@ -1629,7 +1632,7 @@ EMBEDDING_PROVIDER=local_hash_embedding VECTOR_INDEX_BACKEND=local_json ENABLE_R
 
 - OCR requires a local engine; no OCR text is fabricated when engines are unavailable.
 - Mock/local AI fallback is for workflow demonstration only.
-- Legacy `/api/alignment/run` remains registered pending Task 9C.5I's consumer audit. Task 9C.5H removes it from the teacher document-alignment start, polling, item-loading, and reload-recovery paths; its external/live execution path remains blocked.
+- Legacy `/api/alignment/run` remains an active compatibility surface after Task 9C.5L's consumer audit. No production frontend POST consumer remains, but the legacy worker, compatibility tests, readiness probes, OpenAPI contract, and unknown external clients prevent removal or HTTP 410 in this candidate. Task 9C.5H removes it from the teacher document-alignment start, polling, item-loading, and reload-recovery paths; its external/live execution path remains blocked.
 - Task 9C.4V defines `FORMAL_DOCUMENT_ALIGNMENT_ORCHESTRATION`; Task 9C.4W adds its root/item models, Task 9C.4X adds admission/start, Task 9C.4Y characterizes processing, and Task 9C.4Z establishes local-pilot formal BackgroundJob CAS/lease ownership. Task 9C.5A adds governed chunk-scoped item bootstrap, Task 9C.5B adds lease-fenced per-item verification recovery, and Task 9C.5C adds sequential document processing and root finalization. Task 9C.5D adds strict formal payload handling, CAS-only dispatch, result-to-job mapping, retry-exhaustion root finalization, stale recovery, and local formal/legacy queue rotation. Task 9C.5E adds permission-safe read-only run/item queries. Task 9C.5F establishes authenticated formal start/run/items HTTP routes and OpenAPI. Task 9C.5F.1 freezes a server-owned local provider/model/prompt identity at Admission. Task 9C.5F.2 freezes new formal jobs at three counted processing-failure outcomes, allows two attempt-fenced requeues, and verifies HTTP Admission-to-recovery without changing historical jobs. Task 9C.5G v3 verifies real authenticated HTTP start, formal worker processing, polling, pagination, source-scoped concurrent replay, partial/all-blocked business outcomes, retry/crash/terminal recovery, and same-origin browser API access. Task 9C.5H connects the existing teacher page to that formal API with duplicate-start prevention and refresh recovery. Pre-outcome crash/reclaim generations are uncounted and have no separate V1 cap. Historical formal runs, a complete review workbench, supervised runtime, PostgreSQL proof, distributed-worker behavior, and real-provider operation remain absent. `PILOT_CREATE_ALL_ONLY`, provider at-least-once, external/live provider disablement, and production operations remain explicit conditions.
 - No real payment, SMTP, cloud storage, vector database, ByrDocs connector, publisher connector, or crawler is included.
 - Production deployment would require fixed `FRONTEND_ORIGIN`, HTTPS, real secret management, audited RBAC, background workers, durable storage, and PostgreSQL/vector retrieval.

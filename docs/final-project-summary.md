@@ -1,4 +1,4 @@
-# LexiBridge AI Final Project Summary
+# LexiBridge AI Pilot v1.0 Candidate Summary
 
 ## Project Name
 
@@ -43,7 +43,13 @@ The local MVP uses Flask, SQLite, a single-page HTML/CSS/JS frontend, local jobs
 
 ## Current Version Boundary
 
-The system is a local Pilot Release Candidate with conditions. It is not production-ready. Production would require PostgreSQL migrations and proof, object storage, a supervised production queue and worker runtime, distributed lease validation, live-provider governance, formal privacy operations, HTTPS, monitoring, and backup/restore drills.
+The system is the LexiBridge AI Pilot v1.0 Candidate, classified as a
+Controlled Academic Pilot Release. It is not a production SaaS, public release,
+commercial deployment, or production-ready system. Production would require
+PostgreSQL and Alembic migration proof, object storage, a supervised production
+queue and worker runtime, distributed lease validation, live-provider
+governance, formal privacy operations, HTTPS, monitoring, and backup/restore
+drills.
 
 ## Pilot Readiness
 
@@ -51,9 +57,11 @@ The repository includes demo data, runbooks, manuals, metrics, feedback template
 
 Current readiness is `READY_WITH_CONDITIONS`. The candidate is suitable for a
 controlled local pilot using authorized materials, deterministic/local provider
-behavior, and the documented operational checks. The legacy backend alignment
-POST and historical run-list view remain present until a separate
-remaining-consumer audit authorizes deprecation or removal.
+behavior, and the documented operational checks. Task 9C.5L finds no remaining
+production frontend consumer of the legacy alignment POST, but the legacy
+worker, compatibility tests, readiness probes, OpenAPI contract, and unknown
+external clients keep it as an active compatibility surface. This candidate
+does not authorize deprecation, HTTP 410, or removal.
 
 ## Next Plan
 

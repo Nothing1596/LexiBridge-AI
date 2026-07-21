@@ -6,11 +6,12 @@ Status:
 - `EXTERNAL_EXECUTION_DISABLED`
 - `WORKER_EXTERNAL_EXECUTION_DISABLED`
 - `EXISTING_EXTERNAL_JOBS_QUARANTINED`
-- `FRONTEND_COMPATIBILITY_RETAINED`
-- `FORMAL_REPLACEMENT_CONTRACT_PROPOSED`
-- `REPLACEMENT_NOT_YET_IMPLEMENTED`
-Tasks: 9C.4S, 9C.4T, 9C.4U, 9C.4V
-Baseline: `d82798012c263d54761a42c0ebff57ef9e78f8b2`
+- `FORMAL_REPLACEMENT_IMPLEMENTED`
+- `FRONTEND_POST_CONSUMER_MIGRATED`
+- `CONSUMER_AUDIT_COMPLETE`
+- `EXTERNAL_CONSUMERS_UNKNOWN`
+Tasks: 9C.4S through 9C.5L
+Current release baseline: `8ba533ab43fc36e952268c5ea385397778b6fbd5`
 Main conclusion: `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`
 Deprecation policy after Task 9C.4T:
 `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`
@@ -22,13 +23,17 @@ Replacement contract conclusion:
 `FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST`
 Replacement model status after Task 9C.4W:
 `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
+Consumer audit result after Task 9C.5L:
+`LEGACY_ALIGNMENT_CONSUMER_BOUNDARY_IDENTIFIED`
 
 This document freezes the current behavior of `POST /api/alignment/run` and
-records the Phase 1 containment boundary. Task 9C.4V separately defines the
-formal replacement workflow contract in
+records the Phase 1 containment boundary. Task 9C.4V defines the formal
+replacement workflow contract in
 `docs/formal_document_alignment_workflow_boundary.md` and
-`docs/adr/ADR-formal-document-alignment-workflow.md`. The replacement is not
-implemented and the legacy route is still not safe to extract as a service.
+`docs/adr/ADR-formal-document-alignment-workflow.md`. Tasks through 9C.5K
+implement and verify that replacement and migrate the production teacher POST
+consumer. Task 9C.5L confirms that the legacy route is still not safe to remove
+because legacy worker/tests/safety probes and unknown external consumers remain.
 
 ## Route Registration
 
@@ -39,15 +44,16 @@ implemented and the legacy route is still not safe to extract as a service.
 | Flask endpoint | `run_alignment` |
 | Registration | `@app.route("/api/alignment/run", methods=["POST"])` |
 | File | `backend/app.py` |
-| Handler lines | `10125` through `10284` |
-| Handler size | 160 lines including decorator, 159 function lines |
+| Handler lines | `11048` through `11232` |
+| Handler size | 185 lines including decorator, 184 function lines |
 | Duplicate rule | none |
 | Route module | none |
 | OpenAPI | listed in `docs/openapi.yaml` |
-| Frontend | active call in `frontend/index.html::runAlignmentForDocument` |
+| Frontend | no production POST call; `GET /api/alignment/runs` historical list remains active |
 
-The route remains a legacy active frontend surface. It is not an alias for
-`POST /api/alignment/verify`.
+The route remains an active compatibility surface, but it is no longer a
+production frontend POST surface. It is not an alias for
+`POST /api/alignment/verify` or the formal document workflow.
 
 Task 9C.4U keeps the route in `backend/app.py`, keeps the URL/method/endpoint,
 and adds a fail-closed provider classification gate before any legacy external
@@ -85,12 +91,13 @@ Response envelopes differ by branch:
 
 ## Frontend And OpenAPI
 
-`frontend/index.html` still calls `/api/alignment/run` when a user triggers
-document terminology alignment. The frontend expects either:
+The production teacher document action now uses the formal workflow API and
+does not call or fall back to `POST /api/alignment/run`. The old response
+expectations below remain frozen for compatibility tests and possible external
+clients:
 
-- an async queued response containing `data.job_id`, followed by
-  `loadJobs()` and `loadAlignmentRuns()`;
-- or a non-queued success response that still has `status=success`.
+- async queued responses contain `data.job_id`;
+- non-queued success responses have `status=success`.
 
 OpenAPI lists only a small request schema:
 
@@ -114,27 +121,28 @@ Current frontend dependency:
 | Concern | Current dependency |
 |---|---|
 | File | `frontend/index.html` |
-| Function | `runAlignmentForDocument(documentId, courseId, scopeType)` |
+| Function | `loadAlignmentRuns()` for legacy history; formal start lives in `frontend/js/formal-workflow.js` |
 | UI entry | Teacher/admin document row action button |
-| Route | `POST /api/alignment/run` |
-| Payload | `document_id`, optional `course_id`, `scope_type` |
-| Success follow-up | `loadJobs()` and `loadAlignmentRuns()` |
-| Queued response | `payload.data.job_id` drives queued-job success message |
-| Non-queued response | `status=success` drives generic completed message |
-| Error display | API error message plus `Alignment failed.` |
+| Route | `GET /api/alignment/runs` only; no production legacy POST |
+| Payload | none for the remaining GET list |
+| Success follow-up | historical runs populate `state.cache.alignmentRuns` |
+| Formal start | `POST /api/document-alignment-runs` with server-owned `source_uid` |
+| Formal polling/items | formal run GET plus paginated formal items GET |
+| Error display | formal API failure remains formal; there is no legacy fallback |
 | Legacy list dependency | `/api/alignment/runs` remains loaded after run |
 | Job dependency | `/api/jobs` displays `job.alignment_run_id` |
 
-Cutover checklist:
+Completed cutover checklist:
 
-1. build the replacement backend workflow and contract tests;
-2. add replacement E2E coverage;
-3. switch the document action to the replacement endpoint;
-4. update job/result polling if the replacement no longer uses legacy
+1. replacement backend workflow and contract tests are implemented;
+2. replacement E2E coverage is active;
+3. the document action uses the replacement endpoint;
+4. job/result polling uses formal Run and Item records rather than legacy
    `AlignmentRun`;
-5. statically prove frontend references to `/api/alignment/run` are zero;
-6. dynamically prove E2E makes zero calls to `/api/alignment/run`;
-7. only then move the legacy endpoint to a disabled/deprecated response.
+5. static checks prove production frontend legacy POST references are zero;
+6. browser E2E proves requests to the legacy POST are zero;
+7. disabling or returning 410 remains a separate task after external-consumer
+   and queued-job policy approval.
 
 Task 9C.4V defines the replacement frontend target as the formal API family:
 
@@ -142,10 +150,9 @@ Task 9C.4V defines the replacement frontend target as the formal API family:
 - `GET /api/document-alignment-runs/{run_uid}`
 - `GET /api/document-alignment-runs/{run_uid}/items`
 
-Those routes do not exist yet and must not be documented as implemented.
-Task 9C.4W adds the formal root/item data models only. The frontend still calls
-legacy `/api/alignment/run`; no replacement route, worker, OpenAPI entry, or
-cutover exists yet.
+Those routes now exist with formal models, admission, processing, worker,
+query, OpenAPI, frontend cutover, and browser verification. The detailed
+remaining consumer inventory is in `docs/legacy_alignment_consumer_audit.md`.
 
 ## Formal Verification Comparison
 

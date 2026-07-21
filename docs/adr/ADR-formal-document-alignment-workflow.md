@@ -11,7 +11,7 @@ Initial implementation conclusion: FORMAL_WORKFLOW_MODELS_REQUIRED_FIRST
 Current implementation conclusion:
 FORMAL_WORKFLOW_FRONTEND_CUTOVER_ESTABLISHED
 
-Implementation status after Task 9C.5H:
+Implementation status after Task 9C.5L:
 
 - `FORMAL_WORKFLOW_MODELS_ESTABLISHED`
 - `WORKFLOW_ADMISSION_SERVICE_ESTABLISHED`
@@ -28,6 +28,7 @@ Implementation status after Task 9C.5H:
 - `FORMAL_WORKFLOW_RETRY_BUDGET_CONTRACT_ESTABLISHED`
 - `FORMAL_DOCUMENT_ALIGNMENT_API_END_TO_END_VERIFIED`
 - `FORMAL_WORKFLOW_FRONTEND_CUTOVER_ESTABLISHED`
+- `LEGACY_ALIGNMENT_CONSUMER_BOUNDARY_IDENTIFIED`
 - `LEGACY_ALIGNMENT_ROUTE_STILL_PRESENT`
 - `FRONTEND_VISUAL_REDESIGN_NOT_COMPLETED`
 - `HISTORICAL_RUN_LIST_NOT_IMPLEMENTED`
@@ -43,10 +44,11 @@ Task 9C.4S characterized legacy `POST /api/alignment/run` and concluded
 execution containment for the legacy endpoint, worker, retry, queued job, and
 direct-helper paths.
 
-The legacy route still exists pending the consumer audit and retirement
-boundary, but the teacher document-alignment start path no longer calls it.
-It can still run local deterministic compatibility behavior for unknown
-remaining consumers, while external/live/custom legacy execution is blocked with
+The legacy route remains an active compatibility surface after the consumer
+audit, but the teacher document-alignment start path no longer calls it. It can
+still run local deterministic compatibility behavior for legacy worker/tests,
+safety probes, and unknown external consumers, while external/live/custom
+legacy execution is blocked with
 `LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED`.
 
 The formal system already has governed document ingestion, parse quality gates,

@@ -3,7 +3,7 @@
 Task: 9C.4F
 Baseline commit: `cb63cd657929e5c5f15efd6a9adc0e6384a08a86`
 Branch: `audit/provider-admin-routes-9c4f`
-Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`; Task 9C.4I has since extracted only the legacy observability GET views; Task 9C.4J has since moved the shared legacy provider registry seed implementation into `backend/services/legacy_provider_registry_seed.py` without changing route contracts; Task 9C.4K has since extracted only the seed-backed legacy configuration GET views; Task 9C.4N has since extracted the thin legacy healthcheck POST route; Task 9C.4O has since characterized prompt mutation and concluded `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`; Task 9C.4Q has since established `backend/services/legacy_provider_prompt_mutation.py`; Task 9C.4R has since moved the thin prompt mutation POST adapter into the shared configuration route module; Task 9C.4S has since characterized legacy `/api/alignment/run` and concluded `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`; Task 9C.4T has since accepted `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`.
+Status: route inventory and characterization. Task 9C.4G has since extracted `GET /api/admin/alignment-runs`; Task 9C.4H has since added the dedicated legacy `/api/admin/ai/*` compatibility and healthcheck safety audit in `docs/legacy_provider_admin_surface.md`; Task 9C.4I has since extracted only the legacy observability GET views; Task 9C.4J has since moved the shared legacy provider registry seed implementation into `backend/services/legacy_provider_registry_seed.py` without changing route contracts; Task 9C.4K has since extracted only the seed-backed legacy configuration GET views; Task 9C.4N has since extracted the thin legacy healthcheck POST route; Task 9C.4O has since characterized prompt mutation and concluded `PROMPT_VERSIONING_OR_CONCURRENCY_POLICY_REQUIRED_FIRST`; Task 9C.4Q has since established `backend/services/legacy_provider_prompt_mutation.py`; Task 9C.4R has since moved the thin prompt mutation POST adapter into the shared configuration route module; Task 9C.4S has since characterized legacy `/api/alignment/run` and concluded `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`; Task 9C.4T has since accepted `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`; Task 9C.5L confirms no production frontend legacy POST consumer remains while retaining the route for legacy worker/tests/safety probes and unknown external clients.
 
 ## Scope
 
@@ -29,7 +29,7 @@ The remaining routes below still live in `backend/app.py`. Unknown route count a
 | `/api/admin/ai/usage` | GET | `admin_ai_usage` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | yes | admin only | yes | frontend active | none | none | usage summaries; characterization verifies no sentinel secret | extracted in `backend/routes/legacy_provider_admin_observability.py` |
 | `/api/admin/ai/health` | GET | `admin_ai_health` | module | `EXTRACTED_LEGACY_OBSERVABILITY_VIEW` | mostly | admin only | yes | frontend active | seed flush only; no explicit commit | none | health/config summary only | extracted as local health view, not live probe |
 | `/api/admin/ai/healthcheck` | POST | `admin_ai_healthcheck` | module | `EXTRACTED_LEGACY_HEALTHCHECK_ROUTE` | no | admin only | yes | tested | updates provider health fields, commits | no through legacy endpoint; live mode returns disabled result from service | lower-level helper still needs redaction before future live probe | extracted in `backend/routes/legacy_provider_admin_healthcheck.py` |
-| `/api/alignment/run` | POST | `run_alignment` | 159 | `TEMPORARY_FRONTEND_COMPATIBILITY_ONLY` | no | student, teacher, admin | yes | frontend active, scripts/tests | creates `AlignmentRun`, background job or cards, records personal usage, commits | default local/no-provider paths do not call network; live default provider with usable key can reach legacy transport intent | alignment/card payloads | next security slice: disable legacy external execution |
+| `/api/alignment/run` | POST | `run_alignment` | 184 | `ACTIVE_COMPATIBILITY_SURFACE` | no | student, teacher, admin | yes | no production frontend POST; scripts/tests active | creates `AlignmentRun`, background job or cards, records personal usage, commits | external/live execution is fail-closed | alignment/card payloads | keep until deprecation window, external consumers, and queued jobs are resolved |
 | `/api/alignment/runs` | GET | `alignment_runs` | 29 | `LEGACY_ACTIVE` | yes | student, teacher, admin | yes | frontend active | none | none | serialized legacy `AlignmentRun` summaries | extract only after legacy alignment-run boundary decision |
 | `/api/alignment/runs/<int:run_id>` | GET | `alignment_run_detail` | 16 | `LEGACY_ACTIVE` | yes | student, teacher, admin with owner/course/admin checks | yes | README/docs/tests | none | none | serialized legacy run detail | extract only after legacy alignment-run boundary decision |
 
@@ -100,13 +100,15 @@ The remaining legacy provider admin write/high-risk routes should not be extract
 
 ## Legacy Alignment Run Routes
 
-`/api/alignment/run` and `/api/alignment/runs*` are legacy alignment run APIs. They are active in the frontend and OpenAPI.
+`/api/alignment/run` and `/api/alignment/runs*` are legacy alignment run APIs.
+The POST remains in OpenAPI and compatibility tooling but is no longer called
+by the production frontend. The GET list remains active in the frontend.
 
 - `POST /api/alignment/run` is an execution route. It can create an `AlignmentRun`, create background jobs, run synchronous document/term alignment, create or update terminology cards, record personal AI usage, and commit.
 - `GET /api/alignment/runs` is a role-filtered listing for student/teacher/admin.
 - `GET /api/alignment/runs/<int:run_id>` is a role-filtered detail route.
 
-Task 9C.4S concluded `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`. Task 9C.4T accepts `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`: the POST route is temporary frontend compatibility only, legacy external execution is prohibited, direct aliasing to `/api/alignment/verify` is prohibited, and replacement must be a formal document-alignment orchestration workflow. Task 9C.4U contains legacy external/live execution at the POST route, worker, retry, queued-job, and direct-helper boundaries without extracting the route. The two GET routes should be extracted only after deciding whether this legacy alignment-run surface remains as a compatibility read model.
+Task 9C.4S concluded `DEPRECATE_LEGACY_ALIGNMENT_RUN_FIRST`. Task 9C.4T accepts `LEGACY_ALIGNMENT_RUN_DEPRECATION_V1`, and Task 9C.4U contains legacy external/live execution at the POST route, worker, retry, queued-job, and direct-helper boundaries without extracting the route. Tasks 9C.5H and 9C.5K migrate and verify the formal production frontend path. Task 9C.5L identifies the remaining compatibility boundary in `docs/legacy_alignment_consumer_audit.md`; the route remains active until unknown external consumers and legacy queued-job handling have an approved policy. The two GET routes should be handled separately as a compatibility read model.
 
 ## Duplicate And Alias Matrix
 
@@ -152,7 +154,8 @@ The characterization suite verifies the sentinel does not appear in provider/adm
 Active frontend dependencies:
 
 - `frontend/index.html` calls `/api/alignment/runs`.
-- `frontend/index.html` calls `/api/alignment/run`.
+- No production frontend code calls `POST /api/alignment/run`.
+- `frontend/js/formal-workflow.js` calls only the formal document-alignment API family.
 - `frontend/index.html` calls `/api/admin/ai/providers`, `/models`, `/prompts`, `/calls`, `/usage`, and `/health`.
 
 OpenAPI dependencies:
