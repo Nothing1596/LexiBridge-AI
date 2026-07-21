@@ -916,3 +916,43 @@ Next recommended slice: freeze and implement the formal document alignment
 application service. That task must explicitly define service DTOs, transaction
 ownership, item-key generation, idempotency enforcement, and worker handoff
 from the model fields before any route or frontend cutover.
+
+## Task 9C.5K Formal Workflow Frontend Cutover Verification
+
+Task 9C.5K verifies the Task 9C.5H frontend cutover from the trusted formal
+backend baseline. It does not extract another route and does not change the
+formal API, OpenAPI, workflow version, job type, idempotency scope, or
+`RouteCoreDependencies`.
+
+Verified teacher flow:
+
+- upload and governed-source refresh provide the server-owned `source_uid`;
+- `POST /api/document-alignment-runs` uses a browser-crypto idempotency key and
+  sends only `source_uid`;
+- polling uses `GET /api/document-alignment-runs/{run_uid}` and stops at a
+  terminal business status;
+- items use `GET /api/document-alignment-runs/{run_uid}/items` with server-side
+  `page` and `page_size` parameters;
+- reload restores the same Run from a strict `sessionStorage` allowlist without
+  persisting tokens, credentials, evidence bodies, or model output;
+- double-clicking creates one formal POST, and formal failure does not fall
+  back to `POST /api/alignment/run`.
+
+Legacy consumer status:
+
+- the teacher start, polling, item-loading, and recovery flow makes zero
+  requests to `POST /api/alignment/run`;
+- the legacy backend POST remains registered and is not deleted in this task;
+- `GET /api/alignment/runs` remains an active historical compatibility list and
+  requires a separate remaining-consumer/deprecation decision.
+
+The browser verification runner uses the server-authoritative
+`DocumentAlignmentWorkflowRun.total_items` for item rendering and pagination
+assertions. This preserves item-bootstrap semantics for multi-word candidates
+and for early blocked runs instead of assuming one item per fixture phrase.
+
+Pilot status remains `READY_WITH_CONDITIONS`: the verified local path is a
+Pilot Release Candidate, not a production deployment. PostgreSQL migrations,
+object storage, a supervised production queue/worker runtime, distributed
+lease proof, live-provider governance, monitoring, HTTPS, backup/restore, and
+formal privacy operations remain outside the current baseline.

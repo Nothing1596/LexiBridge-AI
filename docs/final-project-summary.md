@@ -30,6 +30,8 @@ The project shifted from an AI translation tool to an AI retrieval, translation,
 - Course and personal knowledge bases.
 - Evidence retrieval with hard filters.
 - Bilingual terminology alignment.
+- Formal asynchronous document-alignment runs with status polling and
+  server-paginated items.
 - Terminology card quality control.
 - Student feedback and learning marks.
 - Evaluation harness and retrieval regression.
@@ -37,15 +39,21 @@ The project shifted from an AI translation tool to an AI retrieval, translation,
 
 ## Technical Overview
 
-The local MVP uses Flask, SQLite, a single-page HTML/CSS/JS frontend, local jobs, structured services, OpenAPI contract, and local release checks. It supports KnowledgeBaseVersion, KnowledgeSource, KnowledgeChunk, RetrievalBackend, TerminologyCard, AlignmentRun, EvaluationRun, PilotFeedback, and IterationBacklogItem.
+The local MVP uses Flask, SQLite, a single-page HTML/CSS/JS frontend, local jobs, structured services, an OpenAPI contract, and local release checks. Its formal teacher workflow uses governed `KnowledgeSource` identity, `DocumentAlignmentWorkflowRun`, `DocumentAlignmentWorkflowItem`, background processing, idempotent admission, run polling, and server-side item pagination. Legacy `AlignmentRun` data and routes remain for compatibility and controlled deprecation.
 
 ## Current Version Boundary
 
-The system is local pilot-ready. It is not production-ready. Production would require PostgreSQL, object storage, production queue, live provider governance, formal privacy policy, HTTPS, monitoring, and backup drills.
+The system is a local Pilot Release Candidate with conditions. It is not production-ready. Production would require PostgreSQL migrations and proof, object storage, a supervised production queue and worker runtime, distributed lease validation, live-provider governance, formal privacy operations, HTTPS, monitoring, and backup/restore drills.
 
 ## Pilot Readiness
 
-The repository now includes demo data, runbooks, manuals, metrics, feedback templates, pilot report templates, and final presentation materials.
+The repository includes demo data, runbooks, manuals, metrics, feedback templates, pilot report templates, and final presentation materials. Task 9C.5K re-verifies the Task 9C.5H teacher cutover through the real formal start/run/items APIs, duplicate-submit protection, terminal-state rendering, item pagination, and refresh recovery. The verified formal path has no legacy POST fallback and makes no external provider request.
+
+Current readiness is `READY_WITH_CONDITIONS`. The candidate is suitable for a
+controlled local pilot using authorized materials, deterministic/local provider
+behavior, and the documented operational checks. The legacy backend alignment
+POST and historical run-list view remain present until a separate
+remaining-consumer audit authorizes deprecation or removal.
 
 ## Next Plan
 

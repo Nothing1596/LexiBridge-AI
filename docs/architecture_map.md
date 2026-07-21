@@ -1,6 +1,6 @@
 # LexiBridge-AI Architecture Map
 
-Updated: 2026-07-19
+Updated: 2026-07-21
 
 This map describes the current implemented pilot architecture. It is not a future-state product plan.
 
@@ -20,6 +20,7 @@ This map describes the current implemented pilot architecture. It is not a futur
 - Task 9C.5F.1 adds `backend/services/formal_document_alignment_provider_selection.py`: Admission freezes `mock-rule-v1`, `mock-rule-v1:v1`, and `alignment-v1`; preparation has no provider/model/prompt fallback; governance, preflight, verification, and attach resolve the same bounded local policy. Historical null selections fail closed without backfill or provider usage. Task 9C.5G v3 subsequently verifies that default identity through the real local HTTP/worker flow.
 - Task 9C.5F.2 adds authoritative formal retry-budget constants and makes Admission freeze new document-alignment jobs at three counted processing-failure outcomes. Claim and stale reclaim advance lease generation without consuming business retry budget; two requeues are possible; exhaustion and unsupported outcomes finalize Root before Job. Because pre-outcome crash/reclaim generations are uncounted, `execution_attempt` can exceed `max_attempts` and V1 has no separate crash-loop cap. Historical jobs are not backfilled. Task 9C.5G v3 verifies the authenticated HTTP-to-worker-to-polling chain, pagination, source-scoped concurrent replay, business partial/all-blocked outcomes, retry/crash/terminal recovery, browser-session access, and response/artifact redaction on local SQLite.
 - Task 9C.5H adds `frontend/js/formal-workflow.js` and connects the existing teacher course-document action to the formal start/run/items API. Governed source identity is mapped from the server source list, start keys use browser crypto, one active poll is persisted in a strict versioned `sessionStorage` schema, reload resumes the same Run, and item pages remain server-paginated. The formal path has no legacy POST fallback. The legacy backend route and old run-list compatibility view remain for consumer audit; a historical formal run center, full review workbench, visual redesign, PostgreSQL proof, distributed workers, live providers, and production supervision remain absent.
+- Task 9C.5K re-verifies the 9C.5H cutover as a Pilot Release Candidate baseline without changing the production frontend or backend contracts. The real browser gates cover duplicate-click suppression, `ready_for_review`, `completed_with_warnings`, and `blocked` terminal outcomes, server-authoritative item counts and pagination, reload recovery of the same Run, allowlisted `sessionStorage`, zero legacy alignment POSTs, zero external provider requests, and zero console/page errors. The E2E runner now reads `run.total_items` instead of assuming one workflow item per source phrase.
 - `AlignmentProviderPolicy`: governance policy for alignment providers. It records enabled state, replay/external-call gates, attach policy, human-review requirement, role/course scope, limits, and budget caps.
 - `ConceptCardReviewRecord`: immutable review action record for approve, reject, revision request, more-evidence request, reopen, deprecate, assignment, and notes.
 - `CourseReviewPolicy`: course-level review rules for evidence sides, blocking risks, override permissions, two-step review, and human-review requirements.
@@ -206,10 +207,11 @@ Provider verification:
 - Mock/fake/replay/disabled runs never set production approval and never write `ConceptAlignmentCard.confidence_score`.
 
 Legacy alignment run:
-- `POST /api/alignment/run` remains registered pending a consumer audit, but
-  Task 9C.5H removes it from the teacher document-alignment start, polling,
-  item-loading, and reload-recovery paths. Task 9C.4S characterizes it as a
-  legacy execution path, not the formal verification path.
+- `POST /api/alignment/run` remains registered pending a final
+  remaining-consumer audit, but Tasks 9C.5H and 9C.5K remove and verify its
+  absence from the teacher document-alignment start, polling, item-loading,
+  and reload-recovery paths. Task 9C.4S characterizes it as a legacy execution
+  path, not the formal verification path.
 - It writes `AlignmentRun`, `BackgroundJob`, `TerminologyCard`, legacy
   `UsageRecord`, and `AICallLog` paths rather than `AlignmentVerificationRun`
   and `AlignmentProviderUsageRecord`.
@@ -237,7 +239,8 @@ Legacy alignment run:
   OpenAPI while hiding transport ownership. Task 9C.5F.1 aligns Admission's
   frozen local provider identity with preparation, policy, preflight, and
   attach. Task 9C.5G v3 supplies the formal API E2E, and Task 9C.5H supplies the
-  minimal teacher frontend cutover. A production worker runtime does not exist.
+  minimal teacher frontend cutover, and Task 9C.5K verifies that cutover for a
+  local Pilot Release Candidate. A production worker runtime does not exist.
 
 ## Permission Boundaries
 

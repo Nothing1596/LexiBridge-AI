@@ -15,6 +15,7 @@ def test_formal_ui_runner_drives_real_controls_and_worker():
     assert 'data-testid="formal-alignment-start"' in combined
     assert 'get_by_test_id("formal-alignment-next")' in source
     assert "run_formal_worker_once" in source
+    assert "actual_items = int(run.total_items or 0)" in source
     assert "page.evaluate(async () => fetch" not in combined
     assert '"/api/alignment/run"' in source
     assert "legacy_alignment_requests" in source

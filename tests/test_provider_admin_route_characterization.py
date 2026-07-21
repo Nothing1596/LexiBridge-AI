@@ -299,10 +299,13 @@ def test_admin_ai_healthcheck_local_path_writes_health_without_network_or_provid
         assert after["ai_provider_config"] == before["ai_provider_config"]
 
 
-def test_legacy_alignment_run_routes_contract_and_frontend_dependency(app_module, client, teacher_token, student_token):
+def test_legacy_alignment_run_routes_contract_and_frontend_cutover(app_module, client, teacher_token, student_token):
     frontend = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    formal_frontend = (ROOT / "frontend" / "js" / "formal-workflow.js").read_text(encoding="utf-8")
     assert 'api("/api/alignment/runs")' in frontend
-    assert 'api("/api/alignment/run"' in frontend
+    assert 'api("/api/alignment/run"' not in frontend
+    assert '"/api/alignment/run"' not in formal_frontend
+    assert '"/api/document-alignment-runs"' in formal_frontend
     assert 'api("/api/admin/ai/providers")' in frontend
     assert 'api("/api/admin/ai/health")' in frontend
 
