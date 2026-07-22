@@ -1,0 +1,165 @@
+# Legacy Alignment Deprecation Plan
+
+## Decision
+
+- Task: `9C.5M`
+- Baseline: `4319d35751ba5468961081b17c0d7a49a5997762`
+- Route: `POST /api/alignment/run`
+- Current state: `ACTIVE_COMPATIBILITY_SURFACE`
+- Boundary status: `LEGACY_ALIGNMENT_DEPRECATION_BOUNDARY_ESTABLISHED`
+- HTTP 410 readiness: `NOT_READY`
+
+This document defines the evidence required to enter a deprecation window. It
+does not change the route, response, permission model, frontend, worker,
+database schema, provider behavior, or formal workflow.
+
+## Scope Boundary
+
+The POST execution route is the retirement target. These related surfaces are
+separate decisions:
+
+- `GET /api/alignment/runs` remains an active frontend history view;
+- `GET /api/alignment/runs/{run_id}` remains a compatibility detail view;
+- `GET /api/admin/alignment-runs` remains an admin read view;
+- legacy `AlignmentRun` and `TerminologyCard` data may require long-term
+  read-only retention after POST admission ends.
+
+HTTP 410 for the POST must not implicitly delete those read contracts or data.
+
+## 410 Readiness Gates
+
+| Gate | Required Evidence | Current Evidence | Status |
+|---|---|---|---|
+| Frontend consumer = 0 | Static scan and browser request count show no production legacy POST/fallback | 9C.5K/9C.5L and formal UI E2E show `legacy_alignment_requests=0` | satisfied |
+| External consumer = no known | Client-owner inventory plus route traffic observation shows no caller | No repository executable client found, but no gateway/access telemetry or external client registry exists | blocked: `UNKNOWN_EXTERNAL_LEGACY_CONSUMER` |
+| Queued legacy jobs = 0 | Authoritative target database query at window start and immediately before cutover | Repository-local SQLite snapshot is 0 only | conditional; not environment-authoritative |
+| Running legacy jobs = 0 | Authoritative query plus explicit disposition for stale-running jobs | Repository-local SQLite snapshot is 0; legacy worker has no stale reclaim | blocked pending operational policy |
+| Retrying legacy jobs = 0 | Authoritative query and retry drain/quarantine report | Repository-local SQLite snapshot is 0 only | conditional |
+| No lifecycle mismatch | No missing-run jobs; no active runs linked to terminal/missing jobs | Repository-local snapshot has no mismatch; code permits mismatch after crash/failure/cancel | blocked pending environment audit |
+| Migration notice exists | OpenAPI/operator notice names formal replacement, timeline, owner, and support path | OpenAPI marks deprecated but incorrectly says the formal replacement is unavailable; no dated notice exists | blocked |
+| Monitoring window complete | Approved duration with route-call and queue-state evidence retained | No legacy route usage metric or completed window exists | blocked |
+| Compatibility tests reclassified | Tests are tagged as keep, convert-to-410, or remove-after-retirement | Inventory exists; conversion decision is not implemented | blocked |
+| Rollback and incident owner defined | Named owner and reversible cutover procedure exist | Not present in repository governance docs | blocked |
+
+## Required Monitoring Window
+
+Before 410 is authorized, the pilot operator must select an explicit window
+and record, per environment:
+
+- authenticated `POST /api/alignment/run` call count and caller identity class;
+- response status distribution without request bodies or credentials;
+- `alignment_run` jobs by `queued`, `running`, `retrying`, `failed`,
+  `completed`, and `canceled`;
+- age of the oldest queued/retrying/running legacy job;
+- jobs missing a linked `AlignmentRun`;
+- active runs with no job or with a terminal/missing job;
+- manual retry/cancel operations;
+- worker crashes or legacy jobs stuck in `running`;
+- support reports from pilot teachers, scripts, and external API owners.
+
+The window duration, environments, owner, and acceptable zero-traffic
+threshold must be approved outside this code audit. Repository scanning alone
+cannot substitute for runtime evidence.
+
+## Queue Drain And Running-Job Policy
+
+Before disabling admission:
+
+1. identify every target database and worker instance;
+2. record initial legacy queue counts without mutating data;
+3. stop or gate new legacy POST admission only in a future approved task;
+4. keep the legacy worker and dispatch code available while queued/retrying
+   work drains;
+5. investigate every running job because automatic legacy stale reclaim does
+   not exist;
+6. choose an explicit operator action for each stale job: complete, cancel,
+   fail safely, or requeue under a separately reviewed procedure;
+7. verify linked `AlignmentRun` status and legacy card writes after drain;
+8. require queued/running/retrying and lifecycle-mismatch counts to remain zero
+   immediately before 410.
+
+This task does not choose or execute a mutation procedure for stale jobs.
+
+## Consumer Confirmation Procedure
+
+The following evidence is required to replace
+`UNKNOWN_EXTERNAL_LEGACY_CONSUMER` with `NO_KNOWN_EXTERNAL_CONSUMER`:
+
+1. search the repository and maintained deployment/configuration repositories;
+2. identify owners of documented API clients, browser bookmarks, teaching
+   scripts, notebooks, scheduled jobs, and integration accounts;
+3. inspect sanitized gateway/application access metrics for the approved
+   observation window;
+4. publish the formal replacement endpoints and migration deadline;
+5. obtain explicit confirmation from known client owners;
+6. retain the evidence with the release decision.
+
+No request payload, token, credential, prompt, output, or private evidence may
+be added to monitoring artifacts.
+
+## Test Retirement Matrix
+
+| Test Class | During Window | At HTTP 410 | After Dead-Code Removal |
+|---|---|---|---|
+| Formal zero-legacy/fallback tests | keep unchanged | keep unchanged | keep unchanged |
+| Formal worker no-legacy-dispatch tests | keep unchanged | keep unchanged | keep unchanged |
+| Legacy external/no-network containment | keep while execution exists | replace with no-transport 410 assertions | remove only with retired execution code |
+| Legacy local route/worker success | keep during drain | split: route expects 410; direct worker drain test remains until queue retirement | remove only after worker/data decision |
+| Legacy permission/response characterization | keep during window | convert to approved deprecation response contract | remove only after route removal |
+| Legacy GET history/admin tests | keep; separate scope | keep unless read surfaces are separately migrated | follow independent read-retention decision |
+| Readiness legacy safety probes | keep | update to assert approved disabled/410 behavior and zero transport | retain a no-regression retirement Gate |
+
+Tests are evidence and must be converted deliberately; their existence is not
+a reason to preserve obsolete runtime behavior forever.
+
+## Migration Notice Requirements
+
+The future notice must:
+
+- identify `POST /api/document-alignment-runs` as the supported replacement;
+- include status and item polling endpoints;
+- state the compatibility-window start and end dates;
+- state the planned HTTP status/error envelope after the window;
+- identify an owner/support path;
+- distinguish POST retirement from legacy GET history retention;
+- avoid promising production readiness beyond the controlled pilot boundary.
+
+The current OpenAPI description is insufficient because it still says the
+formal replacement is unavailable.
+
+## Entry Criteria For A Legacy 410 Task
+
+A future Task 9C.5N may begin only when all of the following are documented:
+
+1. production frontend legacy POST and fallback counts remain zero;
+2. external consumer status is `NO_KNOWN_EXTERNAL_CONSUMER` after the approved
+   observation window;
+3. authoritative queued, running, and retrying legacy job counts are zero in
+   every target environment;
+4. no orphan or run/job lifecycle mismatch remains;
+5. a stale-running job disposition is approved;
+6. a dated migration notice has been published;
+7. compatibility tests have an approved conversion map;
+8. rollback/incident ownership is assigned;
+9. Formal Workflow and all release/readiness Gates remain green.
+
+## Current Blockers
+
+- `UNKNOWN_EXTERNAL_LEGACY_CONSUMER` due to absent runtime traffic evidence;
+- new legacy async and synchronous execution remains enabled;
+- legacy worker still claims and executes queued/retrying jobs;
+- no legacy stale-running reclaim or operator disposition exists;
+- local zero queue counts are not authoritative for other environments;
+- OpenAPI migration text is stale and no dated notice exists;
+- no completed monitoring/deprecation window exists;
+- legacy compatibility tests have not yet been converted to a 410 contract.
+
+## Authorization Result
+
+The retirement boundary is now explicit, but HTTP 410 and code removal are not
+authorized.
+
+```text
+LEGACY_ALIGNMENT_DEPRECATION_BOUNDARY_ESTABLISHED
+LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
+```
