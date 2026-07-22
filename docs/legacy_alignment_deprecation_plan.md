@@ -4,6 +4,8 @@
 
 - Task: `9C.5M`
 - Baseline: `4319d35751ba5468961081b17c0d7a49a5997762`
+- Runtime containment amendment: Task `9C.5N`, baseline
+  `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
 - Route: `POST /api/alignment/run`
 - Current state: `ACTIVE_COMPATIBILITY_SURFACE`
 - Boundary status: `LEGACY_ALIGNMENT_DEPRECATION_BOUNDARY_ESTABLISHED`
@@ -36,7 +38,9 @@ HTTP 410 for the POST must not implicitly delete those read contracts or data.
 | Running legacy jobs = 0 | Authoritative query plus explicit disposition for stale-running jobs | Repository-local SQLite snapshot is 0; legacy worker has no stale reclaim | blocked pending operational policy |
 | Retrying legacy jobs = 0 | Authoritative query and retry drain/quarantine report | Repository-local SQLite snapshot is 0 only | conditional |
 | No lifecycle mismatch | No missing-run jobs; no active runs linked to terminal/missing jobs | Repository-local snapshot has no mismatch; code permits mismatch after crash/failure/cancel | blocked pending environment audit |
-| Migration notice exists | OpenAPI/operator notice names formal replacement, timeline, owner, and support path | OpenAPI marks deprecated but incorrectly says the formal replacement is unavailable; no dated notice exists | blocked |
+| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | POST, sync upload, and helper-backed creation remain active | blocked pending cutover design |
+| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Formal and legacy polling share `scripts/run_worker.py`; no formal-only switch exists | blocked |
+| Migration notice exists | OpenAPI/operator notice names formal replacement, timeline, owner, and support path | OpenAPI identifies the formal replacement; no dated timeline, owner, or support path exists | partially satisfied; blocked |
 | Monitoring window complete | Approved duration with route-call and queue-state evidence retained | No legacy route usage metric or completed window exists | blocked |
 | Compatibility tests reclassified | Tests are tagged as keep, convert-to-410, or remove-after-retirement | Inventory exists; conversion decision is not implemented | blocked |
 | Rollback and incident owner defined | Named owner and reversible cutover procedure exist | Not present in repository governance docs | blocked |
@@ -57,8 +61,8 @@ and record, per environment:
 - worker crashes or legacy jobs stuck in `running`;
 - support reports from pilot teachers, scripts, and external API owners.
 
-The window duration, environments, owner, and acceptable zero-traffic
-threshold must be approved outside this code audit. Repository scanning alone
+The concrete minimum window and required evidence are defined in
+`docs/legacy_alignment_runtime_observation_plan.md`. Repository scanning alone
 cannot substitute for runtime evidence.
 
 ## Queue Drain And Running-Job Policy
@@ -124,12 +128,34 @@ The future notice must:
 - distinguish POST retirement from legacy GET history retention;
 - avoid promising production readiness beyond the controlled pilot boundary.
 
-The current OpenAPI description is insufficient because it still says the
-formal replacement is unavailable.
+OpenAPI now identifies the formal replacement and preserves the active
+compatibility contract. A dated operator/client notice with an owner and
+support path is still required.
+
+## Runtime Containment Amendment
+
+Task 9C.5N confirms that runtime containment readiness is documented but not
+operationally complete:
+
+- legacy claim records `locked_by` and `locked_at` but does not use heartbeat,
+  stale reclaim, lease ownership, or fencing;
+- running legacy jobs have no safe automatic recovery path;
+- cancel/retry update the shared job but do not guarantee linked
+  `AlignmentRun` terminal consistency;
+- sync upload and helper-backed execution can create legacy runs outside the
+  default async legacy POST;
+- the combined local worker has no switch to stop legacy polling while
+  retaining Formal Workflow processing;
+- the external consumer state remains unknown until the observation window
+  completes.
+
+See `docs/legacy_alignment_runtime_inventory.md` and
+`docs/legacy_alignment_runtime_observation_plan.md` for the evidence and
+operational requirements.
 
 ## Entry Criteria For A Legacy 410 Task
 
-A future Task 9C.5N may begin only when all of the following are documented:
+A future Task 9C.5O may begin only when all of the following are documented:
 
 1. production frontend legacy POST and fallback counts remain zero;
 2. external consumer status is `NO_KNOWN_EXTERNAL_CONSUMER` after the approved
@@ -138,19 +164,26 @@ A future Task 9C.5N may begin only when all of the following are documented:
    every target environment;
 4. no orphan or run/job lifecycle mismatch remains;
 5. a stale-running job disposition is approved;
-6. a dated migration notice has been published;
-7. compatibility tests have an approved conversion map;
-8. rollback/incident ownership is assigned;
-9. Formal Workflow and all release/readiness Gates remain green.
+6. legacy creation is disabled or intentionally accepted under the approved
+   cutover procedure;
+7. a legacy worker shutdown procedure is rehearsed without stopping Formal
+   Workflow processing;
+8. a dated migration notice has been published;
+9. compatibility tests have an approved conversion map;
+10. rollback/incident ownership is assigned;
+11. Formal Workflow and all release/readiness Gates remain green.
 
 ## Current Blockers
 
 - `UNKNOWN_EXTERNAL_LEGACY_CONSUMER` due to absent runtime traffic evidence;
 - new legacy async and synchronous execution remains enabled;
+- sync upload and helper-backed paths can still create legacy runs;
 - legacy worker still claims and executes queued/retrying jobs;
 - no legacy stale-running reclaim or operator disposition exists;
+- no formal-only worker mode or legacy polling shutdown procedure exists;
 - local zero queue counts are not authoritative for other environments;
-- OpenAPI migration text is stale and no dated notice exists;
+- OpenAPI names the formal replacement, but no dated notice, owner, or support
+  path exists;
 - no completed monitoring/deprecation window exists;
 - legacy compatibility tests have not yet been converted to a 410 contract.
 

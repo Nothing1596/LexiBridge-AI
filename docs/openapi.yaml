@@ -1064,13 +1064,18 @@ paths:
       summary: Run terminology alignment for a document or direct term
       deprecated: true
       description: >
-        Legacy temporary frontend compatibility endpoint. External/live
-        execution is disabled in this path and returns
+        Legacy active compatibility endpoint. Under the API root, the
+        supported replacement is POST document-alignment-runs, followed by
+        GET document-alignment-runs/{run_uid} and
+        GET document-alignment-runs/{run_uid}/items. The production teacher
+        workflow uses that formal API and does not fall back to this operation.
+        External/live execution is disabled in this path and returns
         LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED. Only explicitly
         allowlisted local deterministic compatibility modes may continue.
-        The formal replacement document-alignment workflow is not available
-        yet. This endpoint is not HTTP 410 until all callers are migrated; a
-        later zero-caller phase will use LEGACY_ALIGNMENT_RUN_DEPRECATED.
+        This endpoint is not HTTP 410 until the external-consumer observation
+        window, legacy queue drain, worker shutdown procedure, migration
+        notice, and rollback ownership are complete. A later approved
+        zero-caller phase will use LEGACY_ALIGNMENT_RUN_DEPRECATED.
       requestBody:
         required: true
         content:
