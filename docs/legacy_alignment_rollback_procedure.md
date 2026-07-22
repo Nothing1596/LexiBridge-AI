@@ -7,6 +7,11 @@
 - Incident/support path: `PENDING_TARGET_ENVIRONMENT_ASSIGNMENT`
 - Current authorization: rehearsal only
 
+```text
+ROLLBACK_OWNER_PENDING
+OBSERVATION_WINDOW_PENDING_DEPLOYMENT
+```
+
 A named person and contact path are required before a target freeze. The
 repository cannot infer operational ownership.
 

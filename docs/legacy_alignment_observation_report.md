@@ -11,9 +11,11 @@
 - Observation end: `PENDING_14_DAY_WINDOW`
 - Actual target-environment active days: `0`
 - External consumer status: `UNKNOWN_EXTERNAL_LEGACY_CONSUMER`
+- Activation record: `docs/legacy_alignment_observation_window.md`
 
 ```text
 OBSERVATION_WINDOW_PENDING
+OBSERVATION_WINDOW_PENDING_DEPLOYMENT
 LEGACY_ALIGNMENT_DEPRECATION_OBSERVATION_INCOMPLETE
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```
