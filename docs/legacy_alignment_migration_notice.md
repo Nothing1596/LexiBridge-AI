@@ -3,11 +3,11 @@
 ## Notice Status
 
 - Audience: Legacy alignment API client owners and pilot operators
-- Publication status: `DRAFT_NOT_DISTRIBUTED`
-- Observation environment: `TARGET_PILOT_ENVIRONMENT_UNASSIGNED`
-- Observation start: `PENDING_DEPLOYMENT`
+- Publication status: `READY_FOR_DISTRIBUTION`
+- Observation environment: `pilot-internal-local`
+- Observation start: `PENDING_OBSERVATION_START`
 - Earliest review date: `PENDING_START_DATE_PLUS_14_DAYS`
-- Support owner: `SUPPORT_OWNER_PENDING`
+- Support owner: Project Maintainer
 
 This is a migration notice draft. It does not announce retirement, HTTP 410,
 or route removal.
@@ -39,10 +39,11 @@ fall back to the Legacy POST after a Formal API failure.
 
 ## Observation Timeline
 
-The observation window has not started. It begins only after the target
-environment, database, workers, retained log source, and named owners are
-recorded. It then runs for at least 14 continuous calendar days and at least
-five actual operating days.
+The observation window has not started. The target environment, database,
+worker modes, and owners are declared. Distribution, retained log activation,
+initial snapshots, process records, and the UTC start timestamp must be
+recorded before timing begins. The window then runs for at least 14 continuous
+calendar days and at least five actual operating days.
 
 No retirement date is set. Any unexplained Legacy creation, incomplete queue
 drain, external-consumer uncertainty, rollback, or Formal regression extends
@@ -62,14 +63,16 @@ payloads in migration evidence.
 
 ## Contacts
 
-- Observation owner: `OWNER_PENDING`
-- Rollback owner: `ROLLBACK_OWNER_PENDING`
-- Support owner/contact path: `SUPPORT_OWNER_PENDING`
+- Observation owner: Project Maintainer
+- Rollback owner: Project Maintainer
+- Support owner/contact path: Project Maintainer pilot coordination channel
 
-The notice cannot be distributed as an operational deadline until these roles
-and a target environment are assigned.
+The notice is ready to distribute to the controlled Pilot participants. The
+owner must record recipients, channel, version, and UTC distribution time. It
+must not state a retirement date or imply that the Legacy API is already gone.
 
 ```text
-OBSERVATION_WINDOW_PENDING_DEPLOYMENT
+LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
+OBSERVATION_WINDOW_PENDING_START
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```

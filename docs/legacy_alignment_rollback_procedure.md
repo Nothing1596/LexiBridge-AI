@@ -2,18 +2,20 @@
 
 ## Ownership
 
-- Change owner: `PENDING_TARGET_ENVIRONMENT_ASSIGNMENT`
-- Rollback owner: `PENDING_TARGET_ENVIRONMENT_ASSIGNMENT`
-- Incident/support path: `PENDING_TARGET_ENVIRONMENT_ASSIGNMENT`
-- Current authorization: rehearsal only
+- Target environment: `pilot-internal-local`
+- Change owner: Project Maintainer
+- Rollback owner: Project Maintainer
+- Incident/support path: Project Maintainer pilot coordination channel
+- Current authorization: environment preparation and local rehearsal only
 
 ```text
-ROLLBACK_OWNER_PENDING
-OBSERVATION_WINDOW_PENDING_DEPLOYMENT
+LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
+OBSERVATION_WINDOW_PENDING_START
 ```
 
-A named person and contact path are required before a target freeze. The
-repository cannot infer operational ownership.
+The Project Maintainer is the decision and execution owner for this
+single-person controlled Pilot. A hosted or multi-operator environment must
+replace this assignment with named operational contacts.
 
 ## Preconditions
 

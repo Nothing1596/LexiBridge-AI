@@ -7,7 +7,9 @@ authorize HTTP 410, delete data, or replace the rollback procedure. Every
 entry needs a UTC timestamp, operator, environment, database identity, and
 artifact location.
 
-Current execution status: `PENDING_TARGET_DEPLOYMENT`.
+Target environment: `pilot-internal-local`.
+
+Current execution status: `READY_FOR_OBSERVATION_START`.
 
 ## Before Freeze
 
@@ -66,7 +68,23 @@ The `2026-07-22` isolated SQLite rehearsal passed Freeze, drain, Disabled, and
 rollback checks. It is preparation evidence only. No checkbox above is marked
 complete for a target environment.
 
+The `pilot-internal-local` readiness pre-check also confirmed:
+
+| Check | Result |
+|---|---|
+| Persistent SQLite identity | declared |
+| Database readiness/integrity | PASS |
+| Legacy queued/running/retrying | 0 / 0 / 0 at readiness snapshot |
+| Formal and Legacy worker modes | declared and isolated |
+| Observation/rollback/support owner | Project Maintainer |
+| Backup, verification, isolated restore | PASS |
+| External access-log visibility | limited; gateway source not available |
+
+These pre-checks do not mark any operational Freeze checkbox complete. Counts
+and process state must be captured again at the actual observation start and
+Freeze timestamps.
+
 ```text
-OBSERVATION_WINDOW_PENDING_DEPLOYMENT
-ROLLBACK_OWNER_PENDING
+LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
+OBSERVATION_WINDOW_PENDING_START
 ```

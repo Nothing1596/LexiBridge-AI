@@ -4,23 +4,26 @@
 
 - Task: `9C.5O.1`
 - Baseline: `22f9976dc94ef448682cca5bb54a99bde2dc320e`
-- Target environment name: `TARGET_PILOT_ENVIRONMENT_UNASSIGNED`
+- Environment-readiness task: `9C.5O.2`
+- Target environment name: `pilot-internal-local`
 - Current state: `PREPARED`
-- Start date: `PENDING_DEPLOYMENT`
+- Start date: `PENDING_OBSERVATION_START`
 - Target end date: `PENDING_START_DATE_PLUS_14_DAYS`
 - Actual target operating days: `0`
 - Required target operating days: `5`
 
 ```text
-OBSERVATION_WINDOW_PENDING_DEPLOYMENT
+LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
+OBSERVATION_WINDOW_PENDING_START
 LIMITED_OBSERVABILITY
-OWNER_PENDING
+EXTERNAL_CONSUMER_VISIBILITY_LIMITED
 ```
 
-No target deployment, authoritative database identity, retained access-log
-source, or operational owner is available in the repository. The isolated
-environment used by tests and rehearsals is named `pilot-local-rehearsal`, but
-it is not a target pilot environment and does not count as Day 1.
+The target is the concrete `pilot-internal-local` controlled-pilot environment
+declared in `docs/pilot_environment_declaration.md`. It has an identified
+database, worker modes, owners, and evidence procedures. It is not currently
+running an observation window, and no local test or preparation step counts as
+Day 1.
 
 ## State Machine
 
@@ -43,13 +46,13 @@ initial evidence bundle. This task does not enter `COMPLETED` or `REVIEWED`.
 
 | Scope | Required value | Current value |
 |---|---|---|
-| Deployment environment | Stable target name | `TARGET_PILOT_ENVIRONMENT_UNASSIGNED` |
-| Database type | SQLite or PostgreSQL as actually deployed | `PENDING_DEPLOYMENT` |
-| Database identity | Non-secret stable instance/file identifier | `PENDING_DEPLOYMENT` |
-| Initial snapshot time | Retained UTC timestamp | `PENDING_DEPLOYMENT` |
-| Formal worker | Process/service identity and mode | `PENDING_DEPLOYMENT` |
-| Legacy worker | Process/service identity or confirmed stopped state | `PENDING_DEPLOYMENT` |
-| Application log source | Retained stream/path and retention period | `PENDING_DEPLOYMENT` |
+| Deployment environment | Stable target name | `pilot-internal-local` |
+| Database type | SQLite or PostgreSQL as actually deployed | SQLite |
+| Database identity | Non-secret stable instance/file identifier | `project-root/backend/lexibridge.db` |
+| Initial snapshot time | Retained UTC timestamp | required at observation start |
+| Formal worker | Process/service identity and mode | `pilot-internal-formal-1`, Formal mode |
+| Legacy worker | Process/service identity or confirmed stopped state | `pilot-internal-legacy-1`, isolated/on demand |
+| Application log source | Retained stream/path and retention period | declared local sink; activation verification pending |
 | Access/gateway logs | Source and query owner, or explicit unavailable decision | `UNAVAILABLE` |
 
 Do not record database credentials, tokens, filesystem secrets, request
@@ -59,12 +62,13 @@ payloads, prompts, outputs, or private evidence in this declaration.
 
 | Role | Responsibility | Current owner |
 |---|---|---|
-| Observation owner | Daily metrics, caller attribution, evidence retention | `OWNER_PENDING` |
-| Rollback owner | Freeze rollback decision and execution | `ROLLBACK_OWNER_PENDING` |
-| Support owner | Migration questions and caller communication | `SUPPORT_OWNER_PENDING` |
+| Observation owner | Daily metrics, caller attribution, evidence retention | Project Maintainer |
+| Rollback owner | Freeze rollback decision and execution | Project Maintainer |
+| Support owner | Migration questions and caller communication | Project Maintainer |
 
-The window cannot become `ACTIVE` until named owners and contact paths are
-recorded in an environment-controlled operational record.
+The Project Maintainer owns the single-person controlled Pilot. A later
+multi-person or hosted environment requires named operational contacts before
+it enters the observation scope.
 
 ## Duration
 
@@ -83,14 +87,14 @@ actual operating days. When activation evidence exists:
 
 | Signal | Required dimensions | Current source | Activation status |
 |---|---|---|---|
-| Legacy POST | timestamp, caller ID/role, result, status, sync/async, creation counts | payload-free application event `legacy_alignment_request` | code ready; target retention pending |
-| Legacy history GET | timestamp, caller ID/role, route, status | payload-free application event `legacy_alignment_request` | code ready; target retention pending |
-| AlignmentRun creation | timestamp, caller/source, count | request creation count and internal creation event | code ready; target retention pending |
-| Legacy BackgroundJob creation | timestamp, caller/source, count | request creation count and internal creation event | code ready; target retention pending |
-| Queue state | queued, running, retrying, failed, oldest active age | `legacy_alignment_runtime.py status` and authoritative database snapshot | manual collection pending |
-| Legacy worker | claim, start, completion, retry, failure, worker ID | `BackgroundJobEvent` plus worker process inventory | target correlation pending |
-| Formal run count | run count and terminal distribution | Formal WorkflowRun database snapshot | target query pending |
-| Formal Legacy POST count | `legacy_alignment_requests` | Formal frontend E2E/network artifact | deployment observation pending |
+| Legacy POST | timestamp, caller ID/role, result, status, sync/async, creation counts | payload-free application event `legacy_alignment_request` | available; retained sink starts with window |
+| Legacy history GET | timestamp, caller ID/role, route, status | payload-free application event `legacy_alignment_request` | available; retained sink starts with window |
+| AlignmentRun creation | timestamp, caller/source, count | request creation count and internal creation event | available |
+| Legacy BackgroundJob creation | timestamp, caller/source, count | request creation count and internal creation event | available |
+| Queue state | queued, running, retrying, failed, oldest active age | `legacy_alignment_runtime.py status` and database snapshot | available; manual collection |
+| Legacy worker | claim, start, completion, retry, failure, worker ID | `BackgroundJobEvent` plus worker process inventory | available; process correlation required |
+| Formal run count | run count and terminal distribution | Formal WorkflowRun database snapshot | available |
+| Formal Legacy POST count | `legacy_alignment_requests` | Formal frontend E2E/network artifact | available per operating-day run |
 | External consumer signal | gateway/access logs and client-owner confirmation | none connected | unavailable |
 
 Application logging plus database snapshots provide partial evidence. Without
@@ -122,7 +126,8 @@ not remove the list/detail read contracts or historical `AlignmentRun` data.
 
 ## Activation Gate
 
-Change the state to `ACTIVE` only after all items below are recorded:
+The environment is ready for a separately authorized start operation. Change
+the state to `ACTIVE` only after all items below are recorded:
 
 - target environment and authoritative database identity;
 - Formal and Legacy worker process inventory;
@@ -133,9 +138,10 @@ Change the state to `ACTIVE` only after all items below are recorded:
 - migration notice distribution record;
 - exact UTC start timestamp and calculated target end date.
 
-Until then:
+Environment assignment is complete. Start-time log retention, snapshots,
+notice distribution, process records, and timestamp remain pending. Until then:
 
 ```text
-OBSERVATION_WINDOW_PENDING_DEPLOYMENT
+OBSERVATION_WINDOW_PENDING_START
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```

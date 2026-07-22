@@ -5,9 +5,9 @@
 - Task: `9C.5O`
 - Baseline: `388666a192df9d33044541aaca4ddf42e6aa7bd2`
 - Report generated: `2026-07-22`
-- Target environment: `PENDING_ASSIGNMENT`
-- Target database: `PENDING_ASSIGNMENT`
-- Observation start: `PENDING_TARGET_DEPLOYMENT`
+- Target environment: `pilot-internal-local`
+- Target database: `project-root/backend/lexibridge.db` (SQLite)
+- Observation start: `PENDING_OBSERVATION_START`
 - Observation end: `PENDING_14_DAY_WINDOW`
 - Actual target-environment active days: `0`
 - External consumer status: `UNKNOWN_EXTERNAL_LEGACY_CONSUMER`
@@ -15,7 +15,8 @@
 
 ```text
 OBSERVATION_WINDOW_PENDING
-OBSERVATION_WINDOW_PENDING_DEPLOYMENT
+LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
+OBSERVATION_WINDOW_PENDING_START
 LEGACY_ALIGNMENT_DEPRECATION_OBSERVATION_INCOMPLETE
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```
@@ -37,9 +38,9 @@ restarts the zero-creation interval after the caller is classified.
 |---|---|---|
 | Start time | pending | retained UTC deployment timestamp |
 | End time | pending | at least 14 days after start |
-| Environment | pending | every target pilot environment |
-| Database | pending | every authoritative target database |
-| Worker state | local rehearsal only | target process inventory and state |
+| Environment | `pilot-internal-local` declared | every target pilot environment |
+| Database | persistent SQLite identified | initial timestamped snapshot |
+| Worker state | modes/owners declared, not started | target process inventory and state |
 | Legacy POST metrics | unavailable | attributed request series |
 | Legacy GET metrics | unavailable | retained read-usage decision |
 | External signal | unavailable | gateway/access-log evidence plus owner review |
@@ -136,14 +137,14 @@ FORMAL_ONLY_RUNTIME_CONFIRMED
 
 Before this report can be completed:
 
-1. deploy telemetry in every target pilot environment;
-2. name observation and rollback owners;
-3. retain 14 continuous days and five actual operating days;
-4. attribute every Legacy POST and internal creation signal;
-5. capture authoritative queue snapshots before, during, and after drain;
-6. rehearse Legacy worker shutdown against the actual process manager;
-7. retain zero active Legacy counts for the approved hold period;
-8. publish the dated migration notice;
+1. activate retained logs in `pilot-internal-local`;
+2. capture and retain the initial database, queue, and process snapshots;
+3. distribute the migration notice and record its recipients;
+4. retain 14 continuous days and five actual operating days;
+5. attribute every Legacy POST and internal creation signal;
+6. capture authoritative queue snapshots before, during, and after drain;
+7. rehearse Legacy worker shutdown against the actual manual process lifecycle;
+8. retain zero active Legacy counts for the approved hold period;
 9. keep Formal and readiness gates green throughout the window.
 
 ## Local Verification
