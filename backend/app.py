@@ -356,8 +356,13 @@ ALIGNMENT_PROMPT_VERSION = os.environ.get("ALIGNMENT_PROMPT_VERSION", "alignment
 TOKEN_HASH_SECRET = os.environ.get("TOKEN_HASH_SECRET", app.config["SECRET_KEY"])
 JOB_WORKER_ID = os.environ.get("JOB_WORKER_ID", "local-worker").strip() or "local-worker"
 JOB_MAX_ATTEMPTS = int(os.environ.get("JOB_MAX_ATTEMPTS", "3"))
+LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED = (
+    os.environ.get("LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED", "true").strip().lower() == "true"
+)
 
-JOB_TYPES = {"document_ingestion", "alignment_run", "evaluation_run"}
+LEGACY_ALIGNMENT_JOB_TYPE = "alignment_run"
+GENERIC_BACKGROUND_JOB_TYPES = frozenset({"document_ingestion", "evaluation_run"})
+JOB_TYPES = set(GENERIC_BACKGROUND_JOB_TYPES) | {LEGACY_ALIGNMENT_JOB_TYPE}
 JOB_STATUSES = {"queued", "running", "completed", "failed", "canceled", "retrying"}
 TERMINAL_JOB_STATUSES = {"completed", "failed", "canceled"}
 
@@ -376,6 +381,7 @@ ERROR_CODES = {
     "AI_PROVIDER_FAILED": 502,
     "AI_PROVIDER_NOT_CONFIGURED": 422,
     "LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED": 422,
+    "LEGACY_ALIGNMENT_ADMISSION_DISABLED": 503,
     "AI_INVALID_RESPONSE": 502,
     "PDF_FONT_UNAVAILABLE": 422,
     "TOO_MANY_REQUESTS": 429,
@@ -7150,11 +7156,22 @@ def run_background_job(job_id, worker_id=JOB_WORKER_ID):
         return job
 
 
-def claim_next_background_job(worker_id=JOB_WORKER_ID):
-    job = BackgroundJob.query.filter(
+def claim_next_background_job(worker_id=JOB_WORKER_ID, job_types=None):
+    query = BackgroundJob.query.filter(
         BackgroundJob.status.in_(["queued", "retrying"]),
         BackgroundJob.job_type != FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
-    ).order_by(BackgroundJob.priority.asc(), BackgroundJob.id.asc()).first()
+    )
+    if job_types is not None:
+        selected_types = tuple(
+            sorted({str(item or "").strip() for item in job_types if str(item or "").strip()})
+        )
+        if not selected_types:
+            return None
+        unsupported_types = set(selected_types) - JOB_TYPES
+        if unsupported_types:
+            raise ValueError(f"Unsupported background job types: {sorted(unsupported_types)}")
+        query = query.filter(BackgroundJob.job_type.in_(selected_types))
+    job = query.order_by(BackgroundJob.priority.asc(), BackgroundJob.id.asc()).first()
     if job is None:
         return None
     now = current_time_text()
@@ -7171,6 +7188,28 @@ def claim_next_background_job(worker_id=JOB_WORKER_ID):
 
 def run_worker_once(worker_id=JOB_WORKER_ID):
     job = claim_next_background_job(worker_id)
+    if job is None:
+        return None
+    return run_background_job(job.id, worker_id=worker_id)
+
+
+def claim_next_legacy_alignment_job(worker_id=JOB_WORKER_ID):
+    return claim_next_background_job(worker_id, job_types={LEGACY_ALIGNMENT_JOB_TYPE})
+
+
+def run_legacy_alignment_worker_once(worker_id=JOB_WORKER_ID):
+    job = claim_next_legacy_alignment_job(worker_id)
+    if job is None:
+        return None
+    return run_background_job(job.id, worker_id=worker_id)
+
+
+def claim_next_generic_background_job(worker_id=JOB_WORKER_ID):
+    return claim_next_background_job(worker_id, job_types=GENERIC_BACKGROUND_JOB_TYPES)
+
+
+def run_generic_background_worker_once(worker_id=JOB_WORKER_ID):
+    job = claim_next_generic_background_job(worker_id)
     if job is None:
         return None
     return run_background_job(job.id, worker_id=worker_id)
@@ -11050,6 +11089,12 @@ def run_alignment():
     user, error_response = require_current_user({"student", "teacher", "admin"})
     if error_response:
         return error_response
+    if not LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED:
+        return api_error(
+            "LEGACY_ALIGNMENT_ADMISSION_DISABLED",
+            "Legacy alignment admission is disabled; use the formal document alignment workflow.",
+            503,
+        )
 
     sync_requested = str(request.args.get("sync", "")).strip().lower() in {"1", "true", "yes"}
     data = request.get_json() or {}

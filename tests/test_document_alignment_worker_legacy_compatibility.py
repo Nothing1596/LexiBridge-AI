@@ -148,11 +148,14 @@ def test_formal_and_generic_claims_exclude_the_other_job_family(app_module):
         app_module.db.session.commit()
 
 
-def test_local_worker_loop_uses_stable_in_memory_formal_legacy_rotation():
+def test_local_worker_loop_uses_explicit_queue_family_modes():
     source = (Path(__file__).resolve().parents[1] / "scripts" / "run_worker.py").read_text(
         encoding="utf-8"
     )
     assert "prefer_formal = True" in source
-    assert "prefer_formal = not prefer_formal" in source
     assert "run_formal_worker_once" in source
-    assert "run_worker_once" in source
+    assert "run_generic_background_worker_once" in source
+    assert "run_legacy_alignment_worker_once" in source
+    assert 'mode == "standard"' in source
+    assert 'mode == "legacy-alignment"' in source
+    assert "app_module.run_worker_once" not in source

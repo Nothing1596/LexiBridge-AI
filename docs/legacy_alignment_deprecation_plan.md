@@ -6,6 +6,8 @@
 - Baseline: `4319d35751ba5468961081b17c0d7a49a5997762`
 - Runtime containment amendment: Task `9C.5N`, baseline
   `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
+- Runtime isolation amendment: Task `9C.5N.1`, baseline
+  `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
 - Route: `POST /api/alignment/run`
 - Current state: `ACTIVE_COMPATIBILITY_SURFACE`
 - Boundary status: `LEGACY_ALIGNMENT_DEPRECATION_BOUNDARY_ESTABLISHED`
@@ -38,8 +40,8 @@ HTTP 410 for the POST must not implicitly delete those read contracts or data.
 | Running legacy jobs = 0 | Authoritative query plus explicit disposition for stale-running jobs | Repository-local SQLite snapshot is 0; legacy worker has no stale reclaim | blocked pending operational policy |
 | Retrying legacy jobs = 0 | Authoritative query and retry drain/quarantine report | Repository-local SQLite snapshot is 0 only | conditional |
 | No lifecycle mismatch | No missing-run jobs; no active runs linked to terminal/missing jobs | Repository-local snapshot has no mismatch; code permits mismatch after crash/failure/cancel | blocked pending environment audit |
-| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | POST, sync upload, and helper-backed creation remain active | blocked pending cutover design |
-| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Formal and legacy polling share `scripts/run_worker.py`; no formal-only switch exists | blocked |
+| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | Reversible POST gate exists and defaults enabled; sync upload and helper-backed creation remain active | partially satisfied; blocked pending deployment and remaining-path decision |
+| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Default/formal/generic modes exclude legacy; explicit legacy mode and written shutdown plan exist | partially satisfied; blocked pending drain/disposition rehearsal |
 | Migration notice exists | OpenAPI/operator notice names formal replacement, timeline, owner, and support path | OpenAPI identifies the formal replacement; no dated timeline, owner, or support path exists | partially satisfied; blocked |
 | Monitoring window complete | Approved duration with route-call and queue-state evidence retained | No legacy route usage metric or completed window exists | blocked |
 | Compatibility tests reclassified | Tests are tagged as keep, convert-to-410, or remove-after-retirement | Inventory exists; conversion decision is not implemented | blocked |
@@ -134,8 +136,8 @@ support path is still required.
 
 ## Runtime Containment Amendment
 
-Task 9C.5N confirms that runtime containment readiness is documented but not
-operationally complete:
+Tasks 9C.5N and 9C.5N.1 confirm that runtime containment is logically isolated
+but retirement evidence is not operationally complete:
 
 - legacy claim records `locked_by` and `locked_at` but does not use heartbeat,
   stale reclaim, lease ownership, or fencing;
@@ -144,12 +146,17 @@ operationally complete:
   `AlignmentRun` terminal consistency;
 - sync upload and helper-backed execution can create legacy runs outside the
   default async legacy POST;
-- the combined local worker has no switch to stop legacy polling while
-  retaining Formal Workflow processing;
+- default and Formal worker modes no longer poll legacy jobs; an explicit
+  legacy mode remains available for controlled compatibility drain;
+- a default-enabled route admission flag can return reversible 503 responses
+  without writes, but sync upload and helper callers remain outside that gate;
 - the external consumer state remains unknown until the observation window
   completes.
 
-See `docs/legacy_alignment_runtime_inventory.md` and
+See `docs/legacy_alignment_runtime_inventory.md`,
+`docs/legacy_alignment_runtime_isolation.md`,
+`docs/legacy_creation_boundary.md`,
+`docs/legacy_running_job_shutdown_plan.md`, and
 `docs/legacy_alignment_runtime_observation_plan.md` for the evidence and
 operational requirements.
 
@@ -178,9 +185,11 @@ A future Task 9C.5O may begin only when all of the following are documented:
 - `UNKNOWN_EXTERNAL_LEGACY_CONSUMER` due to absent runtime traffic evidence;
 - new legacy async and synchronous execution remains enabled;
 - sync upload and helper-backed paths can still create legacy runs;
-- legacy worker still claims and executes queued/retrying jobs;
+- explicit legacy worker mode still claims and executes queued/retrying jobs
+  when an operator starts it;
 - no legacy stale-running reclaim or operator disposition exists;
-- no formal-only worker mode or legacy polling shutdown procedure exists;
+- worker shutdown is separable, but drain and safe-failure disposition have
+  not been rehearsed in target environments;
 - local zero queue counts are not authoritative for other environments;
 - OpenAPI names the formal replacement, but no dated notice, owner, or support
   path exists;

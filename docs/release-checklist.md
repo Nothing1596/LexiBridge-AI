@@ -69,12 +69,13 @@ python scripts/check_release_package.py dist/<release>.zip
 1. Run migration.
 2. Start backend.
 3. Open `frontend/index.html`.
-4. Login as Teacher, upload a TXT course document, inspect `Job Status`, then run `python scripts/run_worker.py --once`.
-5. Run terminology alignment and inspect cards/QC.
-6. Login as Student, search cards, favorite, mastered, feedback.
-7. Student uploads personal TXT and verifies another student cannot access it.
-8. Login as Admin, inspect users, logs, usage, ingestion jobs, background jobs, personal access audit.
-9. Run evaluation smoke set through `/api/evaluation/run`, then process the queued job with the worker.
+4. Login as Teacher, upload a TXT course document, inspect `Job Status`, then run `python scripts/run_worker.py --once`; this standard mode handles Formal Workflow plus generic ingestion/evaluation jobs and never legacy `alignment_run` jobs.
+5. When explicitly validating legacy compatibility, use a separate `python scripts/run_worker.py --mode legacy-alignment --once` process and record the reason.
+6. Run terminology alignment and inspect cards/QC.
+7. Login as Student, search cards, favorite, mastered, feedback.
+8. Student uploads personal TXT and verifies another student cannot access it.
+9. Login as Admin, inspect users, logs, usage, ingestion jobs, background jobs, personal access audit.
+10. Run evaluation smoke set through `/api/evaluation/run`, then process the queued job with the worker.
 
 ## Release Notes Must Be Honest
 

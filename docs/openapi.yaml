@@ -54,6 +54,7 @@ components:
             - AI_PROVIDER_FAILED
             - AI_PROVIDER_NOT_CONFIGURED
             - LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED
+            - LEGACY_ALIGNMENT_ADMISSION_DISABLED
             - AI_INVALID_RESPONSE
             - PDF_FONT_UNAVAILABLE
             - TOO_MANY_REQUESTS
@@ -1075,7 +1076,11 @@ paths:
         This endpoint is not HTTP 410 until the external-consumer observation
         window, legacy queue drain, worker shutdown procedure, migration
         notice, and rollback ownership are complete. A later approved
-        zero-caller phase will use LEGACY_ALIGNMENT_RUN_DEPRECATED.
+        zero-caller phase will use LEGACY_ALIGNMENT_RUN_DEPRECATED. Operators
+        may disable new compatibility admission with
+        LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED=false; that maintenance state
+        returns 503 LEGACY_ALIGNMENT_ADMISSION_DISABLED without creating a run
+        or job and is reversible independently of the formal workflow.
       requestBody:
         required: true
         content:
@@ -1091,6 +1096,7 @@ paths:
         "200": {description: Alignment result and card, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
         "400": {$ref: "#/components/responses/Error400"}
         "403": {$ref: "#/components/responses/Error403"}
+        "503": {description: Legacy alignment admission is disabled for maintenance, content: {application/json: {schema: {$ref: "#/components/schemas/ApiError"}}}}
   /api/alignment/runs:
     get:
       summary: List visible alignment runs

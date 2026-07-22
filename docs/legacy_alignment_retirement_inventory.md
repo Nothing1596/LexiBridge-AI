@@ -72,11 +72,12 @@ alignment and can write legacy run/card/usage data.
 
 ### Claim And Execution
 
-`claim_next_background_job()` selects the oldest highest-priority non-formal
-job in `queued` or `retrying`, changes it to `running`, increments
-`attempt_count`, records its lock owner/time, and commits. `run_worker.py`
-alternates formal and legacy polling, so the production local worker still
-consumes legacy jobs.
+`claim_next_background_job()` selects the oldest highest-priority eligible
+non-formal job in `queued` or `retrying`, changes it to `running`, increments
+`attempt_count`, records its lock owner/time, and commits. Task 9C.5N.1 adds
+filtered wrappers: default `run_worker.py` operation excludes legacy jobs,
+while `--mode legacy-alignment` consumes only legacy jobs for controlled
+compatibility or drain work.
 
 `run_background_job()` dispatches `alignment_run` to
 `process_alignment_job()`. Bounded local deterministic work can complete.
@@ -130,8 +131,9 @@ databases. These counts cannot authorize HTTP 410 for another environment.
 2. **How do existing jobs complete?** The local worker claims queued/retrying
    jobs and dispatches them through `process_alignment_job`; safe local work
    completes, external intent fails closed, and retryable failures may requeue.
-3. **Does the worker still consume them?** Yes. `run_worker.py` explicitly
-   alternates formal and legacy polling.
+3. **Does the worker still consume them?** Only when an operator explicitly
+   starts `run_worker.py --mode legacy-alignment`; default and Formal modes do
+   not consume them.
 4. **What is the deletion risk?** Removing the route alone stops new HTTP
    admission but does not drain queued work. Removing worker/dispatch/models
    can strand queued/retrying/running jobs, break job APIs/history, and leave

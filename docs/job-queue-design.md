@@ -56,7 +56,8 @@ For compatibility and tests, append `?sync=true` to keep the older synchronous b
 
 ## Worker
 
-Run one local worker:
+Run the default local worker for Formal Workflow plus generic document
+ingestion and evaluation jobs:
 
 ```bash
 python scripts/run_worker.py
@@ -68,7 +69,17 @@ For a one-shot worker pass:
 python scripts/run_worker.py --once
 ```
 
-The worker claims `queued` or `retrying` jobs by priority and ID order, executes the matching handler, writes progress events, and records the final result.
+The default worker does not claim `alignment_run`. Compatibility jobs require
+an explicitly isolated worker:
+
+```bash
+python scripts/run_worker.py --mode legacy-alignment
+```
+
+Use `--mode formal` or `--mode generic` to run only that queue family.
+`JOB_WORKER_QUEUE_MODE` sets the default mode. Each worker claims eligible
+`queued` or `retrying` jobs by priority and ID order, executes the matching
+handler, writes progress events, and records the final result.
 
 ## Retry And Cancel
 

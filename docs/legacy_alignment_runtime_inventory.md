@@ -4,6 +4,8 @@
 
 - Task: `9C.5N`
 - Baseline: `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
+- Runtime-isolation amendment: Task `9C.5N.1`, baseline
+  `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
 - Branch: `release/pilot-v1-candidate`
 - Runtime target: legacy `POST /api/alignment/run`
 - Current state: `ACTIVE_COMPATIBILITY_SURFACE`
@@ -28,8 +30,12 @@ POST /api/alignment/run
 POST /api/documents/upload?sync=true
   `-- run_alignment_for_chunks() -> AlignmentRun + legacy cards
 
-scripts/run_worker.py
-  `-- alternates formal worker and generic legacy worker polling
+scripts/run_worker.py --mode standard
+  |-- formal_document_alignment_workflow_v1
+  `-- document_ingestion + evaluation_run
+
+scripts/run_worker.py --mode legacy-alignment
+  `-- alignment_run only
 ```
 
 The default production frontend upload does not request `sync=true`, and the
@@ -47,8 +53,10 @@ operations.
 | Job creation helper | `backend/app.py:6381` (`create_background_job`) | Create a queued job and `created` event | active internal helper |
 | Legacy execution | `backend/app.py:6942` (`process_alignment_job`) | Execute a persisted local deterministic alignment job | active |
 | Generic dispatcher | `backend/app.py:7068` (`run_background_job`) | Dispatch non-formal jobs and persist completed/retrying/failed state | active |
-| Generic claim | `backend/app.py:7153` (`claim_next_background_job`) | Select and claim the oldest queued/retrying non-formal job | active; non-CAS |
-| Worker loop | `scripts/run_worker.py` | Alternate formal and legacy polling in one process | active |
+| Generic claim | `backend/app.py` (`claim_next_background_job`) | Select and claim queued/retrying non-formal jobs, with optional validated job-type filtering | active; non-CAS |
+| Generic wrapper | `backend/app.py` (`claim_next_generic_background_job`) | Claim only document ingestion and evaluation jobs | active isolated family |
+| Legacy wrapper | `backend/app.py` (`claim_next_legacy_alignment_job`) | Claim only `alignment_run` | active isolated family |
+| Worker loop | `scripts/run_worker.py` | Dispatch `standard`, `formal`, `generic`, or explicit `legacy-alignment` modes | active; default excludes legacy |
 | Cancel API | `backend/app.py:14990` | Mark a non-terminal job canceled | active shared API |
 | Retry API | `backend/app.py:15012` | Requeue a failed job except quarantined external legacy work | active shared API |
 | Legacy history reads | `backend/app.py:11234`, `backend/app.py:11253`, `backend/routes/admin_alignment_runs.py` | Preserve run detail/list/admin history | active read surfaces |
@@ -57,7 +65,7 @@ operations.
 
 | Entry | Location | Can create new job | Current purpose | Classification | Action |
 |---|---|---:|---|---|---|
-| Legacy POST, default async | `backend/app.py:11048` | yes: creates one queued `alignment_run` job and one queued run | compatibility execution | required compatibility | keep during observation; do not expand |
+| Legacy POST, default async | `backend/app.py` | yes when admission is enabled: creates one queued `alignment_run` job and one queued run | compatibility execution | required compatibility | keep during observation; disable reversibly before drain |
 | Legacy POST, sync direct term | `backend/app.py:11175` branch | no job; creates a running/completed run and card writes | synchronous compatibility | required compatibility | keep during observation; include in POST traffic count |
 | Legacy POST, sync document | `backend/app.py:11137` branch | no job; helper creates a run and cards | synchronous compatibility | required compatibility | keep during observation; include in POST traffic count |
 | Sync document upload | `backend/app.py:10156`, call at `backend/app.py:10542` | no alignment job; helper creates a run and cards | legacy synchronous upload compatibility | unknown | investigate callers before any creation block |
@@ -69,13 +77,14 @@ operations.
 | Admin UI/API action | repository scan | no dedicated creation action found | none | obsolete | no action |
 | External callers | outside repository | potentially yes through legacy POST | unknown | unknown | observe and identify owners |
 
-There is no repository feature flag that disables only legacy alignment
-admission, and `scripts/run_worker.py` has no formal-only mode. Disabling the
-route now would not address sync upload creation, queued work, or unknown
-external callers.
+`LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED=false` now disables legacy POST
+creation with a reversible 503 response and zero domain writes. The explicit
+worker modes can stop legacy polling without stopping Formal Workflow.
+However, the route flag does not address sync upload creation, direct helper
+calls, queued/running work, or unknown external callers.
 
 ```text
-LEGACY_CREATION_BLOCK_NOT_SAFE
+LEGACY_ADMISSION_CONTROL_NOT_READY
 ```
 
 ## Job State Transitions
@@ -147,8 +156,15 @@ LEGACY_RUNNING_JOB_RECOVERY_GAP
 ## Containment Conclusion
 
 Formal execution is independent and remains the only production frontend
-alignment path. Legacy creation is nevertheless still available through more
-than one compatibility path, and the shared worker still executes queued
-legacy work without strong ownership. Runtime retirement therefore requires
-observed zero callers, environment-authoritative queue drain, a running-job
-disposition, a formal-only worker/shutdown procedure, and rollback ownership.
+alignment path. Default worker operation no longer claims legacy jobs, and a
+dedicated legacy mode is available for controlled drain. Legacy creation is
+nevertheless still available through more than one compatibility path, and
+the explicit legacy worker still lacks strong ownership. Runtime retirement
+therefore requires observed zero callers, environment-authoritative queue
+drain, rehearsed running-job disposition, shutdown evidence, and rollback
+ownership.
+
+```text
+LEGACY_ALIGNMENT_RUNTIME_ISOLATED
+LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
+```

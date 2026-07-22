@@ -8,6 +8,8 @@ production telemetry by itself and does not authorize HTTP 410.
 
 - Task: `9C.5N`
 - Baseline: `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
+- Runtime-isolation amendment: Task `9C.5N.1`, baseline
+  `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
 - Target POST: `/api/alignment/run`
 - Separate read surfaces: `/api/alignment/runs`,
   `/api/alignment/runs/{run_id}`, and `/api/admin/alignment-runs`
@@ -59,11 +61,11 @@ consumer. It cannot prove that deployed scripts or clients are absent.
 Evidence must come from every target environment's sanitized gateway or
 application access metrics and authoritative database queries.
 
-The repository currently has no dedicated legacy route metric, deprecation
-feature flag, formal-only worker CLI mode, or automated job/run reconciliation
-report. Those gaps must be addressed operationally or in separately approved
-implementation tasks before the observation window can produce complete
-evidence.
+The repository now has a reversible legacy route admission flag and explicit
+formal, generic, and legacy worker modes. It still has no dedicated legacy
+route metric or automated job/run reconciliation report. Those remaining gaps
+must be addressed operationally or in separately approved implementation
+tasks before the observation window can produce complete evidence.
 
 ## Worker Shutdown Readiness
 
@@ -78,9 +80,11 @@ A future shutdown procedure must:
 7. preserve read-only legacy history where required;
 8. include a reversible re-enable or incident rollback procedure.
 
-The current combined `scripts/run_worker.py` loop cannot disable only legacy
-polling through configuration. Full worker shutdown would also stop Formal
-Workflow processing, so it is not an acceptable legacy retirement procedure.
+`scripts/run_worker.py` now excludes legacy polling in its default `standard`
+mode and provides an explicit `legacy-alignment` mode for drain. This makes
+worker shutdown separable from Formal Workflow. The procedure still requires
+an environment rehearsal and approved stale-running disposition before it is
+retirement evidence.
 
 ## External Consumer Review
 
