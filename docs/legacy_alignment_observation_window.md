@@ -2,28 +2,27 @@
 
 ## Activation Status
 
-- Task: `9C.5O.1`
-- Baseline: `22f9976dc94ef448682cca5bb54a99bde2dc320e`
-- Environment-readiness task: `9C.5O.2`
-- Target environment name: `pilot-internal-local`
-- Current state: `PREPARED`
-- Start date: `PENDING_OBSERVATION_START`
-- Target end date: `PENDING_START_DATE_PLUS_14_DAYS`
-- Actual target operating days: `0`
-- Required target operating days: `5`
+- Task: `9C.5O.3`
+- Application baseline: `ff86db830c53cd96466e6da080206eab2d383f74`
+- Environment: `pilot-internal-local`
+- Current state: `ACTIVE`
+- Start UTC: `2026-07-22T15:13:47Z`
+- Provisional 14-day end UTC: `2026-08-05T15:13:47Z`
+- Actual operating days completed: `0`
+- Required operating days: `5`
 
 ```text
-LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
-OBSERVATION_WINDOW_PENDING_START
+LEGACY_ALIGNMENT_OBSERVATION_WINDOW_ACTIVE
 LIMITED_OBSERVABILITY
 EXTERNAL_CONSUMER_VISIBILITY_LIMITED
+LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```
 
-The target is the concrete `pilot-internal-local` controlled-pilot environment
-declared in `docs/pilot_environment_declaration.md`. It has an identified
-database, worker modes, owners, and evidence procedures. It is not currently
-running an observation window, and no local test or preparation step counts as
-Day 1.
+The observation clock started only after the application, retained local
+logs, Formal worker, database identity, initial queue snapshot, owners, and
+rollback procedure were verified. The start was not backdated to a rehearsal.
+The activation record is Day 0; the first completed post-start operating-day
+checklist will count as Day 1.
 
 ## State Machine
 
@@ -33,115 +32,110 @@ PREPARED -> ACTIVE -> COMPLETED -> REVIEWED
 
 | State | Entry evidence |
 |---|---|
-| `PREPARED` | Telemetry, report tooling, Freeze/drain rehearsal, and procedures exist |
-| `ACTIVE` | Named environment/database/workers/owners, retained logs, initial queue snapshot, and UTC start timestamp |
-| `COMPLETED` | At least 14 continuous calendar days and five actual operating days with all required evidence |
-| `REVIEWED` | Owners review traffic, queue, worker, external-consumer, rollback, and Formal evidence |
+| `PREPARED` | Telemetry, procedures, environment, and local rehearsals exist |
+| `ACTIVE` | Named environment/database/processes/owners, retained logs, Day 0 snapshot, notice record, and UTC start exist |
+| `COMPLETED` | At least 14 continuous calendar days and five actual operating days have retained evidence |
+| `REVIEWED` | Owners review traffic, queue, workers, callers, rollback, and Formal evidence |
 
-The current state remains `PREPARED`. Deployment alone does not imply
-`ACTIVE`; the activation record must contain all required identities and the
-initial evidence bundle. This task does not enter `COMPLETED` or `REVIEWED`.
+This task enters only `ACTIVE`. Calendar duration, operating-day coverage,
+traffic classification, and retirement review remain open.
 
 ## Environment Declaration
 
-| Scope | Required value | Current value |
-|---|---|---|
-| Deployment environment | Stable target name | `pilot-internal-local` |
-| Database type | SQLite or PostgreSQL as actually deployed | SQLite |
-| Database identity | Non-secret stable instance/file identifier | `project-root/backend/lexibridge.db` |
-| Initial snapshot time | Retained UTC timestamp | required at observation start |
-| Formal worker | Process/service identity and mode | `pilot-internal-formal-1`, Formal mode |
-| Legacy worker | Process/service identity or confirmed stopped state | `pilot-internal-legacy-1`, isolated/on demand |
-| Application log source | Retained stream/path and retention period | declared local sink; activation verification pending |
-| Access/gateway logs | Source and query owner, or explicit unavailable decision | `UNAVAILABLE` |
+| Scope | Activated value |
+|---|---|
+| Application | commit `ff86db830c53cd96466e6da080206eab2d383f74`, Flask debug disabled, `127.0.0.1:5100` |
+| Database | SQLite, `project-root/backend/lexibridge.db` |
+| Formal worker | `pilot-internal-formal-1`, Formal mode, active at start |
+| Legacy worker | `pilot-internal-legacy-1`, `STOPPED_BY_POLICY` at start |
+| Legacy runtime | `active`; route admission enabled |
+| Application log | retained local `application.log` in the operator observation root |
+| Formal worker log | retained local `formal-worker.log` in the operator observation root |
+| Legacy worker log | retained local `legacy-worker.log` with stopped-state record |
+| Gateway/reverse-proxy logs | `NOT_AVAILABLE` |
 
-Do not record database credentials, tokens, filesystem secrets, request
-payloads, prompts, outputs, or private evidence in this declaration.
+The exact process IDs and database snapshot are in
+`docs/legacy_alignment_observation_day0.md`. Runtime evidence is kept outside
+the repository and contains no credentials, prompts, provider output, request
+bodies, or private evidence payloads.
 
 ## Ownership
 
-| Role | Responsibility | Current owner |
+| Role | Responsibility | Owner |
 |---|---|---|
 | Observation owner | Daily metrics, caller attribution, evidence retention | Project Maintainer |
 | Rollback owner | Freeze rollback decision and execution | Project Maintainer |
 | Support owner | Migration questions and caller communication | Project Maintainer |
 
-The Project Maintainer owns the single-person controlled Pilot. A later
-multi-person or hosted environment requires named operational contacts before
-it enters the observation scope.
+These assignments cover the single-person controlled Pilot only. A hosted or
+multi-operator environment must declare its own named operational contacts.
 
-## Duration
+## Duration Rules
 
-The target duration is at least 14 continuous calendar days and at least five
-actual operating days. When activation evidence exists:
-
-1. record the UTC start timestamp after telemetry and initial snapshots are
-   verified;
-2. calculate the provisional end as start plus 14 full days;
-3. extend the window until five actual operating days are complete;
-4. restart the zero-creation interval after any unexplained Legacy creation;
-5. never backdate the start to local tests, deployment preparation, or an
-   incomplete logging period.
+1. Retain evidence continuously from `2026-07-22T15:13:47Z`.
+2. Do not review completion before `2026-08-05T15:13:47Z`.
+3. Extend beyond that time until five actual operating days are complete.
+4. Restart the zero-creation interval after any unexplained Legacy creation.
+5. Do not count local rehearsals or Day 0 as an operating day.
 
 ## Metrics And Sources
 
-| Signal | Required dimensions | Current source | Activation status |
+| Signal | Required dimensions | Active source | Status |
 |---|---|---|---|
-| Legacy POST | timestamp, caller ID/role, result, status, sync/async, creation counts | payload-free application event `legacy_alignment_request` | available; retained sink starts with window |
-| Legacy history GET | timestamp, caller ID/role, route, status | payload-free application event `legacy_alignment_request` | available; retained sink starts with window |
-| AlignmentRun creation | timestamp, caller/source, count | request creation count and internal creation event | available |
-| Legacy BackgroundJob creation | timestamp, caller/source, count | request creation count and internal creation event | available |
-| Queue state | queued, running, retrying, failed, oldest active age | `legacy_alignment_runtime.py status` and database snapshot | available; manual collection |
-| Legacy worker | claim, start, completion, retry, failure, worker ID | `BackgroundJobEvent` plus worker process inventory | available; process correlation required |
-| Formal run count | run count and terminal distribution | Formal WorkflowRun database snapshot | available |
-| Formal Legacy POST count | `legacy_alignment_requests` | Formal frontend E2E/network artifact | available per operating-day run |
-| External consumer signal | gateway/access logs and client-owner confirmation | none connected | unavailable |
+| Legacy POST | timestamp, caller ID/role, result, status, sync/async, creation counts | payload-free `legacy_alignment_request` application event | active, local retention |
+| Legacy history GET | timestamp, caller ID/role, route, status | payload-free `legacy_alignment_request` application event | active, local retention |
+| AlignmentRun creation | timestamp, caller/source, count | request and internal creation events plus database snapshot | active |
+| Legacy BackgroundJob creation | timestamp, caller/source, count | creation events plus database snapshot | active |
+| Queue state | queued, running, retrying, failed, oldest active age | runtime status tool and database snapshot | manual daily capture |
+| Legacy worker | claim, completion, retry, failure, worker ID | `BackgroundJobEvent` and worker log | active when worker is intentionally started |
+| Formal runs | count, terminal distribution, worker execution | Formal database snapshot, event records, worker log | active |
+| Formal Legacy POST count | `legacy_alignment_requests` | Formal frontend E2E/network artifact | per operating day |
+| External consumer signal | gateway/access logs and client-owner confirmation | no gateway source | unavailable |
 
-Application logging plus database snapshots provide partial evidence. Without
-retained target logs and an external access-log source, the current status is
-`LIMITED_OBSERVABILITY`; external consumers must remain unknown.
+Local application logs and database snapshots are retained, but there is no
+central log store or gateway telemetry. Log survival depends on the operator's
+workstation and detached process lifecycle. The observation therefore remains
+`LIMITED_OBSERVABILITY`, and repository-external consumers remain unknown.
+Pre-start process-launch diagnostics are excluded by the recorded start UTC.
 
 ## Collection Cadence
 
-- continuously retain Legacy HTTP and creation events;
-- capture queue and worker snapshots at activation, at least daily, before and
-  after Freeze/drain actions, and at window exit;
-- record Formal run counts and zero-Legacy-POST evidence each operating day;
-- review unattributed callers and failed/retrying jobs daily;
-- retain the report artifact generated by
-  `scripts/legacy_alignment_observation_report.py` without raw payloads.
+- retain Legacy HTTP and creation events continuously;
+- capture process, queue, workflow, and database summaries at least daily;
+- capture the same summaries before and after any Freeze/drain action;
+- run Formal network verification on every actual operating day;
+- classify unattributed callers and active/failed jobs daily;
+- use `docs/legacy_alignment_observation_daily_checklist.md` for sign-off;
+- keep generated artifacts outside Git and redact raw payloads and secrets.
 
 ## Legacy GET Consumer Decision
 
 Decision: **B - retain as a read-only compatibility surface**.
 
-`frontend/index.html` function `loadAlignmentRuns()` calls
-`GET /api/alignment/runs` to populate `state.cache.alignmentRuns` for legacy
-history display. The Formal API currently supports start, run detail, and item
-pagination, but it does not provide an equivalent history-list contract.
+`frontend/index.html` function `loadAlignmentRuns()` uses
+`GET /api/alignment/runs` for legacy history display. The Formal API does not
+currently expose an equivalent history-list contract. This route remains
+active and unchanged; its usage is observed separately from Legacy creation.
 
-The GET route therefore remains active and unchanged. Its migration requires
-a separate Formal history API and frontend cutover task. POST retirement must
-not remove the list/detail read contracts or historical `AlignmentRun` data.
+## Freeze Boundary
 
-## Activation Gate
+Starting the observation window did not execute Freeze. At activation the
+Legacy runtime is `active` and route admission remains enabled so real caller
+signals can be observed. Freeze requires a separately authorized operation
+using `docs/legacy_alignment_freeze_observation_checklist.md`.
 
-The environment is ready for a separately authorized start operation. Change
-the state to `ACTIVE` only after all items below are recorded:
+## Activation Evidence
 
-- target environment and authoritative database identity;
-- Formal and Legacy worker process inventory;
-- observation, rollback, and support owners;
-- retained application-log source and retention period;
-- initial Legacy queue snapshot and lifecycle-integrity review;
-- confirmed Formal health and zero production frontend Legacy POST;
+The activation gate passed at `2026-07-22T15:13:47Z` with:
+
+- stable environment and database identity;
+- active application and dedicated Formal worker;
+- Legacy worker intentionally stopped and separately identifiable;
+- retained local application and worker logs;
+- initial database, queue, workflow, and process snapshot;
+- assigned observation, rollback, and support owners;
+- verified Formal health with external providers disabled;
 - migration notice distribution record;
-- exact UTC start timestamp and calculated target end date.
+- executable rollback procedure.
 
-Environment assignment is complete. Start-time log retention, snapshots,
-notice distribution, process records, and timestamp remain pending. Until then:
-
-```text
-OBSERVATION_WINDOW_PENDING_START
-LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
-```
+See `docs/legacy_alignment_observation_day0.md` for the immutable Day 0 values.

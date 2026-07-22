@@ -9,7 +9,7 @@ artifact location.
 
 Target environment: `pilot-internal-local`.
 
-Current execution status: `READY_FOR_OBSERVATION_START`.
+Current execution status: `OBSERVATION_ACTIVE_FREEZE_NOT_EXECUTED`.
 
 ## Before Freeze
 
@@ -68,23 +68,24 @@ The `2026-07-22` isolated SQLite rehearsal passed Freeze, drain, Disabled, and
 rollback checks. It is preparation evidence only. No checkbox above is marked
 complete for a target environment.
 
-The `pilot-internal-local` readiness pre-check also confirmed:
+The `pilot-internal-local` Day 0 activation snapshot confirmed:
 
 | Check | Result |
 |---|---|
 | Persistent SQLite identity | declared |
 | Database readiness/integrity | PASS |
-| Legacy queued/running/retrying | 0 / 0 / 0 at readiness snapshot |
-| Formal and Legacy worker modes | declared and isolated |
+| Legacy queued/running/retrying | 0 / 0 / 0 at Day 0 snapshot |
+| Formal worker | active in dedicated Formal mode |
+| Legacy worker | identified and `STOPPED_BY_POLICY` |
 | Observation/rollback/support owner | Project Maintainer |
 | Backup, verification, isolated restore | PASS |
 | External access-log visibility | limited; gateway source not available |
 
-These pre-checks do not mark any operational Freeze checkbox complete. Counts
-and process state must be captured again at the actual observation start and
-Freeze timestamps.
+These activation checks do not mark any operational Freeze checkbox complete.
+Counts and process state must be captured again at the separately authorized
+Freeze timestamp.
 
 ```text
-LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
-OBSERVATION_WINDOW_PENDING_START
+LEGACY_ALIGNMENT_OBSERVATION_WINDOW_ACTIVE
+OBSERVATION_ACTIVE_FREEZE_NOT_EXECUTED
 ```

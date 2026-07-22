@@ -6,11 +6,11 @@
 - Change owner: Project Maintainer
 - Rollback owner: Project Maintainer
 - Incident/support path: Project Maintainer pilot coordination channel
-- Current authorization: environment preparation and local rehearsal only
+- Current authorization: observation `ACTIVE`; Freeze requires separate approval
 
 ```text
-LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
-OBSERVATION_WINDOW_PENDING_START
+LEGACY_ALIGNMENT_OBSERVATION_WINDOW_ACTIVE
+ROLLBACK_READY_FREEZE_NOT_EXECUTED
 ```
 
 The Project Maintainer is the decision and execution owner for this
@@ -81,7 +81,9 @@ The isolated `2026-07-22` rehearsal verified:
 - Formal contracts remained unchanged.
 
 The rehearsal used temporary SQLite and did not validate a target process
-manager, authoritative pilot database, or named operational owner.
+manager or target-database rollback. Day 0 now records the authoritative local
+Pilot database, manual process identities, and Project Maintainer ownership;
+an operational Freeze has still not occurred.
 
 ```text
 LEGACY_ALIGNMENT_ROLLBACK_REHEARSAL_PASS

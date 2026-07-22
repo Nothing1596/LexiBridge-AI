@@ -2,47 +2,49 @@
 
 ## Report Status
 
-- Task: `9C.5O`
-- Baseline: `388666a192df9d33044541aaca4ddf42e6aa7bd2`
+- Preparation task: `9C.5O`
+- Activation task: `9C.5O.3`
+- Application baseline: `ff86db830c53cd96466e6da080206eab2d383f74`
 - Report generated: `2026-07-22`
 - Target environment: `pilot-internal-local`
 - Target database: `project-root/backend/lexibridge.db` (SQLite)
-- Observation start: `PENDING_OBSERVATION_START`
-- Observation end: `PENDING_14_DAY_WINDOW`
+- Observation state: `ACTIVE`
+- Observation start: `2026-07-22T15:13:47Z`
+- Provisional observation end: `2026-08-05T15:13:47Z`
 - Actual target-environment active days: `0`
 - External consumer status: `UNKNOWN_EXTERNAL_LEGACY_CONSUMER`
 - Activation record: `docs/legacy_alignment_observation_window.md`
 
 ```text
-OBSERVATION_WINDOW_PENDING
-LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
-OBSERVATION_WINDOW_PENDING_START
-LEGACY_ALIGNMENT_DEPRECATION_OBSERVATION_INCOMPLETE
+LEGACY_ALIGNMENT_OBSERVATION_WINDOW_ACTIVE
+LOG_RETENTION_LIMITED
+EXTERNAL_CONSUMER_VISIBILITY_LIMITED
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```
 
-The required continuous 14-day window with at least five actual operating
-days cannot be completed in a single repository task. No gateway, access-log,
-or target-environment telemetry was available at this baseline, so this report
-does not infer zero external traffic from repository scans or local E2E runs.
+The Day 0 environment, process, database, queue, log, owner, notice, and
+rollback evidence is recorded in
+`docs/legacy_alignment_observation_day0.md`. The required continuous 14-day
+window with at least five actual operating days has started but has not elapsed.
+No gateway or reverse-proxy source exists, so this report does not infer zero
+external traffic from repository scans, local logs, or E2E runs.
 
 ## Observation Window
 
-The window starts only after all target pilot environments deploy the
-observation telemetry and name an observation owner and rollback owner. It
-must run for at least 14 continuous 24-hour periods and cover at least five
-actual operating days. Any unexplained Legacy POST or new creation signal
-restarts the zero-creation interval after the caller is classified.
+The window is active in the single declared target environment. It must run
+for at least 14 continuous 24-hour periods and cover at least five actual
+operating days. Any unexplained Legacy POST or new creation signal restarts the
+zero-creation interval after the caller is classified.
 
 | Field | Current value | Exit requirement |
 |---|---|---|
-| Start time | pending | retained UTC deployment timestamp |
-| End time | pending | at least 14 days after start |
-| Environment | `pilot-internal-local` declared | every target pilot environment |
-| Database | persistent SQLite identified | initial timestamped snapshot |
-| Worker state | modes/owners declared, not started | target process inventory and state |
-| Legacy POST metrics | unavailable | attributed request series |
-| Legacy GET metrics | unavailable | retained read-usage decision |
+| Start time | `2026-07-22T15:13:47Z` | retained UTC deployment timestamp |
+| End time | provisional `2026-08-05T15:13:47Z` | at least 14 days after start and five operating days |
+| Environment | `pilot-internal-local` active | every target Pilot environment |
+| Database | Day 0 SQLite snapshot retained | daily and event snapshots |
+| Worker state | Formal active; Legacy stopped by policy | daily process inventory |
+| Legacy POST metrics | active local structured log | attributed request series |
+| Legacy GET metrics | active; one Day 0 collection probe | retained read-usage series |
 | External signal | unavailable | gateway/access-log evidence plus owner review |
 
 ## Traffic Telemetry
@@ -73,22 +75,22 @@ python scripts/legacy_alignment_observation_report.py \
   --json-output /path/to/legacy-observation-report.json
 ```
 
-The report remains `OBSERVATION_WINDOW_PENDING` unless the duration, active
-days, zero-creation, and external-consumer evidence gates all pass. Queue,
-worker shutdown, rollback, and Formal regression evidence remain separate
-retirement gates.
+Activation alone does not satisfy the duration, active-day, zero-creation, or
+external-consumer evidence gates. Queue, worker shutdown, rollback, and Formal
+regression evidence remain separate retirement gates.
 
 ## Current Metrics
 
 | Signal | Target-environment result | Repository/local evidence |
 |---|---|---|
-| Legacy POST requests | unknown | Formal frontend E2E reports `legacy_alignment_requests=0` |
-| Legacy GET history | unknown | production frontend still actively loads `GET /api/alignment/runs` |
-| Legacy creation | unknown | Freeze rehearsal blocked one POST with zero run/job creation |
-| Internal creation | unknown | telemetry now covers helper and job-factory signals |
+| Legacy POST requests | 0 at Day 0 activation | Formal frontend E2E must continue to report `legacy_alignment_requests=0` |
+| Legacy GET history | 1 deliberate unauthenticated collection probe, HTTP 401 | frontend still actively loads `GET /api/alignment/runs` |
+| Legacy creation | 0 at Day 0 activation | Freeze rehearsal separately blocked one POST with no run/job creation |
+| Internal creation | 0 at Day 0 activation | telemetry covers helper and job-factory signals |
+| Legacy queue | queued/running/retrying/failed all 0 | daily snapshots required |
 | External consumer | unknown | no gateway/access-log source is connected |
 
-Local and test evidence is not counted as an observation day.
+Day 0 activation and local tests are not counted as an operating day.
 
 ## Controlled Freeze Evidence
 
@@ -135,34 +137,34 @@ FORMAL_ONLY_RUNTIME_CONFIRMED
 
 ## Remaining Evidence
 
-Before this report can be completed:
+Before this report can enter review:
 
-1. activate retained logs in `pilot-internal-local`;
-2. capture and retain the initial database, queue, and process snapshots;
-3. distribute the migration notice and record its recipients;
-4. retain 14 continuous days and five actual operating days;
-5. attribute every Legacy POST and internal creation signal;
-6. capture authoritative queue snapshots before, during, and after drain;
-7. rehearse Legacy worker shutdown against the actual manual process lifecycle;
-8. retain zero active Legacy counts for the approved hold period;
-9. keep Formal and readiness gates green throughout the window.
+1. retain 14 continuous days and five actual operating days;
+2. attribute every Legacy POST and internal creation signal;
+3. capture daily process, queue, workflow, and traffic snapshots;
+4. capture authoritative queue snapshots before, during, and after any drain;
+5. rehearse Legacy worker shutdown against the actual manual process lifecycle;
+6. retain zero active Legacy counts for the approved hold period;
+7. keep Formal and readiness gates green throughout the window;
+8. review the external-visibility limitation without claiming zero consumers.
 
-## Local Verification
+## Activation Verification
 
-The following repository-local Gates passed on `2026-07-22`. They verify the
-implementation and rehearsal, but do not advance the target observation-day
-counts.
+The following Gates passed on `2026-07-22`. They verify the activation change
+and Formal regression boundary, but do not advance the operating-day count.
 
 | Gate | Result | Artifact or detail |
 |---|---|---|
-| Targeted observation/freeze/Formal tests | PASS | 43 tests |
-| Full pytest | PASS | 1110 tests, 6 existing deprecation warnings |
-| Release safety | PASS | no release safety finding |
-| Developer check | PASS | tests, migration, and backend smoke |
-| Controlled Freeze/drain/rollback | PASS | `/private/tmp/lexibridge-9c5o-controlled-freeze.json` |
-| Formal frontend with Legacy Disabled | PASS | `/private/tmp/lexibridge-9c5o-formal-frontend.json`; three Formal POSTs, zero Legacy POSTs |
-| Teacher browser E2E | PASS | `/private/tmp/lexibridge-9c5o-teacher.json` |
-| Full browser E2E | PASS | `/private/tmp/lexibridge-9c5o-full.json` |
+| Observation documentation contract | PASS | 8 tests |
+| Full pytest | PASS | 1115 tests, 6 existing deprecation warnings |
+| Release safety | PASS | no finding |
+| Developer check | PASS | 1115 tests, migration, and backend smoke |
+| Formal frontend with Legacy Disabled | PASS | `/private/tmp/lexibridge-9c5o3-formal-frontend.json`; three Formal POSTs, zero Legacy POSTs |
+| Teacher browser E2E | PASS | `/private/tmp/lexibridge-9c5o3-teacher.json` |
+| Full browser E2E | PASS | `/private/tmp/lexibridge-9c5o3-full.json` |
 | Browser console/page errors | PASS | zero unexpected errors |
-| External provider requests | PASS | zero actual requests |
-| Pilot readiness | `READY_WITH_CONDITIONS` | `/private/tmp/lexibridge-9c5o-readiness.json` |
+| External provider requests | PASS | zero actual dependency requests |
+| Pilot readiness | `READY_WITH_CONDITIONS` | `/private/tmp/lexibridge-9c5o3-readiness.json` |
+
+The browser flows continue to issue the active compatibility history GET, but
+Formal execution made zero requests to the Legacy POST and used no fallback.

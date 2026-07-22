@@ -2,15 +2,20 @@
 
 ## Notice Status
 
-- Audience: Legacy alignment API client owners and pilot operators
-- Publication status: `READY_FOR_DISTRIBUTION`
+- Audience: controlled Pilot operator and known Legacy alignment client owners
+- Publication status: `DISTRIBUTED`
+- Distribution UTC: `2026-07-22T15:17:39Z`
+- Recipient scope: Project Maintainer / controlled Pilot operator
+- Distribution channel: shared release branch and Task 9C.5O.3 operational handoff
+- Distribution owner: Project Maintainer
 - Observation environment: `pilot-internal-local`
-- Observation start: `PENDING_OBSERVATION_START`
-- Earliest review date: `PENDING_START_DATE_PLUS_14_DAYS`
-- Support owner: Project Maintainer
+- Observation start: `2026-07-22T15:13:47Z`
+- Earliest review UTC: `2026-08-05T15:13:47Z`
 
-This is a migration notice draft. It does not announce retirement, HTTP 410,
-or route removal.
+The distribution record covers the known single-person controlled Pilot. No
+external client-owner list exists, so it is not evidence that repository-
+external consumers are absent. This notice does not announce retirement, HTTP
+410, route removal, or a committed retirement date.
 
 ## Legacy API Status
 
@@ -18,8 +23,7 @@ or route removal.
 Its URL, method, permissions, request, response, and local compatibility
 behavior remain unchanged. External provider execution remains disabled.
 
-The read-only history surfaces remain active and are not part of the POST
-retirement decision:
+The read-only history surfaces remain active:
 
 - `GET /api/alignment/runs`;
 - `GET /api/alignment/runs/{run_id}`;
@@ -27,39 +31,35 @@ retirement decision:
 
 ## Supported Replacement
 
-New teacher workflows must use the Formal Document Alignment API:
+New teacher workflows must use:
 
 - `POST /api/document-alignment-runs`;
 - `GET /api/document-alignment-runs/{run_uid}`;
 - `GET /api/document-alignment-runs/{run_uid}/items`.
 
-Clients must preserve the Formal API's permission, source identity,
-Idempotency-Key, polling, and server-side pagination contracts. They must not
-fall back to the Legacy POST after a Formal API failure.
+Clients must preserve Formal permission, source identity, Idempotency-Key,
+polling, and server-side pagination contracts. They must not fall back to the
+Legacy POST when a Formal request fails.
 
 ## Observation Timeline
 
-The observation window has not started. The target environment, database,
-worker modes, and owners are declared. Distribution, retained log activation,
-initial snapshots, process records, and the UTC start timestamp must be
-recorded before timing begins. The window then runs for at least 14 continuous
-calendar days and at least five actual operating days.
-
-No retirement date is set. Any unexplained Legacy creation, incomplete queue
-drain, external-consumer uncertainty, rollback, or Formal regression extends
-or restarts the observation period.
+The observation window is active from `2026-07-22T15:13:47Z`. Review cannot
+occur before 14 continuous calendar days and five actual operating days have
+retained evidence. Any unexplained Legacy creation, incomplete drain, caller
+uncertainty, rollback, or Formal regression extends or restarts the relevant
+evidence interval.
 
 ## Client Action
 
 Known Legacy POST client owners must:
 
-1. identify the client, environment, schedule, and responsible owner;
+1. identify the client, environment, schedule, and owner;
 2. migrate execution to the Formal API;
-3. confirm whether Legacy history reads are still required;
-4. report any blocked migration before the observation review.
+3. confirm whether Legacy history reads remain necessary;
+4. report blocked migration before observation review.
 
-Do not include credentials, tokens, prompts, outputs, or private request
-payloads in migration evidence.
+Do not put credentials, tokens, prompts, outputs, or request payloads into
+migration evidence.
 
 ## Contacts
 
@@ -67,12 +67,8 @@ payloads in migration evidence.
 - Rollback owner: Project Maintainer
 - Support owner/contact path: Project Maintainer pilot coordination channel
 
-The notice is ready to distribute to the controlled Pilot participants. The
-owner must record recipients, channel, version, and UTC distribution time. It
-must not state a retirement date or imply that the Legacy API is already gone.
-
 ```text
-LEGACY_ALIGNMENT_OBSERVATION_ENVIRONMENT_READY
-OBSERVATION_WINDOW_PENDING_START
+LEGACY_ALIGNMENT_OBSERVATION_WINDOW_ACTIVE
+EXTERNAL_CONSUMER_VISIBILITY_LIMITED
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```
