@@ -2,8 +2,9 @@
 
 ## Scope
 
-This plan defines how operators should stop the isolated legacy runtime. It is
-not an executable recovery tool and does not mutate existing jobs.
+This plan defines how operators should stop the isolated legacy runtime. The
+companion operator tool is dry-run by default and mutates a stale job only when
+all explicit safe-failure gates are satisfied.
 
 ## Known Constraint
 
@@ -46,10 +47,11 @@ not blindly requeue or directly call `run_background_job()` for an old
 | `failed` | retain; do not manually retry during shutdown | avoids reopening the queue |
 | `canceled` | reconcile linked run and retain | generic cancel may leave the run active |
 
-The future safe-failure action must update the Job and linked `AlignmentRun`
-in one reviewed transaction, append a sanitized event, preserve historical
-cards, reject active owners, support dry-run output, and be auditable. That
-tool is outside Task 9C.5N.1.
+`scripts/legacy_alignment_runtime.py safe-fail` now implements this boundary:
+dry-run by default, explicit owner and stale cutoff fences, one transaction for
+the Job and linked `AlignmentRun`, a sanitized event, and an `AuditRecord`.
+Apply remains environment-gated and must not be used before the former worker
+process is independently confirmed stopped.
 
 ## Shutdown Checklist
 
@@ -83,11 +85,11 @@ legacy queue ownership.
 
 ## Exit Boundary
 
-This plan makes shutdown mechanically separable but does not prove external
-consumer absence, environment-authoritative queue drain, or a rehearsed
-safe-failure tool.
+The isolated rehearsal proves the repository mechanics but does not prove
+external consumer absence, environment-authoritative queue drain, or a target
+process-manager shutdown rehearsal.
 
 ```text
-LEGACY_RUNNING_JOB_RECOVERY_GAP
+LEGACY_RUNNING_JOB_AUTOMATIC_RECOVERY_ABSENT
 LEGACY_ALIGNMENT_410_NOT_AUTHORIZED
 ```

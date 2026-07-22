@@ -6,6 +6,8 @@
 - Baseline: `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
 - Runtime-isolation amendment: Task `9C.5N.1`, baseline
   `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
+- Freeze-preparation amendment: Task `9C.5N.2`, baseline
+  `9762b03197b0a919b72fd6ced913982d0da4a794`
 - Branch: `release/pilot-v1-candidate`
 - Runtime target: legacy `POST /api/alignment/run`
 - Current state: `ACTIVE_COMPATIBILITY_SURFACE`
@@ -69,22 +71,22 @@ operations.
 | Legacy POST, sync direct term | `backend/app.py:11175` branch | no job; creates a running/completed run and card writes | synchronous compatibility | required compatibility | keep during observation; include in POST traffic count |
 | Legacy POST, sync document | `backend/app.py:11137` branch | no job; helper creates a run and cards | synchronous compatibility | required compatibility | keep during observation; include in POST traffic count |
 | Sync document upload | `backend/app.py:10156`, call at `backend/app.py:10542` | no alignment job; helper creates a run and cards | legacy synchronous upload compatibility | unknown | investigate callers before any creation block |
-| Document-type legacy worker execution | `backend/app.py:6974` | creates an additional helper-owned run while processing the job-linked run | queued compatibility execution | required compatibility until drain | preserve behavior for now; separate run-identity fix task |
-| Direct helper call | `backend/app.py:9571` (`run_alignment_for_chunks`) | no job; always creates a run after its quality gate | shared legacy execution helper | required compatibility | do not expose as a new service; retire with callers |
+| Document-type legacy worker execution | `backend/app.py` `process_alignment_job` | reuses the job-linked run while processing existing work | queued compatibility execution | required compatibility until drain | allow only in Active/Draining |
+| Direct helper call | `backend/app.py:9571` (`run_alignment_for_chunks`) | no job; creates a run only in Active, or reuses a caller-supplied linked run during drain | shared legacy execution helper | required compatibility | do not expose as a new service; retire with callers |
 | Demo flow | `scripts/run_demo_flow.py:188` and `:217` | creates terminal run and terminal job records | local demo material | test-only | remove or replace only after demo/read-history decision |
 | Readiness containment probe | `scripts/pilot_readiness_check.py:615` and `:631` | creates and immediately processes an isolated test job | release safety proof | test-only | retain until 410 test conversion |
 | Direct test setup | legacy worker, route, card, and admin tests | can create isolated records/jobs | characterization and safety coverage | test-only | reclassify at deprecation execution |
 | Admin UI/API action | repository scan | no dedicated creation action found | none | obsolete | no action |
 | External callers | outside repository | potentially yes through legacy POST | unknown | unknown | observe and identify owners |
 
-`LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED=false` now disables legacy POST
-creation with a reversible 503 response and zero domain writes. The explicit
-worker modes can stop legacy polling without stopping Formal Workflow.
-However, the route flag does not address sync upload creation, direct helper
-calls, queued/running work, or unknown external callers.
+`LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED=false` now participates in one
+creation boundary covering the Legacy POST, sync upload, direct helper, and
+legacy job factory. The runtime state separately controls whether the dedicated
+worker may drain existing work. This does not resolve queued/running work in
+target environments or unknown external callers.
 
 ```text
-LEGACY_ADMISSION_CONTROL_NOT_READY
+LEGACY_ALIGNMENT_CREATION_FREEZE_BOUNDARY_COMPLETE
 ```
 
 ## Job State Transitions
@@ -112,10 +114,9 @@ backoff. The generic claim can select a retrying job again on the next poll.
   the job becomes `retrying` or `failed`.
 - Generic cancellation changes only the job and can leave the run queued or
   running.
-- Document-type worker execution calls `run_alignment_for_chunks()`, which
-  creates another `AlignmentRun`; cards are subsequently reassigned to the
-  job-linked run. This preserves current behavior but makes run accounting
-  unsuitable for retirement decisions without an explicit identity audit.
+- Document-type worker execution passes its linked `AlignmentRun` to
+  `run_alignment_for_chunks()`. Drain execution no longer creates a second run,
+  so queue/run counts have one stable identity for new drain operations.
 - `BackgroundJob.alignment_run_id` is nullable and is not a database foreign
   key, so the database does not enforce job/run lifecycle integrity.
 
@@ -127,7 +128,7 @@ backoff. The generic claim can select a retrying job again on the next poll.
 | Is there a legacy heartbeat? | No. Shared `heartbeat_at` exists, but the legacy path never updates it. |
 | Is there stale reclaim? | No. Legacy claim only selects queued/retrying jobs and never evaluates `lease_expires_at` or lock age. |
 | Is there ownership fencing? | No. `execution_attempt` and `lease_token` are not assigned by legacy claim, and writes/terminal commits have no owner CAS check. |
-| How is a running job recovered? | There is no automatic safe recovery path. Directly calling the dispatcher can rerun it, but that is not fenced or exposed as an approved operator procedure. |
+| How is a running job recovered? | There is no automatic safe recovery path. The fenced operator tool may fail a stale job and linked run after the former owner is confirmed stopped; it never replays the job. |
 | Is there orphan cleanup? | No automated job/run reconciliation or cleanup was found. |
 | Is there a manual recovery procedure? | No approved procedure or operator script exists. Generic cancel can mark the job canceled but does not repair the linked run; retry accepts only failed jobs. |
 

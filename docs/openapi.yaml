@@ -1080,7 +1080,11 @@ paths:
         may disable new compatibility admission with
         LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED=false; that maintenance state
         returns 503 LEGACY_ALIGNMENT_ADMISSION_DISABLED without creating a run
-        or job and is reversible independently of the formal workflow.
+        or job and is reversible independently of the formal workflow. The
+        server runtime states ACTIVE, FREEZE, DRAINING, and DISABLED preserve
+        history reads while separating creation, controlled queue drain, and
+        worker shutdown. FREEZE deployment starts observation preparation; it
+        is not HTTP 410 and does not remove this operation.
       requestBody:
         required: true
         content:

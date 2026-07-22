@@ -10,6 +10,8 @@ production telemetry by itself and does not authorize HTTP 410.
 - Baseline: `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
 - Runtime-isolation amendment: Task `9C.5N.1`, baseline
   `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
+- Freeze-preparation amendment: Task `9C.5N.2`, baseline
+  `9762b03197b0a919b72fd6ced913982d0da4a794`
 - Target POST: `/api/alignment/run`
 - Separate read surfaces: `/api/alignment/runs`,
   `/api/alignment/runs/{run_id}`, and `/api/admin/alignment-runs`
@@ -61,11 +63,12 @@ consumer. It cannot prove that deployed scripts or clients are absent.
 Evidence must come from every target environment's sanitized gateway or
 application access metrics and authoritative database queries.
 
-The repository now has a reversible legacy route admission flag and explicit
-formal, generic, and legacy worker modes. It still has no dedicated legacy
-route metric or automated job/run reconciliation report. Those remaining gaps
-must be addressed operationally or in separately approved implementation
-tasks before the observation window can produce complete evidence.
+The repository now has unified production creation admission, explicit worker
+modes, a read-only queue snapshot, fenced safe failure, and an isolated
+shutdown rehearsal. It still has no dedicated deployed-route metric or
+automated target-environment job/run reconciliation report. Those remaining
+gaps must be addressed operationally before the observation window can produce
+complete evidence.
 
 ## Worker Shutdown Readiness
 

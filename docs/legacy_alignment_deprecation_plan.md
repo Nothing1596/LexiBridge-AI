@@ -8,6 +8,8 @@
   `d4ec0790c53f05f5f3d598908ac4da60f5c2ea80`
 - Runtime isolation amendment: Task `9C.5N.1`, baseline
   `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
+- Freeze preparation amendment: Task `9C.5N.2`, baseline
+  `9762b03197b0a919b72fd6ced913982d0da4a794`
 - Route: `POST /api/alignment/run`
 - Current state: `ACTIVE_COMPATIBILITY_SURFACE`
 - Boundary status: `LEGACY_ALIGNMENT_DEPRECATION_BOUNDARY_ESTABLISHED`
@@ -40,8 +42,8 @@ HTTP 410 for the POST must not implicitly delete those read contracts or data.
 | Running legacy jobs = 0 | Authoritative query plus explicit disposition for stale-running jobs | Repository-local SQLite snapshot is 0; legacy worker has no stale reclaim | blocked pending operational policy |
 | Retrying legacy jobs = 0 | Authoritative query and retry drain/quarantine report | Repository-local SQLite snapshot is 0 only | conditional |
 | No lifecycle mismatch | No missing-run jobs; no active runs linked to terminal/missing jobs | Repository-local snapshot has no mismatch; code permits mismatch after crash/failure/cancel | blocked pending environment audit |
-| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | Reversible POST gate exists and defaults enabled; sync upload and helper-backed creation remain active | partially satisfied; blocked pending deployment and remaining-path decision |
-| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Default/formal/generic modes exclude legacy; explicit legacy mode and written shutdown plan exist | partially satisfied; blocked pending drain/disposition rehearsal |
+| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | All repository production creation paths share admission; release defaults remain Active | partially satisfied; blocked pending target freeze deployment |
+| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Explicit modes, snapshot, fenced safe failure, and isolated rehearsal pass | partially satisfied; blocked pending target-environment rehearsal |
 | Migration notice exists | OpenAPI/operator notice names formal replacement, timeline, owner, and support path | OpenAPI identifies the formal replacement; no dated timeline, owner, or support path exists | partially satisfied; blocked |
 | Monitoring window complete | Approved duration with route-call and queue-state evidence retained | No legacy route usage metric or completed window exists | blocked |
 | Compatibility tests reclassified | Tests are tagged as keep, convert-to-410, or remove-after-retirement | Inventory exists; conversion decision is not implemented | blocked |
@@ -136,20 +138,22 @@ support path is still required.
 
 ## Runtime Containment Amendment
 
-Tasks 9C.5N and 9C.5N.1 confirm that runtime containment is logically isolated
-but retirement evidence is not operationally complete:
+Tasks 9C.5N through 9C.5N.2 confirm that runtime containment is isolated and
+freeze tooling exists, but retirement evidence is not operationally complete:
 
 - legacy claim records `locked_by` and `locked_at` but does not use heartbeat,
   stale reclaim, lease ownership, or fencing;
 - running legacy jobs have no safe automatic recovery path;
 - cancel/retry update the shared job but do not guarantee linked
   `AlignmentRun` terminal consistency;
-- sync upload and helper-backed execution can create legacy runs outside the
-  default async legacy POST;
+- sync upload and helper-backed execution are now covered by the same admission
+  decision as the default async legacy POST;
 - default and Formal worker modes no longer poll legacy jobs; an explicit
   legacy mode remains available for controlled compatibility drain;
-- a default-enabled route admission flag can return reversible 503 responses
-  without writes, but sync upload and helper callers remain outside that gate;
+- a unified default-enabled admission boundary covers route, sync upload,
+  helper, and job-factory creation;
+- Active/Freeze/Draining/Disabled states, read-only queue inspection, fenced
+  safe failure, and an isolated shutdown rehearsal are present;
 - the external consumer state remains unknown until the observation window
   completes.
 
@@ -183,13 +187,15 @@ A future Task 9C.5O may begin only when all of the following are documented:
 ## Current Blockers
 
 - `UNKNOWN_EXTERNAL_LEGACY_CONSUMER` due to absent runtime traffic evidence;
-- new legacy async and synchronous execution remains enabled;
-- sync upload and helper-backed paths can still create legacy runs;
+- release defaults intentionally remain Active until the observation owner
+  authorizes a target-environment freeze;
 - explicit legacy worker mode still claims and executes queued/retrying jobs
   when an operator starts it;
-- no legacy stale-running reclaim or operator disposition exists;
-- worker shutdown is separable, but drain and safe-failure disposition have
-  not been rehearsed in target environments;
+- no automatic legacy stale-running reclaim exists; fenced operator safe
+  failure is available but requires a confirmed stopped owner and explicit
+  environment/apply gates;
+- worker shutdown is separable and rehearsed in isolation, but not yet against
+  target process managers and authoritative databases;
 - local zero queue counts are not authoritative for other environments;
 - OpenAPI names the formal replacement, but no dated notice, owner, or support
   path exists;

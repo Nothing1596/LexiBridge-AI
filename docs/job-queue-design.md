@@ -81,6 +81,18 @@ Use `--mode formal` or `--mode generic` to run only that queue family.
 `queued` or `retrying` jobs by priority and ID order, executes the matching
 handler, writes progress events, and records the final result.
 
+Legacy retirement operations use `LEGACY_ALIGNMENT_RUNTIME_STATE`:
+
+- `active`: admission and dedicated Legacy claim are available;
+- `freeze`: admission and Legacy claim are blocked;
+- `draining`: admission stays blocked while the dedicated Legacy worker may
+  finish existing queued/retrying jobs;
+- `disabled`: admission and Legacy claim are blocked after drain.
+
+Run `python scripts/legacy_alignment_runtime.py status` for a read-only
+queued/running/retrying/failed snapshot. Safe failure is a separate fenced,
+audited operator action and never retries, migrates, or deletes a job.
+
 ## Retry And Cancel
 
 - Unexpected retryable failures move to `retrying` until `attempt_count >= max_attempts`.

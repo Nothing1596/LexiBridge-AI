@@ -71,11 +71,12 @@ python scripts/check_release_package.py dist/<release>.zip
 3. Open `frontend/index.html`.
 4. Login as Teacher, upload a TXT course document, inspect `Job Status`, then run `python scripts/run_worker.py --once`; this standard mode handles Formal Workflow plus generic ingestion/evaluation jobs and never legacy `alignment_run` jobs.
 5. When explicitly validating legacy compatibility, use a separate `python scripts/run_worker.py --mode legacy-alignment --once` process and record the reason.
-6. Run terminology alignment and inspect cards/QC.
-7. Login as Student, search cards, favorite, mastered, feedback.
-8. Student uploads personal TXT and verifies another student cannot access it.
-9. Login as Admin, inspect users, logs, usage, ingestion jobs, background jobs, personal access audit.
-10. Run evaluation smoke set through `/api/evaluation/run`, then process the queued job with the worker.
+6. Before a Legacy freeze rehearsal, run `python scripts/legacy_alignment_runtime.py status`, record queue counts, and confirm the apply gate remains false unless a reviewed stale-job disposition is being executed.
+7. Run terminology alignment and inspect cards/QC.
+8. Login as Student, search cards, favorite, mastered, feedback.
+9. Student uploads personal TXT and verifies another student cannot access it.
+10. Login as Admin, inspect users, logs, usage, ingestion jobs, background jobs, personal access audit.
+11. Run evaluation smoke set through `/api/evaluation/run`, then process the queued job with the worker.
 
 ## Release Notes Must Be Honest
 

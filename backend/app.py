@@ -78,6 +78,7 @@ from services.legacy_alignment_provider_classification import (
     LEGACY_ALIGNMENT_EXTERNAL_EXECUTION_DISABLED,
     classify_legacy_alignment_provider,
 )
+from services import legacy_alignment_freeze as legacy_alignment_freeze_service
 from services.document_alignment_workflow_contract import (
     DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES,
     DOCUMENT_ALIGNMENT_ITEM_STAGES,
@@ -359,12 +360,33 @@ JOB_MAX_ATTEMPTS = int(os.environ.get("JOB_MAX_ATTEMPTS", "3"))
 LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED = (
     os.environ.get("LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED", "true").strip().lower() == "true"
 )
+LEGACY_ALIGNMENT_RUNTIME_STATE = legacy_alignment_freeze_service.normalize_runtime_state(
+    os.environ.get("LEGACY_ALIGNMENT_RUNTIME_STATE", legacy_alignment_freeze_service.RUNTIME_STATE_ACTIVE)
+)
 
 LEGACY_ALIGNMENT_JOB_TYPE = "alignment_run"
 GENERIC_BACKGROUND_JOB_TYPES = frozenset({"document_ingestion", "evaluation_run"})
 JOB_TYPES = set(GENERIC_BACKGROUND_JOB_TYPES) | {LEGACY_ALIGNMENT_JOB_TYPE}
 JOB_STATUSES = {"queued", "running", "completed", "failed", "canceled", "retrying"}
 TERMINAL_JOB_STATUSES = {"completed", "failed", "canceled"}
+
+
+def legacy_alignment_creation_is_allowed():
+    return legacy_alignment_freeze_service.creation_is_allowed(
+        LEGACY_ALIGNMENT_RUNTIME_STATE,
+        LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED,
+    )
+
+
+def require_legacy_alignment_creation_admission():
+    legacy_alignment_freeze_service.require_creation_admission(
+        LEGACY_ALIGNMENT_RUNTIME_STATE,
+        LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED,
+    )
+
+
+def legacy_alignment_worker_claim_is_allowed():
+    return legacy_alignment_freeze_service.worker_claim_is_allowed(LEGACY_ALIGNMENT_RUNTIME_STATE)
 
 ERROR_CODES = {
     "AUTH_REQUIRED": 401,
@@ -6356,6 +6378,23 @@ def can_manage_evaluation_set(user, evaluation_set):
     return False
 
 
+def legacy_alignment_runtime_models():
+    return legacy_alignment_freeze_service.LegacyAlignmentRuntimeModels(
+        background_job=BackgroundJob,
+        alignment_run=AlignmentRun,
+        background_job_event=BackgroundJobEvent,
+        audit_record=AuditRecord,
+    )
+
+
+def legacy_alignment_queue_snapshot(limit=100):
+    return legacy_alignment_freeze_service.legacy_queue_snapshot(
+        db.session,
+        legacy_alignment_runtime_models(),
+        limit=limit,
+    )
+
+
 class JobExecutionError(Exception):
     def __init__(self, message, error_code="INTERNAL_ERROR", retryable=True):
         super().__init__(message)
@@ -6400,6 +6439,8 @@ def create_background_job(
     job_type = str(job_type or "").strip()
     if job_type not in JOB_TYPES:
         raise ValueError(f"Unsupported job_type: {job_type}")
+    if job_type == LEGACY_ALIGNMENT_JOB_TYPE:
+        require_legacy_alignment_creation_admission()
     now = current_time_text()
     creator_id = created_by.id if hasattr(created_by, "id") else int(created_by or 0)
     job = BackgroundJob(
@@ -6985,6 +7026,7 @@ def process_alignment_job(job):
             source_document_id=document.id,
             triggered_by_user_id=job.created_by,
             provider_metadata=provider_metadata,
+            alignment_run=alignment_run,
         )
         for card in cards:
             card.alignment_run_id = alignment_run.id
@@ -7077,6 +7119,8 @@ def run_background_job(job_id, worker_id=JOB_WORKER_ID):
         raise JobExecutionError("BackgroundJob not found.", "RESOURCE_NOT_FOUND", retryable=False)
     if job.job_type == FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE:
         return job
+    if job.job_type == LEGACY_ALIGNMENT_JOB_TYPE and not legacy_alignment_worker_claim_is_allowed():
+        return job
     if job.status == "canceled":
         add_job_event(job, "canceled", "Job was canceled before execution.")
         return job
@@ -7161,6 +7205,8 @@ def claim_next_background_job(worker_id=JOB_WORKER_ID, job_types=None):
         BackgroundJob.status.in_(["queued", "retrying"]),
         BackgroundJob.job_type != FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
     )
+    if job_types is None and not legacy_alignment_worker_claim_is_allowed():
+        query = query.filter(BackgroundJob.job_type != LEGACY_ALIGNMENT_JOB_TYPE)
     if job_types is not None:
         selected_types = tuple(
             sorted({str(item or "").strip() for item in job_types if str(item or "").strip()})
@@ -7194,6 +7240,8 @@ def run_worker_once(worker_id=JOB_WORKER_ID):
 
 
 def claim_next_legacy_alignment_job(worker_id=JOB_WORKER_ID):
+    if not legacy_alignment_worker_claim_is_allowed():
+        return None
     return claim_next_background_job(worker_id, job_types={LEGACY_ALIGNMENT_JOB_TYPE})
 
 
@@ -9616,7 +9664,10 @@ def run_alignment_for_chunks(
     limit_terms=12,
     triggered_by_user_id=None,
     provider_metadata=None,
+    alignment_run=None,
 ):
+    if alignment_run is None:
+        require_legacy_alignment_creation_admission()
     parse_quality_metadata = parse_quality_metadata_from_chunks(chunks)
     if parse_quality_risk_service.should_block_downstream_creation(parse_quality_metadata):
         return []
@@ -9626,23 +9677,27 @@ def run_alignment_for_chunks(
         if chunk.content and not contains_formula_placeholder(chunk.content)
     )
     meta = provider_metadata or default_legacy_alignment_provider_metadata()
-    alignment_run = AlignmentRun(
-        document_id=source_document_id,
-        course_id=course.id if course else None,
-        triggered_by=triggered_by_user_id or owner_user_id or 0,
-        provider=meta["provider"],
-        model_name=meta["model_name"],
-        ai_provider=meta["provider"],
-        ai_provider_mode=meta.get("provider_mode", ""),
-        ai_model=meta["model_name"],
-        prompt_key="term_alignment",
-        prompt_version="v1",
-        retrieval_version=RETRIEVAL_VERSION,
-        status="running",
-        started_at=current_time_text()
-    )
-    db.session.add(alignment_run)
-    db.session.flush()
+    if alignment_run is None:
+        alignment_run = AlignmentRun(
+            document_id=source_document_id,
+            course_id=course.id if course else None,
+            triggered_by=triggered_by_user_id or owner_user_id or 0,
+            provider=meta["provider"],
+            model_name=meta["model_name"],
+            ai_provider=meta["provider"],
+            ai_provider_mode=meta.get("provider_mode", ""),
+            ai_model=meta["model_name"],
+            prompt_key="term_alignment",
+            prompt_version="v1",
+            retrieval_version=RETRIEVAL_VERSION,
+            status="running",
+            started_at=current_time_text()
+        )
+        db.session.add(alignment_run)
+        db.session.flush()
+    else:
+        alignment_run.status = "running"
+        alignment_run.started_at = alignment_run.started_at or current_time_text()
     if contains_ocr_placeholder(text) or contains_formula_placeholder(text):
         alignment_run.status = "failed"
         alignment_run.error_message = "OCR or formula placeholder content is not eligible for term extraction."
@@ -10201,6 +10256,13 @@ def upload_document():
     audit_context = get_route_audit_context(user)
 
     sync_requested = str(request.args.get("sync", "")).strip().lower() in {"1", "true", "yes"}
+    if sync_requested and not legacy_alignment_creation_is_allowed():
+        return api_error_with_audit_context(
+            "LEGACY_ALIGNMENT_ADMISSION_DISABLED",
+            "Legacy alignment admission is disabled; use asynchronous upload and the formal document alignment workflow.",
+            503,
+            audit_context,
+        )
     file = request.files.get("file")
     if file is None or file.filename == "":
         return api_error_with_audit_context("VALIDATION_ERROR", "没有收到文件。", 400, audit_context)
@@ -11089,7 +11151,7 @@ def run_alignment():
     user, error_response = require_current_user({"student", "teacher", "admin"})
     if error_response:
         return error_response
-    if not LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED:
+    if not legacy_alignment_creation_is_allowed():
         return api_error(
             "LEGACY_ALIGNMENT_ADMISSION_DISABLED",
             "Legacy alignment admission is disabled; use the formal document alignment workflow.",

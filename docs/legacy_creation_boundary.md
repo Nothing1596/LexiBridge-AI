@@ -15,7 +15,7 @@ control without deleting an entry or returning HTTP 410.
 | `POST /api/alignment/run?sync=true`, document | `backend/app.py` `run_alignment()` | no; helper creates run/cards | synchronous legacy compatibility | Production compatibility | same route gate; do not retain as a bypass |
 | `POST /api/documents/upload?sync=true` | `backend/app.py` upload sync branch | no; may invoke helper | old synchronous upload behavior | Migration only | identify remaining callers, then remove helper call in a separate contract task |
 | `run_alignment_for_chunks()` | `backend/app.py` | no; creates run/cards | shared legacy helper used by sync paths and queued execution | Migration only | retire only after all callers are migrated or drained |
-| queued document legacy processing | `backend/app.py` `process_alignment_job()` | consumes a job and may create a helper-owned run | queued compatibility execution | Migration only | preserve until queue drain and run-identity audit |
+| queued document legacy processing | `backend/app.py` `process_alignment_job()` | consumes a job and reuses its linked run | queued compatibility execution | Migration only | preserve until queue drain and run-identity audit |
 | `scripts/run_demo_flow.py` | demo seeding | creates terminal records | local demonstration data | Test only | migrate demo data separately from production admission |
 | `scripts/pilot_readiness_check.py` | containment probe | creates isolated test records | release safety evidence | Test only | retain until deprecation contract changes |
 | tests and fixtures | `tests/` | creates isolated records | characterization and regression | Test only | convert deliberately at future deprecation/removal |
@@ -46,13 +46,13 @@ Recommended future cutover sequence:
 7. verify all creation paths, including sync upload, are closed or explicitly
    retained before considering HTTP 410.
 
-The flag controls only the legacy HTTP route. It intentionally does not gate
-the sync upload branch or direct helper calls because doing so would change a
-separate production contract. Therefore global creation control is not yet
-complete:
+Task 9C.5N.2 supersedes the earlier route-only limitation. The same admission
+decision now covers sync upload, direct helper calls, and the legacy job
+factory. Drain execution may reuse an existing linked run but cannot create a
+replacement run outside Active:
 
 ```text
-LEGACY_ADMISSION_CONTROL_NOT_READY
+LEGACY_ALIGNMENT_CREATION_FREEZE_BOUNDARY_COMPLETE
 ```
 
 ## Migration Strategy

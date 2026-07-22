@@ -67,7 +67,7 @@ def test_creation_boundary_documents_all_non_test_production_entries():
         "Test only",
         "Obsolete",
         "LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED",
-        "LEGACY_ADMISSION_CONTROL_NOT_READY",
+        "LEGACY_ALIGNMENT_CREATION_FREEZE_BOUNDARY_COMPLETE",
     ):
         assert expected in boundary
 
