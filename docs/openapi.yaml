@@ -1084,7 +1084,10 @@ paths:
         server runtime states ACTIVE, FREEZE, DRAINING, and DISABLED preserve
         history reads while separating creation, controlled queue drain, and
         worker shutdown. FREEZE deployment starts observation preparation; it
-        is not HTTP 410 and does not remove this operation.
+        is not HTTP 410 and does not remove this operation. The required
+        target-environment observation window remains pending until at least
+        14 continuous days, five operating days, zero new Legacy creation, and
+        external-consumer evidence are recorded.
       requestBody:
         required: true
         content:

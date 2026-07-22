@@ -181,6 +181,10 @@ Legacy freeze operations use `LEGACY_ALIGNMENT_RUNTIME_STATE` with
 writes using `python scripts/legacy_alignment_runtime.py status`. The
 safe-failure command is dry-run unless the runtime state, owner fence, stale
 cutoff, apply environment gate, and `--apply` all authorize one transaction.
+Payload-free observation events are enabled by
+`LEGACY_ALIGNMENT_OBSERVATION_ENABLED`; aggregate retained application logs
+with `python scripts/legacy_alignment_observation_report.py`. Repository scans
+and local E2E do not complete the required target-environment 14-day window.
 
 If port `5000` is occupied:
 

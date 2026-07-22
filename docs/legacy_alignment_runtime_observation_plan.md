@@ -47,7 +47,7 @@ or telemetry also restart the window.
 | Running jobs | Count, owner, lock age, and linked run state | at least hourly | zero; every stale candidate has an approved disposition |
 | Retrying jobs | Count, attempt distribution, error-code class, and oldest age | at least hourly | zero at window exit |
 | Worker activity | Claims, completions, retries, failures, cancels, worker identifier, and last legacy activity | continuous; daily summary | no unexplained activity and a tested shutdown procedure |
-| External consumer signal | Sanitized gateway/application access evidence plus client-owner confirmations | continuous plus weekly review | `NO_KNOWN_EXTERNAL_CONSUMER` decision with retained evidence |
+| External consumer signal | Sanitized gateway/application access evidence plus client-owner confirmations | continuous plus weekly review | `NO_KNOWN_EXTERNAL_LEGACY_CONSUMER` decision with retained evidence |
 | Lifecycle integrity | Missing-run jobs, active runs without jobs, and run/job terminal mismatches | daily and before cutover | zero unresolved mismatches |
 | Rollback ownership | Named primary/secondary owner, decision authority, and contact path | before window starts | approved owner record and rehearsal evidence |
 
@@ -65,10 +65,12 @@ application access metrics and authoritative database queries.
 
 The repository now has unified production creation admission, explicit worker
 modes, a read-only queue snapshot, fenced safe failure, and an isolated
-shutdown rehearsal. It still has no dedicated deployed-route metric or
-automated target-environment job/run reconciliation report. Those remaining
-gaps must be addressed operationally before the observation window can produce
-complete evidence.
+shutdown rehearsal. Task 9C.5O adds payload-free structured request and
+creation signals plus `scripts/legacy_alignment_observation_report.py` for
+offline aggregation. Target environments still need to deploy and retain those
+logs, and there is no automated target-environment job/run reconciliation
+report. Those remaining gaps must be addressed operationally before the
+observation window can produce complete evidence.
 
 ## Worker Shutdown Readiness
 
@@ -100,7 +102,8 @@ The observation owner must inventory:
 - support reports received during the window.
 
 No caller found in the application repository is not sufficient to replace
-`UNKNOWN_EXTERNAL_LEGACY_CONSUMER` with `NO_KNOWN_EXTERNAL_CONSUMER`.
+`UNKNOWN_EXTERNAL_LEGACY_CONSUMER` with
+`NO_KNOWN_EXTERNAL_LEGACY_CONSUMER`.
 
 ## Rollback Requirements
 

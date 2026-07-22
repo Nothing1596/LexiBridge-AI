@@ -28,3 +28,6 @@ def test_isolated_shutdown_rehearsal_passes(tmp_path):
     assert payload["environment"] == "isolated_temporary_sqlite"
     assert all(payload["checks"].values())
     assert payload["drained_snapshot"]["active_total"] == 0
+    assert payload["checks"]["freeze_http_created_no_legacy_records"] is True
+    assert payload["checks"]["rollback_http_creation_restored"] is True
+    assert payload["rollback_http_status"] == 200

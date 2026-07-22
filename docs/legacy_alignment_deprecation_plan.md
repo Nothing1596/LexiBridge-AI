@@ -10,6 +10,8 @@
   `e58982d216d9d2977abc5c91f35a2b1c7429ade8`
 - Freeze preparation amendment: Task `9C.5N.2`, baseline
   `9762b03197b0a919b72fd6ced913982d0da4a794`
+- Controlled observation amendment: Task `9C.5O`, baseline
+  `388666a192df9d33044541aaca4ddf42e6aa7bd2`
 - Route: `POST /api/alignment/run`
 - Current state: `ACTIVE_COMPATIBILITY_SURFACE`
 - Boundary status: `LEGACY_ALIGNMENT_DEPRECATION_BOUNDARY_ESTABLISHED`
@@ -39,15 +41,15 @@ HTTP 410 for the POST must not implicitly delete those read contracts or data.
 | Frontend consumer = 0 | Static scan and browser request count show no production legacy POST/fallback | 9C.5K/9C.5L and formal UI E2E show `legacy_alignment_requests=0` | satisfied |
 | External consumer = no known | Client-owner inventory plus route traffic observation shows no caller | No repository executable client found, but no gateway/access telemetry or external client registry exists | blocked: `UNKNOWN_EXTERNAL_LEGACY_CONSUMER` |
 | Queued legacy jobs = 0 | Authoritative target database query at window start and immediately before cutover | Repository-local SQLite snapshot is 0 only | conditional; not environment-authoritative |
-| Running legacy jobs = 0 | Authoritative query plus explicit disposition for stale-running jobs | Repository-local SQLite snapshot is 0; legacy worker has no stale reclaim | blocked pending operational policy |
+| Running legacy jobs = 0 | Authoritative query plus explicit disposition for stale-running jobs | Isolated safe-failure and drain rehearsal passed; target database evidence is unavailable | blocked pending target execution |
 | Retrying legacy jobs = 0 | Authoritative query and retry drain/quarantine report | Repository-local SQLite snapshot is 0 only | conditional |
 | No lifecycle mismatch | No missing-run jobs; no active runs linked to terminal/missing jobs | Repository-local snapshot has no mismatch; code permits mismatch after crash/failure/cancel | blocked pending environment audit |
-| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | All repository production creation paths share admission; release defaults remain Active | partially satisfied; blocked pending target freeze deployment |
-| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Explicit modes, snapshot, fenced safe failure, and isolated rehearsal pass | partially satisfied; blocked pending target-environment rehearsal |
+| Legacy creation controlled | Admission is disabled or intentionally accepted for an approved observation window | All repository production creation paths share admission; isolated Freeze/rollback rehearsal passed; release defaults remain Active | partially satisfied; blocked pending target freeze deployment |
+| Worker shutdown procedure exists | Legacy polling can stop without halting Formal Workflow, with drain and stale-job handling | Explicit modes, snapshot, fenced safe failure, isolated shutdown rehearsal, and local Formal-only runtime pass | partially satisfied; blocked pending target-environment rehearsal |
 | Migration notice exists | OpenAPI/operator notice names formal replacement, timeline, owner, and support path | OpenAPI identifies the formal replacement; no dated timeline, owner, or support path exists | partially satisfied; blocked |
-| Monitoring window complete | Approved duration with route-call and queue-state evidence retained | No legacy route usage metric or completed window exists | blocked |
+| Monitoring window complete | Approved duration with route-call and queue-state evidence retained | Payload-free route/creation telemetry and report tooling exist; target deployment is 0 of 14 days and 0 of 5 operating days | blocked: `OBSERVATION_WINDOW_PENDING` |
 | Compatibility tests reclassified | Tests are tagged as keep, convert-to-410, or remove-after-retirement | Inventory exists; conversion decision is not implemented | blocked |
-| Rollback and incident owner defined | Named owner and reversible cutover procedure exist | Not present in repository governance docs | blocked |
+| Rollback and incident owner defined | Named owner and reversible cutover procedure exist | Reversible procedure and isolated rollback rehearsal exist; target owner/support path is unassigned | blocked |
 
 ## Required Monitoring Window
 
@@ -91,7 +93,8 @@ This task does not choose or execute a mutation procedure for stale jobs.
 ## Consumer Confirmation Procedure
 
 The following evidence is required to replace
-`UNKNOWN_EXTERNAL_LEGACY_CONSUMER` with `NO_KNOWN_EXTERNAL_CONSUMER`:
+`UNKNOWN_EXTERNAL_LEGACY_CONSUMER` with
+`NO_KNOWN_EXTERNAL_LEGACY_CONSUMER`:
 
 1. search the repository and maintained deployment/configuration repositories;
 2. identify owners of documented API clients, browser bookmarks, teaching
@@ -154,6 +157,8 @@ freeze tooling exists, but retirement evidence is not operationally complete:
   helper, and job-factory creation;
 - Active/Freeze/Draining/Disabled states, read-only queue inspection, fenced
   safe failure, and an isolated shutdown rehearsal are present;
+- payload-free request and internal-creation telemetry plus a report tool are
+  present, but no target environment has begun the required window;
 - the external consumer state remains unknown until the observation window
   completes.
 
@@ -166,11 +171,11 @@ operational requirements.
 
 ## Entry Criteria For A Legacy 410 Task
 
-A future Task 9C.5O may begin only when all of the following are documented:
+A future Task 9C.5P may begin only when all of the following are documented:
 
 1. production frontend legacy POST and fallback counts remain zero;
-2. external consumer status is `NO_KNOWN_EXTERNAL_CONSUMER` after the approved
-   observation window;
+2. external consumer status is `NO_KNOWN_EXTERNAL_LEGACY_CONSUMER` after the
+   approved observation window;
 3. authoritative queued, running, and retrying legacy job counts are zero in
    every target environment;
 4. no orphan or run/job lifecycle mismatch remains;
@@ -194,12 +199,13 @@ A future Task 9C.5O may begin only when all of the following are documented:
 - no automatic legacy stale-running reclaim exists; fenced operator safe
   failure is available but requires a confirmed stopped owner and explicit
   environment/apply gates;
-- worker shutdown is separable and rehearsed in isolation, but not yet against
-  target process managers and authoritative databases;
+- worker shutdown and rollback are separable and rehearsed in isolation, but
+  not yet against target process managers and authoritative databases;
 - local zero queue counts are not authoritative for other environments;
 - OpenAPI names the formal replacement, but no dated notice, owner, or support
   path exists;
-- no completed monitoring/deprecation window exists;
+- observation telemetry is available, but no target deployment, named owner,
+  completed 14-day window, or five actual operating days exist;
 - legacy compatibility tests have not yet been converted to a 410 contract.
 
 ## Authorization Result

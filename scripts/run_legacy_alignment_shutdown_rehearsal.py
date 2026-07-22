@@ -117,9 +117,32 @@ def run_rehearsal(app_module):
             status="running",
             owner="rehearsal-stopped-worker",
         )
+        token = app_module.create_auth_token(user)
+        client = app_module.app.test_client()
 
         app_module.LEGACY_ALIGNMENT_RUNTIME_STATE = service.RUNTIME_STATE_FREEZE
         app_module.LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED = False
+        before_frozen_http = {
+            "runs": app_module.AlignmentRun.query.count(),
+            "jobs": app_module.BackgroundJob.query.filter_by(
+                job_type=app_module.LEGACY_ALIGNMENT_JOB_TYPE
+            ).count(),
+        }
+        frozen_http = client.post(
+            "/api/alignment/run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "english_term": "Frozen Legacy Rehearsal Term",
+                "course_id": course.id,
+                "scope_type": "course",
+            },
+        )
+        after_frozen_http = {
+            "runs": app_module.AlignmentRun.query.count(),
+            "jobs": app_module.BackgroundJob.query.filter_by(
+                job_type=app_module.LEGACY_ALIGNMENT_JOB_TYPE
+            ).count(),
+        }
         creation_blocked = False
         try:
             app_module.create_background_job(
@@ -149,6 +172,7 @@ def run_rehearsal(app_module):
         app_module.LEGACY_ALIGNMENT_RUNTIME_STATE = service.RUNTIME_STATE_DRAINING
         drained_job = app_module.run_legacy_alignment_worker_once("rehearsal-drain-worker")
         drained_snapshot = app_module.legacy_alignment_queue_snapshot()
+        drained_run_count = app_module.AlignmentRun.query.count()
 
         app_module.LEGACY_ALIGNMENT_RUNTIME_STATE = service.RUNTIME_STATE_DISABLED
         disabled_claim = app_module.claim_next_legacy_alignment_job("rehearsal-disabled-worker")
@@ -156,6 +180,15 @@ def run_rehearsal(app_module):
         app_module.LEGACY_ALIGNMENT_RUNTIME_STATE = service.RUNTIME_STATE_ACTIVE
         app_module.LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED = True
         restored = app_module.legacy_alignment_creation_is_allowed()
+        rollback_http = client.post(
+            "/api/alignment/run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "english_term": "Restored Legacy Rehearsal Term",
+                "course_id": course.id,
+                "scope_type": "course",
+            },
+        )
         formal_contract = {
             "workflow_version": app_module.WORKFLOW_VERSION_V1,
             "job_type": app_module.FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
@@ -163,6 +196,9 @@ def run_rehearsal(app_module):
 
         checks = {
             "freeze_blocked_creation": creation_blocked,
+            "freeze_http_returned_migration_response": frozen_http.status_code == 503
+            and frozen_http.get_json().get("error_code") == "LEGACY_ALIGNMENT_ADMISSION_DISABLED",
+            "freeze_http_created_no_legacy_records": before_frozen_http == after_frozen_http,
             "freeze_paused_legacy_claim": frozen_claim is None,
             "freeze_observed_queued": frozen_snapshot["counts"]["queued"] == 1,
             "freeze_observed_running": frozen_snapshot["counts"]["running"] == 1,
@@ -173,6 +209,7 @@ def run_rehearsal(app_module):
             "drain_active_total_zero": drained_snapshot["active_total"] == 0,
             "disabled_paused_legacy_claim": disabled_claim is None,
             "active_mode_restored": restored,
+            "rollback_http_creation_restored": rollback_http.status_code == 200,
             "formal_contract_unchanged": formal_contract
             == {
                 "workflow_version": "formal-document-alignment-v1",
@@ -188,7 +225,7 @@ def run_rehearsal(app_module):
             ).count()
             == 1,
             "queued_run_reused": app_module.AlignmentRun.query.filter_by(id=queued_run.id).count() == 1,
-            "drain_did_not_create_replacement_run": app_module.AlignmentRun.query.count() == 2,
+            "drain_did_not_create_replacement_run": drained_run_count == 2,
             "stale_run_failed": app_module.db.session.get(app_module.AlignmentRun, stale_run.id).status
             == "failed",
         }
@@ -199,6 +236,7 @@ def run_rehearsal(app_module):
             "freeze_snapshot": frozen_snapshot,
             "drained_snapshot": drained_snapshot,
             "formal_contract": formal_contract,
+            "rollback_http_status": rollback_http.status_code,
         }
 
 

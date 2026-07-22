@@ -1,4 +1,4 @@
-from flask import Flask, Response, g, jsonify, request, send_file
+from flask import Flask, Response, g, has_request_context, jsonify, request, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -79,6 +79,8 @@ from services.legacy_alignment_provider_classification import (
     classify_legacy_alignment_provider,
 )
 from services import legacy_alignment_freeze as legacy_alignment_freeze_service
+from services import legacy_alignment_observation as legacy_alignment_observation_service
+from services import logging_config as logging_config_service
 from services.document_alignment_workflow_contract import (
     DOCUMENT_ALIGNMENT_ITEM_VERIFICATION_EXECUTION_STATUSES,
     DOCUMENT_ALIGNMENT_ITEM_STAGES,
@@ -263,6 +265,7 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
 load_env_file(os.path.join(PROJECT_ROOT, ".env"))
 load_env_file(os.path.join(BASE_DIR, ".env"))
+logging_config_service.configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
 
 app = Flask(__name__)
 
@@ -363,6 +366,9 @@ LEGACY_ALIGNMENT_ROUTE_ADMISSION_ENABLED = (
 LEGACY_ALIGNMENT_RUNTIME_STATE = legacy_alignment_freeze_service.normalize_runtime_state(
     os.environ.get("LEGACY_ALIGNMENT_RUNTIME_STATE", legacy_alignment_freeze_service.RUNTIME_STATE_ACTIVE)
 )
+LEGACY_ALIGNMENT_OBSERVATION_ENABLED = (
+    os.environ.get("LEGACY_ALIGNMENT_OBSERVATION_ENABLED", "true").strip().lower() == "true"
+)
 
 LEGACY_ALIGNMENT_JOB_TYPE = "alignment_run"
 GENERIC_BACKGROUND_JOB_TYPES = frozenset({"document_ingestion", "evaluation_run"})
@@ -387,6 +393,69 @@ def require_legacy_alignment_creation_admission():
 
 def legacy_alignment_worker_claim_is_allowed():
     return legacy_alignment_freeze_service.worker_claim_is_allowed(LEGACY_ALIGNMENT_RUNTIME_STATE)
+
+
+def note_legacy_alignment_creation(entity, source, caller_id=None):
+    if not LEGACY_ALIGNMENT_OBSERVATION_ENABLED:
+        return
+    entity_name = str(entity or "unknown")
+    if has_request_context():
+        counts = dict(getattr(g, "legacy_alignment_creation_counts", {}) or {})
+        counts[entity_name] = int(counts.get(entity_name, 0) or 0) + 1
+        g.legacy_alignment_creation_counts = counts
+        return
+    legacy_alignment_observation_service.log_internal_creation(
+        entity=entity_name,
+        source=source,
+        caller_id=caller_id,
+    )
+
+
+@app.after_request
+def observe_legacy_alignment_request(response):
+    if not LEGACY_ALIGNMENT_OBSERVATION_ENABLED:
+        return response
+    endpoint = str(request.endpoint or "")
+    routes = {
+        "run_alignment": "/api/alignment/run",
+        "alignment_runs": "/api/alignment/runs",
+        "alignment_run_detail": "/api/alignment/runs/{run_id}",
+        "admin_alignment_runs": "/api/admin/alignment-runs",
+    }
+    if endpoint == "upload_document":
+        sync_requested = str(request.args.get("sync", "")).strip().lower() in {"1", "true", "yes"}
+        if not sync_requested:
+            return response
+        route = "/api/documents/upload?sync=true"
+    else:
+        route = routes.get(endpoint)
+    if not route:
+        return response
+    payload = response.get_json(silent=True) if hasattr(response, "get_json") else {}
+    error_code = payload.get("error_code", "") if isinstance(payload, dict) else ""
+    counts = dict(getattr(g, "legacy_alignment_creation_counts", {}) or {})
+    try:
+        legacy_alignment_observation_service.log_request(
+            method=request.method,
+            route=route,
+            endpoint=endpoint,
+            status_code=response.status_code,
+            error_code=error_code,
+            caller_id=getattr(g, "lexibridge_authenticated_user_id", None),
+            caller_role=getattr(g, "lexibridge_authenticated_user_role", "unknown"),
+            request_id=getattr(g, "lexibridge_request_id", ""),
+            request_mode=(
+                "sync"
+                if route.endswith("sync=true")
+                or (endpoint == "run_alignment" and str(request.args.get("sync", "")).lower() in {"1", "true", "yes"})
+                else "async" if endpoint == "run_alignment" else "read"
+            ),
+            alignment_run_creations=counts.get("alignment_run", 0),
+            background_job_creations=counts.get("background_job", 0),
+        )
+    except Exception:
+        app.logger.exception("Legacy alignment observation logging failed.")
+    return response
 
 ERROR_CODES = {
     "AUTH_REQUIRED": 401,
@@ -6466,6 +6535,8 @@ def create_background_job(
     )
     db.session.add(job)
     db.session.flush()
+    if job_type == LEGACY_ALIGNMENT_JOB_TYPE:
+        note_legacy_alignment_creation("background_job", "create_background_job", creator_id)
     add_job_event(job, "created", f"{job_type} queued.", metadata={"job_type": job_type})
     return job
 
@@ -7634,6 +7705,8 @@ def require_current_user(roles=None):
     if roles and user.role not in roles:
         return None, api_error("PERMISSION_DENIED", "当前账号没有权限执行该操作。", 403)
 
+    g.lexibridge_authenticated_user_id = user.id
+    g.lexibridge_authenticated_user_role = user.role
     return user, None
 
 
@@ -9695,6 +9768,11 @@ def run_alignment_for_chunks(
         )
         db.session.add(alignment_run)
         db.session.flush()
+        note_legacy_alignment_creation(
+            "alignment_run",
+            "run_alignment_for_chunks",
+            triggered_by_user_id or owner_user_id,
+        )
     else:
         alignment_run.status = "running"
         alignment_run.started_at = alignment_run.started_at or current_time_text()
@@ -11216,6 +11294,7 @@ def run_alignment():
         )
         db.session.add(alignment_run)
         db.session.flush()
+        note_legacy_alignment_creation("alignment_run", "legacy_post_async", user.id)
         background_job = create_background_job(
             "alignment_run",
             user,
@@ -11306,6 +11385,7 @@ def run_alignment():
     )
     db.session.add(alignment_run)
     db.session.flush()
+    note_legacy_alignment_creation("alignment_run", "legacy_post_sync_term", user.id)
     alignment = generate_alignment_result(
         english_term=english_term,
         courseware_sentence=str(data.get("courseware_sentence", "")).strip(),

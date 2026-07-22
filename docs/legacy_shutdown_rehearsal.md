@@ -20,14 +20,16 @@ The rehearsal created two isolated compatibility jobs while Active:
 It then executed the approved transition sequence:
 
 1. `FREEZE`: route admission false, new job creation rejected, Legacy claim
-   paused, queue snapshot recorded one queued and one running job;
+   paused, HTTP POST returned the migration 503 with zero new records, and the
+   queue snapshot recorded one queued and one running job;
 2. safe failure: owner and stale cutoff matched, Job and linked Run became
    failed, one JobEvent and one AuditRecord were written;
 3. `DRAINING`: the dedicated Legacy worker completed the queued job while
    reusing its linked `AlignmentRun`;
 4. queue verification: queued, running, and retrying counts reached zero;
 5. `DISABLED`: Legacy claim remained paused;
-6. rollback rehearsal: Active and route admission were restored;
+6. rollback rehearsal: Active and route admission were restored, and an
+   authorized Legacy POST returned HTTP 200;
 7. Formal contract constants remained
    `formal-document-alignment-v1` and
    `formal_document_alignment_workflow_v1`.
@@ -37,6 +39,7 @@ It then executed the approved transition sequence:
 | Control | Result |
 |---|---|
 | New Legacy creation blocked in Freeze | PASS |
+| Freeze HTTP migration response and zero creation | PASS |
 | Freeze does not claim queued Legacy work | PASS |
 | Queue snapshot reports queued/running/retrying/failed | PASS |
 | Safe failure owner fence and stale cutoff | PASS |
@@ -46,6 +49,7 @@ It then executed the approved transition sequence:
 | Drain creates no replacement `AlignmentRun` | PASS |
 | Disabled state pauses Legacy claim | PASS |
 | Active rollback restores admission | PASS |
+| Active rollback restores HTTP creation | PASS |
 | Formal Workflow contract unchanged | PASS |
 
 ## Limitations
