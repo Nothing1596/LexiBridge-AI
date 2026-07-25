@@ -14,6 +14,10 @@ commercial, or production deployment:
 - Frontend: single-page HTML/CSS/JavaScript.
 - Auth: local registration, login, bearer token, role checks.
 - AI: DeepSeekProvider when configured; local heuristic/mock fallback only for demo.
+- Controlled Provider evaluation: an evaluation-only Chinese candidate proposal
+  path exists for safe dry-runs and loopback fake-provider E2E. It does not call
+  a real Provider by default, does not change the Formal Workflow provider, and
+  does not treat Provider output as evidence.
 - OCR: Tesseract or PaddleOCR when installed; otherwise the system reports `needs_ocr_engine` and does not fabricate OCR text.
 - Payment: mock payment for Basic/Pro subscription demos.
 - Email: mock verification/reset token in development.
@@ -127,6 +131,26 @@ LOCAL_LATEX_OCR_COMMAND="your-latex-ocr-command"
 If `FORMULA_OCR_PROVIDER` is not configured, the system still detects likely formula regions and records them as `FormulaBlock`, but it does not claim to recognize the formula. Ordinary OCR success does not imply formula OCR success. Handwritten formulas, complex charts, and table-structure recognition are not promised in this Local MVP.
 
 Never put real API keys in `README.md`, frontend code, `.env.example`, or a release package.
+
+## Controlled Provider Evaluation
+
+Task 10B adds a separate evaluation-only path for future Chinese terminology
+candidate proposal testing:
+
+```bash
+python scripts/run_controlled_provider_evaluation.py \
+  --manifest evaluation/controlled_provider_evaluation/synthetic_manifest.json \
+  --json-output /tmp/controlled-provider-evaluation-dry-run.json \
+  --dry-run
+```
+
+The dry-run validates privacy, provider/model selection, bounded inputs, budget
+configuration, strict output contracts, and sanitized artifact writing without
+external Provider requests. Live execution requires a later task, an approved
+Provider target, a legal credential, safe data, and explicit budget gates.
+
+Provider-generated output is only a proposal for evaluation. It is not document
+evidence, not an approved card, and not student-facing learning material.
 
 ## Start Locally
 

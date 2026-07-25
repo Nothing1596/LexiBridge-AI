@@ -53,6 +53,7 @@ Pilot Release established from
 - Alignment verification: `services/alignment_verification.py`, `services/alignment_verification_execution.py`, `services/alignment_providers.py`, `services/alignment_prompting.py`, and `services/alignment_output_parser.py` define provider contracts, execution orchestration, prompt/schema versions, mock/fake/replay behavior, parser failure handling, usage writes, optional attach orchestration, and audit sequencing.
 - Provider governance: `services/provider_governance.py` evaluates provider policy, attach rules, cost/usage limits, and human-review gates.
 - Provider preflight: `services/provider_preflight.py` runs read-only readiness checks and replay dry-runs without enabling real external calls.
+- Controlled Provider evaluation: `services/controlled_provider_evaluation.py` defines the Task 10B evaluation-only Chinese candidate proposal contract. It owns privacy classification gates, provider/model allowlist checks, credential availability checks, budget/cost preflight, bounded prompt construction, evaluation-only HTTP transport, strict proposal parsing, and sanitized artifacts. It is isolated from the Formal Workflow and writes no document evidence, Chinese candidate, WorkflowRun, WorkflowItem, ConceptAlignmentCard, or student-visible data.
 - Concept Card review: `services/concept_card_review.py` implements review queue, review actions, risk override handling, review history, and assignment helpers.
 - Course review policy: `services/course_review_policy.py` checks course-scoped reviewer permissions and course-level review policy.
 - Student course access: `services/student_course_access.py` evaluates memberships and student visibility policy.
@@ -210,6 +211,7 @@ Review:
 Provider verification:
 - `mock_only`, `needs_review`, `failed`, or provider-specific failed statuses.
 - Mock/fake/replay/disabled runs never set production approval and never write `ConceptAlignmentCard.confidence_score`.
+- Controlled Provider evaluation output is `provider_generated_proposal`, not document evidence. Task 10B verifies the evaluation contract, fake HTTP E2E, dry-run artifact, and Formal isolation while keeping actual external Provider requests at zero.
 
 Legacy alignment run:
 - `POST /api/alignment/run` remains registered pending a final
