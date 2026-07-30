@@ -78,7 +78,8 @@ LexiBridge AI separates three parsing layers:
 
 - Native text extraction for digital PDF/DOCX/PPTX/TXT.
 - Text OCR for scanned pages, JPG/PNG, and image regions inside mixed PDFs.
-- Formula OCR for image-based equations, saved as `FormulaBlock`.
+- Raster formula region detection, saved as auditable `FormulaBlock` region records.
+- Formula OCR/recognition for image-based equations.
 
 Tesseract and PaddleOCR are ordinary text OCR engines. They may read some symbols, but they are not reliable formula OCR engines and do not guarantee LaTeX output. Image-based formulas require a separate Formula OCR provider.
 
@@ -89,7 +90,11 @@ OCR_PROVIDER=none
 FORMULA_OCR_PROVIDER=none
 ```
 
-With this configuration, image uploads or scanned PDF pages that need OCR return `ocr_unavailable` / `needs_ocr_engine`, and formula-like regions are saved as `FormulaBlock` with `needs_formula_ocr_engine`. No fake text or fake LaTeX is generated, and formula content is not sent to terminology extraction.
+With this configuration, image uploads or scanned PDF pages that need OCR return
+`ocr_unavailable` / `needs_ocr_engine`, and formula-like raster regions are saved
+as `FormulaBlock` records with detection provenance and
+`FORMULA_RECOGNIZER_UNAVAILABLE`. No fake text or fake LaTeX is generated, and
+formula content is not sent to terminology extraction.
 
 To enable Tesseract text OCR, install an operator-reviewed local Tesseract runtime with `eng`, `chi_sim`, and `osd` language data. The server discovers it from `LEXIBRIDGE_TESSERACT_CMD` first, then `PATH`.
 
@@ -134,7 +139,12 @@ FORMULA_OCR_PROVIDER=local_latex
 LOCAL_LATEX_OCR_COMMAND="your-latex-ocr-command"
 ```
 
-If `FORMULA_OCR_PROVIDER` is not configured, the system still detects likely formula regions and records them as `FormulaBlock`, but it does not claim to recognize the formula. Ordinary OCR success does not imply formula OCR success. Handwritten formulas, complex charts, and table-structure recognition are not promised in this Local MVP.
+If `FORMULA_OCR_PROVIDER` is not configured, the system still detects likely
+raster formula regions and records page, bounding-box, region-hash, detection
+method, confidence, surrounding-text refs, and recognizer-unavailable status.
+It does not claim to recognize the formula. Ordinary OCR success does not imply
+formula OCR success. Handwritten formulas, complex charts, and table-structure
+recognition are not promised in this Local MVP.
 
 Never put real API keys in `README.md`, frontend code, `.env.example`, or a release package.
 

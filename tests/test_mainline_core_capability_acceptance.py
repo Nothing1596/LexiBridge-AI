@@ -25,7 +25,10 @@ def test_fixture_generator_covers_required_mainline_document_types(tmp_path):
         assert not str(fixture.path).startswith(str(Path.home()))
 
 
-def test_acceptance_runner_uses_isolated_database_and_reports_ocr_blocker(tmp_path):
+def test_acceptance_runner_uses_isolated_database_and_reports_ocr_blocker(tmp_path, monkeypatch):
+    monkeypatch.setenv("OCR_PROVIDER", "none")
+    monkeypatch.setenv("FORMULA_OCR_PROVIDER", "none")
+    monkeypatch.setenv("LEXIBRIDGE_10CP0_OCR_PROVIDER", "none")
     main_db = Path("backend/lexibridge.db")
     before = acceptance.sha256_file(main_db)
     output = tmp_path / "acceptance.json"
@@ -64,7 +67,10 @@ def test_acceptance_runner_uses_isolated_database_and_reports_ocr_blocker(tmp_pa
     assert acceptance.sha256_file(main_db) == before
 
 
-def test_acceptance_distinguishes_formula_image_detection_from_formula_text_recognition(tmp_path):
+def test_acceptance_distinguishes_formula_image_detection_from_formula_text_recognition(monkeypatch, tmp_path):
+    monkeypatch.setenv("OCR_PROVIDER", "none")
+    monkeypatch.setenv("FORMULA_OCR_PROVIDER", "none")
+    monkeypatch.setenv("LEXIBRIDGE_10CP0_OCR_PROVIDER", "auto")
     result = acceptance.run_acceptance(
         database_path=tmp_path / "acceptance.db",
         uploads_path=tmp_path / "uploads",
@@ -75,12 +81,16 @@ def test_acceptance_distinguishes_formula_image_detection_from_formula_text_reco
     formula = {fixture["fixture_id"]: fixture for fixture in result["fixtures"]}["formula-image"]
     assert formula["upload"]["status_code"] == 200
     assert formula["formula"]["formula_image_expected"] is True
-    assert formula["formula"]["formula_image_detected"] is False
+    assert formula["formula"]["formula_image_detected"] is True
     assert formula["formula"]["formula_text_recognized"] is False
-    assert formula["formula"]["formula_context_linked"] is False
+    assert formula["formula"]["formula_context_linked"] is True
+    assert formula["formula"]["formula_statuses"] == ["FORMULA_RECOGNIZER_UNAVAILABLE"]
 
 
-def test_acceptance_artifact_is_redacted_and_structured(tmp_path):
+def test_acceptance_artifact_is_redacted_and_structured(monkeypatch, tmp_path):
+    monkeypatch.setenv("OCR_PROVIDER", "none")
+    monkeypatch.setenv("FORMULA_OCR_PROVIDER", "none")
+    monkeypatch.setenv("LEXIBRIDGE_10CP0_OCR_PROVIDER", "none")
     output = tmp_path / "acceptance.json"
     result = acceptance.run_acceptance(
         database_path=tmp_path / "acceptance.db",

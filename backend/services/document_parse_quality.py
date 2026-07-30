@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from services.formula_detection import contains_formula_text
+from services.formula_detection import contains_formula_text, detect_pdf_formula_regions
 from services.ocr import get_ocr_provider, join_tesseract_blocks_text
 
 
@@ -53,6 +53,7 @@ class DocumentParseResult:
     parse_record_data: dict[str, Any]
     blocks: list[dict[str, Any]] = field(default_factory=list)
     raw_text: str = ""
+    formula_regions: list[Any] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -547,6 +548,7 @@ def parse_document_with_quality(
     file_type = detect_file_type(source_filename, mime_type)
     raw_text = ""
     blocks: list[dict[str, Any]] = []
+    formula_regions: list[Any] = []
     warnings: list[str] = []
     errors: list[str] = []
     parser_name = "document_parse_quality_v1"
@@ -572,6 +574,10 @@ def parse_document_with_quality(
             image_only_suspected = bool(meta.get("image_only_suspected"))
             partial_text = bool(meta.get("partial_text"))
             ocr_required = image_only_suspected or partial_text
+            try:
+                formula_regions = detect_pdf_formula_regions(file_path)
+            except Exception:
+                warnings.append("formula_region_detection_failed")
             if ocr_required and ocr_available:
                 provider = get_ocr_provider(ocr_provider_name or os.environ.get("OCR_PROVIDER", "none"))
                 image_only_pages = list(meta.get("image_only_pages") or [])
@@ -638,13 +644,18 @@ def parse_document_with_quality(
         "quality_flags": [],
         "ocr_required": ocr_required,
         "ocr_available": ocr_available,
-        "formula_detected": contains_formula_text(raw_text),
+        "formula_detected": contains_formula_text(raw_text) or bool(formula_regions),
         "image_only_suspected": image_only_suspected,
         "partial_text": partial_text,
         "ocr_completed": ocr_completed,
         "exception": exception,
     }
     quality = classify_parse_quality(parse_input)
+    if formula_regions:
+        quality["quality_flags"] = normalize_quality_flags(
+            list(quality.get("quality_flags", []) or [])
+            + ["formula_region_detected", "formula_recognizer_unavailable"]
+        )
     error_code = ""
     error_message = ""
     if file_type == "unknown":
@@ -679,6 +690,7 @@ def parse_document_with_quality(
         parse_record_data=record_data,
         blocks=blocks,
         raw_text=raw_text,
+        formula_regions=formula_regions,
         warnings=quality["warnings"],
         errors=errors,
     )

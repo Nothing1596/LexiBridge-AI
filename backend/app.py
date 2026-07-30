@@ -25,7 +25,7 @@ from sqlalchemy.orm import validates
 from werkzeug.security import check_password_hash, generate_password_hash
 from services.ai_providers import get_ai_provider
 from services.ocr import get_ocr_provider
-from services.formula_detection import contains_formula_text, looks_like_formula_image
+from services.formula_detection import contains_formula_text, detect_pdf_formula_regions, looks_like_formula_image
 from services.formula_ocr import get_formula_ocr_provider
 from services import retrieval as retrieval_service
 from services.scoring import score_knowledge_chunk as score_evidence_chunk
@@ -1032,7 +1032,10 @@ class FormulaBlock(db.Model):
     not enter terminology extraction as English terms.
     """
     id = db.Column(db.Integer, primary_key=True)
+    formula_region_uid = db.Column(db.String(80), default="")
     document_id = db.Column(db.Integer, nullable=False)
+    document_uid = db.Column(db.String(120), default="")
+    source_uid = db.Column(db.String(64), default="")
     course_id = db.Column(db.Integer, nullable=True)
     owner_user_id = db.Column(db.Integer, default=0)
     scope_type = db.Column(db.String(30), default="course")
@@ -1044,10 +1047,21 @@ class FormulaBlock(db.Model):
     image_storage_key = db.Column(db.String(600), default="")
     image_content_type = db.Column(db.String(160), default="")
     image_sha256 = db.Column(db.String(64), default="")
+    detection_method = db.Column(db.String(120), default="")
+    detection_confidence = db.Column(db.Float, default=0)
+    surrounding_text_refs_json = db.Column(db.Text, default="[]")
+    source_page_ref = db.Column(db.String(120), default="")
     latex = db.Column(db.Text, default="")
     plain_text = db.Column(db.Text, default="")
     provider = db.Column(db.String(80), default="")
+    recognizer_provider = db.Column(db.String(120), default="")
+    recognizer_model = db.Column(db.String(120), default="")
     confidence = db.Column(db.Float, default=0)
+    recognition_confidence = db.Column(db.Float, nullable=True)
+    latex_candidate = db.Column(db.Text, default="")
+    mathml_candidate = db.Column(db.Text, default="")
+    abstention_reason = db.Column(db.Text, default="")
+    provenance_json = db.Column(db.Text, default="{}")
     status = db.Column(db.String(80), default="")
     error = db.Column(db.Text, default="")
     quality_flags_json = db.Column(db.Text, default="[]")
@@ -3304,7 +3318,10 @@ def ensure_schema_columns():
             "created_at": "VARCHAR(40) DEFAULT ''"
         },
         "formula_block": {
+            "formula_region_uid": "VARCHAR(80) DEFAULT ''",
             "document_id": "INTEGER DEFAULT 0",
+            "document_uid": "VARCHAR(120) DEFAULT ''",
+            "source_uid": "VARCHAR(64) DEFAULT ''",
             "course_id": "INTEGER",
             "owner_user_id": "INTEGER DEFAULT 0",
             "scope_type": "VARCHAR(30) DEFAULT 'course'",
@@ -3316,10 +3333,21 @@ def ensure_schema_columns():
             "image_storage_key": "VARCHAR(600) DEFAULT ''",
             "image_content_type": "VARCHAR(160) DEFAULT ''",
             "image_sha256": "VARCHAR(64) DEFAULT ''",
+            "detection_method": "VARCHAR(120) DEFAULT ''",
+            "detection_confidence": "FLOAT DEFAULT 0",
+            "surrounding_text_refs_json": "TEXT DEFAULT '[]'",
+            "source_page_ref": "VARCHAR(120) DEFAULT ''",
             "latex": "TEXT DEFAULT ''",
             "plain_text": "TEXT DEFAULT ''",
             "provider": "VARCHAR(80) DEFAULT ''",
+            "recognizer_provider": "VARCHAR(120) DEFAULT ''",
+            "recognizer_model": "VARCHAR(120) DEFAULT ''",
             "confidence": "FLOAT DEFAULT 0",
+            "recognition_confidence": "FLOAT",
+            "latex_candidate": "TEXT DEFAULT ''",
+            "mathml_candidate": "TEXT DEFAULT ''",
+            "abstention_reason": "TEXT DEFAULT ''",
+            "provenance_json": "TEXT DEFAULT '{}'",
             "status": "VARCHAR(80) DEFAULT ''",
             "error": "TEXT DEFAULT ''",
             "quality_flags_json": "TEXT DEFAULT '[]'",
@@ -6068,23 +6096,134 @@ def serialize_document_chunk(chunk):
 def serialize_formula_block(block):
     return {
         "id": block.id,
+        "formula_region_uid": getattr(block, "formula_region_uid", "") or (f"formula-region-{block.id}" if getattr(block, "id", None) else ""),
         "document_id": block.document_id,
+        "document_uid": getattr(block, "document_uid", ""),
+        "source_uid": getattr(block, "source_uid", ""),
         "course_id": block.course_id,
         "owner_user_id": block.owner_user_id,
         "scope_type": block.scope_type,
         "page_number": block.page_number,
         "slide_number": block.slide_number,
         "bbox": safe_json_loads(getattr(block, "bbox_json", "{}"), {}),
+        "region_image_hash": getattr(block, "image_sha256", ""),
+        "image_sha256": getattr(block, "image_sha256", ""),
+        "detection_method": getattr(block, "detection_method", ""),
+        "detection_confidence": getattr(block, "detection_confidence", 0),
+        "surrounding_text_refs": safe_json_loads(getattr(block, "surrounding_text_refs_json", "[]"), []),
+        "source_page_ref": getattr(block, "source_page_ref", ""),
         "image_path": block.image_path,
         "latex": block.latex,
         "plain_text": block.plain_text,
         "provider": block.provider,
+        "recognizer_provider": getattr(block, "recognizer_provider", "") or block.provider,
+        "recognizer_model": getattr(block, "recognizer_model", ""),
         "confidence": block.confidence,
+        "recognition_confidence": getattr(block, "recognition_confidence", None),
+        "latex_candidate": getattr(block, "latex_candidate", "") or block.latex,
+        "mathml_candidate": getattr(block, "mathml_candidate", ""),
+        "abstention_reason": getattr(block, "abstention_reason", ""),
+        "provenance": safe_json_loads(getattr(block, "provenance_json", "{}"), {}),
         "status": block.status,
         "error": block.error,
         "quality_flags": safe_json_loads(getattr(block, "quality_flags_json", "[]"), []),
         "created_at": block.created_at
     }
+
+
+def _formula_region_payload(region):
+    if hasattr(region, "to_safe_dict"):
+        return dict(region.to_safe_dict())
+    if isinstance(region, dict):
+        return dict(region)
+    return {}
+
+
+def _formula_surrounding_refs_from_parse_blocks(parse_blocks):
+    refs = []
+    for block in parse_blocks or []:
+        page = getattr(block, "page_number", None) if not isinstance(block, dict) else block.get("page_number")
+        locator = getattr(block, "source_locator", "") if not isinstance(block, dict) else block.get("source_locator", "")
+        uid = getattr(block, "block_uid", "") if not isinstance(block, dict) else block.get("block_uid", "")
+        if page is None:
+            continue
+        refs.append(str(locator or f"page:{page};block:{uid or len(refs) + 1}"))
+    return refs[:8]
+
+
+def formula_regions_for_parse_result(parse_result, save_path, parse_blocks=None):
+    regions = list(getattr(parse_result, "formula_regions", []) or []) if parse_result is not None else []
+    if regions:
+        return regions
+    if Path(str(save_path or "")).suffix.lower().lstrip(".") != "pdf":
+        return []
+    try:
+        return detect_pdf_formula_regions(
+            str(save_path),
+            surrounding_text_refs=_formula_surrounding_refs_from_parse_blocks(parse_blocks),
+        )
+    except Exception:
+        return []
+
+
+def create_formula_records_from_regions(document, regions, *, owner_user_id=None, scope_type="course", source_uid=""):
+    records = []
+    for region in regions or []:
+        payload = _formula_region_payload(region)
+        if not payload:
+            continue
+        status = str(payload.get("recognizer_status") or "FORMULA_RECOGNIZER_UNAVAILABLE")
+        recognizer_provider = str(payload.get("recognizer_provider") or "none")
+        recognizer_model = str(payload.get("recognizer_model") or "none")
+        latex_candidate = str(payload.get("latex_candidate") or "")
+        mathml_candidate = str(payload.get("mathml_candidate") or "")
+        item_flags = sorted({
+            "formula_region_detected",
+            "formula_recognizer_unavailable" if status == "FORMULA_RECOGNIZER_UNAVAILABLE" else status,
+        })
+        record = FormulaBlock(
+            formula_region_uid=str(payload.get("formula_region_uid") or str(uuid.uuid4())),
+            document_id=document.id,
+            document_uid=str(payload.get("document_uid") or getattr(document, "parse_uid", "") or getattr(document, "sha256", "") or document.id),
+            source_uid=str(source_uid or payload.get("source_uid") or ""),
+            course_id=document.course_id,
+            owner_user_id=int(owner_user_id if owner_user_id is not None else getattr(document, "owner_user_id", 0) or 0),
+            scope_type=scope_type or getattr(document, "scope_type", "course"),
+            page_number=payload.get("page_number"),
+            slide_number=None,
+            bbox_json=json.dumps(payload.get("bounding_box", {}) or {}, ensure_ascii=False, sort_keys=True),
+            image_path="",
+            image_sha256=str(payload.get("region_image_hash") or ""),
+            detection_method=str(payload.get("detection_method") or ""),
+            detection_confidence=float(payload.get("detection_confidence") or 0),
+            surrounding_text_refs_json=json.dumps(payload.get("surrounding_text_refs", []) or [], ensure_ascii=False, sort_keys=True),
+            source_page_ref=str(payload.get("source_page_ref") or ""),
+            latex=latex_candidate,
+            plain_text="",
+            provider=recognizer_provider,
+            recognizer_provider=recognizer_provider,
+            recognizer_model=recognizer_model,
+            confidence=float(payload.get("recognition_confidence") or 0),
+            recognition_confidence=payload.get("recognition_confidence"),
+            latex_candidate=latex_candidate,
+            mathml_candidate=mathml_candidate,
+            abstention_reason=str(payload.get("abstention_reason") or ""),
+            provenance_json=json.dumps(payload.get("provenance", {}) or {}, ensure_ascii=False, sort_keys=True),
+            status=status,
+            error=str(payload.get("abstention_reason") or ""),
+            quality_flags_json=json.dumps(item_flags, ensure_ascii=False, sort_keys=True),
+            created_at=current_time_text(),
+        )
+        db.session.add(record)
+        records.append(record)
+    return records
+
+
+def attach_formula_records_to_source(formula_records, source_uid):
+    if not source_uid:
+        return
+    for record in formula_records or []:
+        record.source_uid = source_uid
 
 
 def serialize_knowledge_source(source):
@@ -6823,6 +6962,7 @@ def process_document_ingestion_job(job):
     KnowledgeChunk.query.filter_by(document_id=document.id).delete()
     db.session.flush()
 
+    parse_result = None
     parse_record = DocumentParseRecord.query.filter_by(parse_uid=document.parse_uid).first() if document.parse_uid else None
     if parse_record is None:
         parse_result, parse_record, parse_blocks = create_parse_record_for_saved_file(
@@ -6853,44 +6993,19 @@ def process_document_ingestion_job(job):
         "ocr_confidence": 100,
         "warnings": safe_json_loads(getattr(parse_record, "warnings", "[]"), []),
     }
-    parsed_formula_blocks = []
     parser_warnings = list(ocr_meta.get("warnings", []) or [])
     update_job_progress(job, 25, 100, "Saving OCR and formula blocks")
 
-    formula_records = []
-    formula_statuses = []
-    formula_providers = []
-    formula_flags = set()
-    for formula_item in parsed_formula_blocks or []:
-        item_flags = list(formula_item.get("quality_flags", []) or [])
-        formula_status = formula_item.get("status", "")
-        if formula_status:
-            formula_statuses.append(formula_status)
-            if formula_status != "ok":
-                formula_flags.add(formula_status)
-        provider = formula_item.get("provider", "")
-        if provider:
-            formula_providers.append(provider)
-        formula_record = FormulaBlock(
-            document_id=document.id,
-            course_id=document.course_id,
-            owner_user_id=document.owner_user_id,
-            scope_type=document.scope_type,
-            page_number=formula_item.get("page_number"),
-            slide_number=formula_item.get("slide_number"),
-            bbox_json=json.dumps(formula_item.get("bbox", {}) or {}, ensure_ascii=False),
-            image_path=formula_item.get("image_path", ""),
-            latex=formula_item.get("latex", ""),
-            plain_text=formula_item.get("plain_text", ""),
-            provider=provider,
-            confidence=float(formula_item.get("confidence", 0) or 0),
-            status=formula_status,
-            error=formula_item.get("error", ""),
-            quality_flags_json=json.dumps(item_flags, ensure_ascii=False),
-            created_at=current_time_text()
-        )
-        db.session.add(formula_record)
-        formula_records.append(formula_record)
+    parsed_formula_regions = formula_regions_for_parse_result(parse_result, save_path, parse_blocks)
+    formula_records = create_formula_records_from_regions(
+        document,
+        parsed_formula_regions,
+        owner_user_id=document.owner_user_id,
+        scope_type=document.scope_type,
+    )
+    formula_statuses = [record.status for record in formula_records if record.status]
+    formula_providers = [record.provider for record in formula_records if record.provider]
+    formula_flags = {record.status for record in formula_records if record.status and record.status != "ok"}
     db.session.flush()
 
     if not parsed_chunks:
@@ -7008,6 +7123,7 @@ def process_document_ingestion_job(job):
         commit=False,
     )
     source = governed_ingestion.source
+    attach_formula_records_to_source(formula_records, getattr(source, "source_uid", ""))
     knowledge_chunks = governed_ingestion.chunks
     version = create_kb_version(
         document.scope_type,
@@ -10543,41 +10659,16 @@ def upload_document():
             "warnings": safe_json_loads(getattr(parse_record, "warnings", "[]"), []),
         }
         parser_warnings = list(ocr_meta.get("warnings", []) or [])
-        parsed_formula_blocks = []
-        formula_records = []
-        formula_statuses = []
-        formula_providers = []
-        formula_flags = set()
-        for formula_item in parsed_formula_blocks or []:
-            item_flags = list(formula_item.get("quality_flags", []) or [])
-            formula_status = formula_item.get("status", "")
-            if formula_status:
-                formula_statuses.append(formula_status)
-                if formula_status != "ok":
-                    formula_flags.add(formula_status)
-            provider = formula_item.get("provider", "")
-            if provider:
-                formula_providers.append(provider)
-            formula_record = FormulaBlock(
-                document_id=document.id,
-                course_id=document.course_id,
-                owner_user_id=user.id,
-                scope_type=scope_type,
-                page_number=formula_item.get("page_number"),
-                slide_number=formula_item.get("slide_number"),
-                bbox_json=json.dumps(formula_item.get("bbox", {}) or {}, ensure_ascii=False),
-                image_path=formula_item.get("image_path", ""),
-                latex=formula_item.get("latex", ""),
-                plain_text=formula_item.get("plain_text", ""),
-                provider=provider,
-                confidence=float(formula_item.get("confidence", 0) or 0),
-                status=formula_status,
-                error=formula_item.get("error", ""),
-                quality_flags_json=json.dumps(item_flags, ensure_ascii=False),
-                created_at=current_time_text()
-            )
-            db.session.add(formula_record)
-            formula_records.append(formula_record)
+        parsed_formula_regions = formula_regions_for_parse_result(parse_result, save_path, parse_blocks)
+        formula_records = create_formula_records_from_regions(
+            document,
+            parsed_formula_regions,
+            owner_user_id=user.id,
+            scope_type=scope_type,
+        )
+        formula_statuses = [record.status for record in formula_records if record.status]
+        formula_providers = [record.provider for record in formula_records if record.provider]
+        formula_flags = {record.status for record in formula_records if record.status and record.status != "ok"}
         if formula_records:
             db.session.flush()
 
@@ -10708,6 +10799,7 @@ def upload_document():
             commit=False,
         )
         source = governed_ingestion.source
+        attach_formula_records_to_source(formula_records, getattr(source, "source_uid", ""))
         knowledge_chunks = governed_ingestion.chunks
         version = create_kb_version(
             scope_type,

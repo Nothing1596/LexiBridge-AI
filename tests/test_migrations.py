@@ -102,6 +102,22 @@ def test_migration_adds_pr5_required_fields(app_module):
     assert before_users == after_users
     assert before_courses == after_courses
     assert "status" in column_names(db_path, "formula_block")
+    assert {
+        "formula_region_uid",
+        "source_uid",
+        "document_uid",
+        "detection_method",
+        "detection_confidence",
+        "surrounding_text_refs_json",
+        "source_page_ref",
+        "recognizer_provider",
+        "recognizer_model",
+        "recognition_confidence",
+        "latex_candidate",
+        "mathml_candidate",
+        "abstention_reason",
+        "provenance_json",
+    } <= column_names(db_path, "formula_block")
     assert "auto_approved_count" in column_names(db_path, "alignment_run")
     assert "report_markdown" in column_names(db_path, "evaluation_run")
     assert "source_alignment_run_id" in column_names(db_path, "terminology_card")

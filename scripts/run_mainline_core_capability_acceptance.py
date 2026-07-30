@@ -622,6 +622,9 @@ def _database_fixture_metrics(app_module, fixture: AcceptanceFixture, upload: di
         formula_text_signal_detected = bool(parse_record is not None and getattr(parse_record, "formula_detected", False))
         formula_image_detected = bool(formula_blocks)
         formula_text_recognized = any(str(getattr(block, "latex", "") or getattr(block, "plain_text", "") or "").strip() for block in formula_blocks)
+        formula_bboxes = [_safe_json_loads(getattr(block, "bbox_json", "{}"), {}) for block in formula_blocks]
+        formula_methods = sorted({str(getattr(block, "detection_method", "") or "") for block in formula_blocks if getattr(block, "detection_method", "")})
+        formula_source_refs = [str(getattr(block, "source_page_ref", "") or "") for block in formula_blocks if getattr(block, "source_page_ref", "")]
         return {
             "parse": {
                 "parse_status": getattr(parse_record, "parse_status", "") if parse_record is not None else "",
@@ -666,6 +669,12 @@ def _database_fixture_metrics(app_module, fixture: AcceptanceFixture, upload: di
                 "formula_context_linked": formula_image_detected and bool(formal.get("item_count")),
                 "formula_block_count": len(formula_blocks),
                 "formula_statuses": sorted({str(getattr(block, "status", "") or "") for block in formula_blocks}),
+                "formula_bounding_boxes": formula_bboxes,
+                "formula_detection_methods": formula_methods,
+                "formula_detection_confidences": [float(getattr(block, "detection_confidence", 0) or 0) for block in formula_blocks],
+                "formula_region_hashes_present": all(bool(getattr(block, "image_sha256", "")) for block in formula_blocks) if formula_blocks else False,
+                "formula_source_page_refs": formula_source_refs,
+                "formula_provenance_present": all(bool(getattr(block, "provenance_json", "{}")) for block in formula_blocks) if formula_blocks else False,
             },
         }
 

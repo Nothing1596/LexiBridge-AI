@@ -216,7 +216,8 @@ Provider verification:
 OCR:
 - Scanned PDF text OCR now routes through local Tesseract only when the operator-installed executable and `eng`/`chi_sim`/`osd` language data are available. Discovery uses `LEXIBRIDGE_TESSERACT_CMD` first and `PATH` second.
 - Clean OCR output is classified as `ocr_text_ok`, with OCR flags preserved on parse records and blocks. OCR blocks retain page and bbox source locators and can enter governed source creation, candidate governance, and Formal Workflow admission.
-- Formula image recognition is still separate and not completed by ordinary Tesseract text OCR.
+- Raster formula image detection is separate from ordinary text OCR. Formula regions are recorded as auditable `FormulaBlock` region records with page, bbox, region-hash, detection method, surrounding-text references, and recognizer routing status.
+- Formula structure recognition remains unavailable by default and is not completed by ordinary Tesseract text OCR. Detected formula regions use `FORMULA_RECOGNIZER_UNAVAILABLE` until a separate recognizer is explicitly integrated.
 
 Legacy alignment run:
 - `POST /api/alignment/run` remains registered pending a final
