@@ -18,7 +18,7 @@ commercial, or production deployment:
   path exists for safe dry-runs and loopback fake-provider E2E. It does not call
   a real Provider by default, does not change the Formal Workflow provider, and
   does not treat Provider output as evidence.
-- OCR: Tesseract or PaddleOCR when installed; otherwise the system reports `needs_ocr_engine` and does not fabricate OCR text.
+- OCR: local Tesseract when installed and configured; otherwise the system reports OCR unavailable and does not fabricate OCR text. PaddleOCR remains available only when explicitly selected.
 - Payment: mock payment for Basic/Pro subscription demos.
 - Email: mock verification/reset token in development.
 - Retrieval: SQLite keyword/simple similarity, with no vector database in this release.
@@ -70,7 +70,7 @@ TOKEN_HASH_SECRET=change-this-local-token-hash-secret
 
 Use `AI_PROVIDER=none` or remove `DEEPSEEK_API_KEY` to force local demo fallback. Mock/local fallback results are clearly marked and are not auto-approved.
 
-Use `OCR_PROVIDER=auto` to prefer local Tesseract, then PaddleOCR. Use `OCR_PROVIDER=none` to verify the unavailable-OCR path. If no OCR engine is installed, image and scanned-PDF uploads return a clear OCR status and do not generate fake `OCR_REQUIRED` terminology cards.
+Use `OCR_PROVIDER=auto` to select local Tesseract when its executable and required language data are available. Use `OCR_PROVIDER=none` to verify the unavailable-OCR path. If no OCR engine is installed, image and scanned-PDF uploads return a clear OCR status and do not generate fake OCR terminology cards.
 
 ## OCR And Formula OCR
 
@@ -91,21 +91,27 @@ FORMULA_OCR_PROVIDER=none
 
 With this configuration, image uploads or scanned PDF pages that need OCR return `ocr_unavailable` / `needs_ocr_engine`, and formula-like regions are saved as `FormulaBlock` with `needs_formula_ocr_engine`. No fake text or fake LaTeX is generated, and formula content is not sent to terminology extraction.
 
-To enable Tesseract text OCR on macOS:
+To enable Tesseract text OCR, install an operator-reviewed local Tesseract runtime with `eng`, `chi_sim`, and `osd` language data. The server discovers it from `LEXIBRIDGE_TESSERACT_CMD` first, then `PATH`.
+
+Example macOS verification:
 
 ```bash
-brew install tesseract tesseract-lang
+command -v tesseract
+tesseract --version
+tesseract --list-langs
 ```
 
 Then set:
 
 ```env
-OCR_PROVIDER=tesseract
+OCR_PROVIDER=auto
+LEXIBRIDGE_TESSERACT_CMD=
 OCR_LANGS=eng+chi_sim
 OCR_MIN_CONFIDENCE=60
-PDF_OCR_DPI=300
-PDF_MIXED_PAGE_IMAGE_OCR=true
 ```
+
+Leave `LEXIBRIDGE_TESSERACT_CMD` unset when `tesseract` is already available
+on `PATH`; otherwise set it only in the server process environment, not in Git.
 
 For PaddleOCR, install PaddleOCR in your Python environment and set:
 

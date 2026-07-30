@@ -90,6 +90,20 @@ def _font_path() -> str:
     return ""
 
 
+def _scan_font_path() -> str:
+    candidates = (
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/Supplemental/PingFang.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    )
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+    return _font_path()
+
+
 def _register_reportlab_font() -> str:
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
@@ -132,7 +146,7 @@ def _draw_text_image(path: Path, lines: list[str], *, width: int = 1650, height:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    font_file = _font_path()
+    font_file = _scan_font_path()
     try:
         title_font = ImageFont.truetype(font_file, 52) if font_file else ImageFont.load_default()
         body_font = ImageFont.truetype(font_file, 42) if font_file else ImageFont.load_default()
@@ -253,7 +267,7 @@ def build_fixture_set(fixture_root: str | Path) -> list[AcceptanceFixture]:
     fixtures.append(AcceptanceFixture("scanned-chinese", scanned_zh.name, scanned_zh, "zh", "SYNTHETIC", expected_chinese_terms=chinese_terms, scanned=True))
 
     scanned_bilingual = root / "scanned-bilingual.pdf"
-    _write_image_only_pdf(scanned_bilingual, [f"{english}（{chinese}）" for english, chinese in pairs])
+    _write_image_only_pdf(scanned_bilingual, [f"{english} - {chinese}" for english, chinese in pairs])
     fixtures.append(AcceptanceFixture("scanned-bilingual", scanned_bilingual.name, scanned_bilingual, "mixed", "SYNTHETIC", tuple(item[0] for item in pairs), tuple(item[1] for item in pairs), pairs, scanned=True))
 
     mixed = root / "mixed-layout.pdf"

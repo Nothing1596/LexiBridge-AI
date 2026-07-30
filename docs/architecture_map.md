@@ -213,6 +213,11 @@ Provider verification:
 - Mock/fake/replay/disabled runs never set production approval and never write `ConceptAlignmentCard.confidence_score`.
 - Controlled Provider evaluation output is `provider_generated_proposal`, not document evidence. Task 10B verifies the evaluation contract, fake HTTP E2E, dry-run artifact, and Formal isolation while keeping actual external Provider requests at zero.
 
+OCR:
+- Scanned PDF text OCR now routes through local Tesseract only when the operator-installed executable and `eng`/`chi_sim`/`osd` language data are available. Discovery uses `LEXIBRIDGE_TESSERACT_CMD` first and `PATH` second.
+- Clean OCR output is classified as `ocr_text_ok`, with OCR flags preserved on parse records and blocks. OCR blocks retain page and bbox source locators and can enter governed source creation, candidate governance, and Formal Workflow admission.
+- Formula image recognition is still separate and not completed by ordinary Tesseract text OCR.
+
 Legacy alignment run:
 - `POST /api/alignment/run` remains registered pending a final
   remaining-consumer audit, but Tasks 9C.5H and 9C.5K remove and verify its

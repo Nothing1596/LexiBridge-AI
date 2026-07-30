@@ -18,7 +18,7 @@ def build_knowledge_chunk_fields(document, document_chunk, source, kb_version_id
     normalized = normalize_chunk_text(text)
     content_hash = compute_content_hash(text)
     quality_flags = _loads_json(getattr(document_chunk, "quality_flags_json", "[]"), [])
-    quality_status = next((flag for flag in quality_flags if flag in knowledge_governance.REVIEW_PARSE_STATUSES or flag in knowledge_governance.BLOCKED_PARSE_STATUSES or flag == "native_text_ok"), "")
+    quality_status = next((flag for flag in quality_flags if flag in knowledge_governance.REVIEW_PARSE_STATUSES or flag in knowledge_governance.BLOCKED_PARSE_STATUSES or flag in {"native_text_ok", "ocr_text_ok"}), "")
     chunk_status = "blocked" if quality_status in knowledge_governance.BLOCKED_PARSE_STATUSES else ("needs_review" if quality_status in knowledge_governance.REVIEW_PARSE_STATUSES else "active")
     scope_type = getattr(document, "scope_type", "course") or "course"
     if scope_type == "personal":

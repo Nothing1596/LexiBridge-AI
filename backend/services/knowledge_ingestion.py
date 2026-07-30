@@ -14,7 +14,7 @@ from services import audit_records
 from services import knowledge_governance
 
 
-ALLOWED_PARSE_STATUSES = {"native_text_ok", "partial_text"}
+ALLOWED_PARSE_STATUSES = {"native_text_ok", "ocr_text_ok", "partial_text"}
 BLOCKED_PARSE_STATUSES = knowledge_governance.BLOCKED_PARSE_STATUSES | {
     "empty_text",
     "ocr_required",

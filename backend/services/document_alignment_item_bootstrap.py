@@ -269,7 +269,7 @@ def _source_matches_run(source: GovernedKnowledgeSourceSnapshot | None, run: _Ru
         and source.source_version == run.source_version
         and source.source_status == "active"
         and source.parse_status in {"success", "succeeded"}
-        and source.parse_quality in {"ready", "native_text_ok", "partial_text"}
+        and source.parse_quality in {"ready", "native_text_ok", "ocr_text_ok", "partial_text"}
         and source.usable_chunk_count > 0
     )
 
@@ -614,7 +614,7 @@ def bootstrap_document_alignment_workflow_items(
             )
         if (
             source.parse_status not in {"success", "succeeded"}
-            or source.parse_quality not in {"ready", "native_text_ok", "partial_text"}
+            or source.parse_quality not in {"ready", "native_text_ok", "ocr_text_ok", "partial_text"}
             or source.usable_chunk_count <= 0
         ):
             dependencies.session.rollback()

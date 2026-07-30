@@ -15,6 +15,7 @@ def test_ocr_provider_none_and_mock_do_not_fabricate_text(tiny_png_bytes):
 
 def test_tesseract_unavailable_returns_clear_status(monkeypatch, tiny_png_bytes):
     monkeypatch.setenv("OCR_LANGS", "eng+chi_sim")
+    monkeypatch.delenv("LEXIBRIDGE_TESSERACT_CMD", raising=False)
     monkeypatch.setattr("services.ocr.shutil.which", lambda _: None)
     provider = TesseractOCRProvider()
     result = provider.recognize_image("missing.png", language="en")

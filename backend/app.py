@@ -13452,6 +13452,7 @@ def create_parse_record_for_saved_file(save_path, document, filename, mime_type,
         save_path,
         filename=filename,
         mime_type=mime_type or "",
+        language_hint=getattr(document, "language", "") or "",
         now_fn=current_time_text,
     )
     parse_record, parse_blocks = persist_document_parse_result(

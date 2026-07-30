@@ -132,7 +132,7 @@ def _admit_source(source: GovernedKnowledgeSourceSnapshot) -> DocumentAlignmentS
             "Source is not governed.",
             "source_not_governed",
         )
-    if source.parse_status != "success" or source.parse_quality not in {"native_text_ok", "partial_text"}:
+    if source.parse_status != "success" or source.parse_quality not in {"native_text_ok", "ocr_text_ok", "partial_text"}:
         return DocumentAlignmentSourceAdmissionDecision(
             False,
             "DOCUMENT_ALIGNMENT_PARSE_BLOCKED",

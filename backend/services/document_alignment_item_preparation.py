@@ -239,7 +239,7 @@ def _load_scope(command, dependencies):
         str(getattr(source, "version", "") or "") == str(run.source_version or ""),
         str(getattr(source, "status", "") or "") == "active",
         str(getattr(source, "quality_status", "") or "")
-        in {"ready", "native_text_ok", "partial_text"},
+        in {"ready", "native_text_ok", "ocr_text_ok", "partial_text"},
     )):
         return (run, item, None, ())
     refs = _loads_list(item.source_chunk_refs)

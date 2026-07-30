@@ -5,17 +5,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from services.formula_detection import contains_formula_text
-from services.ocr import get_ocr_provider
+from services.ocr import get_ocr_provider, join_tesseract_blocks_text
 
 
 QUALITY_STATUSES = {
     "native_text_ok",
+    "ocr_text_ok",
     "partial_text",
     "empty_text",
     "ocr_required",
@@ -40,6 +42,10 @@ BLOCKING_QUALITY_STATUSES = {
     "parse_failed",
     "unsupported_file_type",
 }
+OCR_PDF_DEFAULT_DPI = 220
+OCR_PDF_MAX_PAGES = 50
+OCR_PDF_MAX_PIXELS_PER_PAGE = 30_000_000
+OCR_PDF_MAX_TOTAL_PIXELS = 160_000_000
 
 
 @dataclass
@@ -80,6 +86,13 @@ def _now_text(now_fn=None) -> str:
 def _file_size(path: str | os.PathLike[str] | None) -> int | None:
     if not path:
         return None
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
     try:
         return os.path.getsize(path)
     except OSError:
@@ -170,6 +183,7 @@ def _parse_pdf_native(path: str) -> tuple[str, list[dict[str, Any]], dict[str, A
     text_parts = []
     page_count = 0
     image_only_pages = 0
+    image_only_page_numbers = []
     with fitz.open(path) as doc:
         page_count = len(doc)
         for page_index, page in enumerate(doc, start=1):
@@ -186,10 +200,175 @@ def _parse_pdf_native(path: str) -> tuple[str, list[dict[str, Any]], dict[str, A
                     blocks.append(block)
             else:
                 image_only_pages += 1
+                image_only_page_numbers.append(page_index)
     return "\n\n".join(text_parts), blocks, {
         "page_count": page_count,
         "image_only_suspected": page_count > 0 and image_only_pages == page_count,
         "partial_text": 0 < image_only_pages < page_count,
+        "image_only_pages": image_only_page_numbers,
+    }
+
+
+def _aggregate_bbox(words: list[dict[str, Any]]) -> tuple[int, int, int, int] | None:
+    boxes = []
+    for word in words:
+        left = word.get("left")
+        top = word.get("top")
+        width = word.get("width")
+        height = word.get("height")
+        if None in {left, top, width, height}:
+            continue
+        boxes.append((int(left), int(top), int(left) + int(width), int(top) + int(height)))
+    if not boxes:
+        return None
+    return (
+        min(item[0] for item in boxes),
+        min(item[1] for item in boxes),
+        max(item[2] for item in boxes),
+        max(item[3] for item in boxes),
+    )
+
+
+def _ocr_blocks_to_parse_blocks(
+    ocr_result,
+    *,
+    page_number: int,
+    block_index_start: int,
+    render_config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    word_blocks = list(getattr(ocr_result, "blocks", []) or [])
+    if not word_blocks:
+        return _text_blocks_from_text(
+            getattr(ocr_result, "text", ""),
+            page_number=page_number,
+            parser_type="ocr",
+            source_locator=f"page:{page_number};ocr_text",
+        )
+    groups: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    order: list[tuple[int, int, int]] = []
+    for word in word_blocks:
+        key = (
+            int(word.get("block_number") or 0),
+            int(word.get("paragraph_number") or 0),
+            int(word.get("line_number") or 0),
+        )
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        item = dict(word)
+        item["page_number"] = page_number
+        groups[key].append(item)
+
+    parse_blocks = []
+    for offset, key in enumerate(order, start=0):
+        words = groups[key]
+        text = _clean_text(join_tesseract_blocks_text(words))
+        if not text:
+            continue
+        bbox = _aggregate_bbox(words)
+        confidences = [float(word["confidence"]) for word in words if word.get("confidence") is not None]
+        confidence = sum(confidences) / len(confidences) / 100 if confidences else None
+        locator = f"page:{page_number};ocr:{key[0]}.{key[1]}.{key[2]}"
+        if bbox is not None:
+            locator = f"{locator};bbox:{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+        flags = [
+            "ocr",
+            "ocr_tsv_provenance",
+            f"ocr_provider_{getattr(ocr_result, 'provider', '') or 'unknown'}",
+            f"ocr_language_{getattr(ocr_result, 'language', '') or 'unknown'}",
+            f"ocr_dpi_{render_config.get('dpi', OCR_PDF_DEFAULT_DPI)}",
+        ]
+        if getattr(ocr_result, "engine_version", ""):
+            flags.append("ocr_engine_version_recorded")
+        flags.extend(getattr(ocr_result, "quality_flags", []) or [])
+        parse_blocks.append({
+            "block_uid": str(uuid.uuid4()),
+            "page_number": page_number,
+            "slide_number": None,
+            "block_index": block_index_start + offset,
+            "block_type": "text",
+            "text": text,
+            "confidence": None if confidence is None else max(0, min(confidence, 1)),
+            "parser_type": "ocr",
+            "source_locator": locator[:160],
+            "quality_flags": normalize_quality_flags(flags),
+        })
+    return parse_blocks
+
+
+def _render_pdf_page_for_ocr(doc, page_number: int, temp_dir: str, *, dpi: int) -> tuple[str, dict[str, Any]]:
+    page = doc[page_number - 1]
+    zoom = max(1, dpi) / 72
+    width = int(page.rect.width * zoom)
+    height = int(page.rect.height * zoom)
+    pixels = width * height
+    if pixels > _env_int("OCR_PDF_MAX_PIXELS_PER_PAGE", OCR_PDF_MAX_PIXELS_PER_PAGE):
+        raise RuntimeError("Rendered OCR page exceeds the safe pixel limit.")
+    output = Path(temp_dir) / f"page-{page_number}.png"
+    pixmap = page.get_pixmap(matrix=__import__("fitz").Matrix(zoom, zoom), alpha=False)
+    pixmap.save(str(output))
+    return str(output), {
+        "page_number": page_number,
+        "dpi": dpi,
+        "width": pixmap.width,
+        "height": pixmap.height,
+        "pixels": pixmap.width * pixmap.height,
+    }
+
+
+def _ocr_pdf_image_pages(path: str, page_numbers: list[int], provider, *, language_hint: str = "bilingual") -> dict[str, Any]:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError("PyMuPDF is not available for PDF OCR rendering.") from exc
+
+    dpi = max(72, min(_env_int("OCR_PDF_RENDER_DPI", OCR_PDF_DEFAULT_DPI), 300))
+    max_pages = max(1, _env_int("OCR_PDF_MAX_PAGES", OCR_PDF_MAX_PAGES))
+    max_total_pixels = max(1, _env_int("OCR_PDF_MAX_TOTAL_PIXELS", OCR_PDF_MAX_TOTAL_PIXELS))
+    pages = [int(page) for page in page_numbers if int(page) > 0]
+    if len(pages) > max_pages:
+        raise RuntimeError("PDF OCR page count exceeds the safe limit.")
+
+    raw_parts: list[str] = []
+    blocks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+    total_pixels = 0
+    executed = False
+    with fitz.open(path) as doc, tempfile.TemporaryDirectory(prefix="lexibridge-ocr-") as temp_dir:
+        for page_number in pages:
+            if page_number > len(doc):
+                continue
+            image_path, render_config = _render_pdf_page_for_ocr(doc, page_number, temp_dir, dpi=dpi)
+            total_pixels += int(render_config["pixels"])
+            if total_pixels > max_total_pixels:
+                raise RuntimeError("PDF OCR total rendered pixels exceed the safe limit.")
+            result = provider.recognize_image(image_path, language=language_hint or "bilingual")
+            executed = True
+            if result.status in {"ok", "low_confidence"} and _clean_text(result.text):
+                raw_parts.append(f"[Page {page_number} OCR]\n{_clean_text(result.text)}")
+                blocks.extend(_ocr_blocks_to_parse_blocks(
+                    result,
+                    page_number=page_number,
+                    block_index_start=len(blocks) + 1,
+                    render_config=render_config,
+                ))
+                if result.status == "low_confidence":
+                    warnings.append("OCR returned low confidence text.")
+                warnings.extend(result.quality_flags or [])
+            elif result.status == "empty_result":
+                warnings.append(f"OCR produced no text for page {page_number}.")
+                warnings.extend(result.quality_flags or [])
+            else:
+                errors.append(result.error or result.status)
+                warnings.extend(result.quality_flags or [])
+    return {
+        "raw_text": "\n\n".join(raw_parts),
+        "blocks": blocks,
+        "warnings": normalize_quality_flags(warnings),
+        "errors": errors,
+        "executed": executed,
+        "completed": bool(_clean_text("\n\n".join(raw_parts)) and blocks),
     }
 
 
@@ -251,6 +430,7 @@ def classify_parse_quality(parse_result: dict[str, Any]) -> dict[str, Any]:
     flags = list(parse_result.get("quality_flags", []) or [])
     ocr_required = bool(parse_result.get("ocr_required", False))
     ocr_available = bool(parse_result.get("ocr_available", False))
+    ocr_completed = bool(parse_result.get("ocr_completed", False))
     formula_detected = bool(parse_result.get("formula_detected", False))
     image_only_suspected = bool(parse_result.get("image_only_suspected", False))
 
@@ -273,10 +453,12 @@ def classify_parse_quality(parse_result: dict[str, Any]) -> dict[str, Any]:
         parse_status = "failed"
         flags.append("empty_text")
     elif parse_result.get("partial_text") or image_only_suspected or ocr_required:
-        quality_status = "mixed_quality" if raw_text and ocr_required else "partial_text"
-        parse_status = "partial"
+        quality_status = "ocr_text_ok" if ocr_completed else ("mixed_quality" if raw_text and ocr_required else "partial_text")
+        parse_status = "success" if ocr_completed else "partial"
         if ocr_required:
             flags.append("ocr_required")
+        if ocr_completed:
+            flags.append("ocr_completed")
         if image_only_suspected:
             flags.append("image_only_suspected")
     else:
@@ -358,6 +540,7 @@ def parse_document_with_quality(
     mime_type: str | None = None,
     *,
     ocr_provider_name: str | None = None,
+    language_hint: str | None = None,
     now_fn=None,
 ) -> DocumentParseResult:
     source_filename = filename or os.path.basename(str(file_path or ""))
@@ -372,6 +555,8 @@ def parse_document_with_quality(
     partial_text = False
     ocr_required = False
     ocr_available = _ocr_available(ocr_provider_name)
+    ocr_language_hint = language_hint or "bilingual"
+    ocr_completed = False
     exception = None
 
     try:
@@ -387,9 +572,24 @@ def parse_document_with_quality(
             image_only_suspected = bool(meta.get("image_only_suspected"))
             partial_text = bool(meta.get("partial_text"))
             ocr_required = image_only_suspected or partial_text
-            if ocr_required and not ocr_available:
+            if ocr_required and ocr_available:
+                provider = get_ocr_provider(ocr_provider_name or os.environ.get("OCR_PROVIDER", "none"))
+                image_only_pages = list(meta.get("image_only_pages") or [])
+                if not image_only_pages and page_count:
+                    image_only_pages = list(range(1, int(page_count) + 1))
+                ocr_data = _ocr_pdf_image_pages(file_path, image_only_pages, provider, language_hint=ocr_language_hint)
+                if _clean_text(ocr_data.get("raw_text", "")):
+                    raw_text = _clean_text("\n\n".join(part for part in [raw_text, ocr_data["raw_text"]] if part))
+                    existing_count = len(blocks)
+                    for index, block in enumerate(ocr_data.get("blocks", []), start=1):
+                        block["block_index"] = existing_count + index
+                        blocks.append(block)
+                    ocr_completed = True
+                warnings.extend(ocr_data.get("warnings", []) or [])
+                errors.extend(ocr_data.get("errors", []) or [])
+            elif ocr_required and not ocr_available:
                 warnings.append("OCR is required but no OCR provider is available.")
-            parser_name = "pymupdf_native"
+            parser_name = "pymupdf_native_tesseract_ocr" if ocr_completed else "pymupdf_native"
         elif file_type == "docx":
             raw_text, blocks, meta = _parse_docx_native(file_path)
             page_count = meta.get("page_count")
@@ -404,14 +604,21 @@ def parse_document_with_quality(
                 warnings.append("Image text requires OCR, but no OCR provider is available.")
             else:
                 provider = get_ocr_provider(ocr_provider_name or os.environ.get("OCR_PROVIDER", "none"))
-                result = provider.recognize_image(file_path)
-                if result.ok:
+                result = provider.recognize_image(file_path, language=ocr_language_hint)
+                if result.status in {"ok", "low_confidence"} and _clean_text(result.text):
                     raw_text = _clean_text(result.text)
                     confidence = max(0, min(float(result.confidence or 0) / 100, 1))
-                    blocks = _text_blocks_from_text(raw_text, parser_type="ocr", source_locator="image:1")
+                    blocks = _ocr_blocks_to_parse_blocks(
+                        result,
+                        page_number=1,
+                        block_index_start=1,
+                        render_config={"dpi": 0},
+                    ) or _text_blocks_from_text(raw_text, parser_type="ocr", source_locator="image:1")
                     for block in blocks:
-                        block["confidence"] = confidence
+                        if block.get("confidence") is None:
+                            block["confidence"] = confidence
                         block["parser_type"] = "ocr"
+                    ocr_completed = True
                     if result.status == "low_confidence":
                         warnings.append("OCR returned low confidence text.")
                 else:
@@ -434,6 +641,7 @@ def parse_document_with_quality(
         "formula_detected": contains_formula_text(raw_text),
         "image_only_suspected": image_only_suspected,
         "partial_text": partial_text,
+        "ocr_completed": ocr_completed,
         "exception": exception,
     }
     quality = classify_parse_quality(parse_input)
@@ -483,7 +691,7 @@ def should_allow_term_extraction(parse_record: Any) -> bool:
         text_chars = int(parse_record.get("extracted_text_chars") or 0)
     else:
         text_chars = int(getattr(parse_record, "extracted_text_chars", 0) or 0)
-    if quality_status in {"native_text_ok", "partial_text"}:
+    if quality_status in {"native_text_ok", "ocr_text_ok", "partial_text", "ocr_low_confidence"}:
         return text_chars > 0
     return False
 
