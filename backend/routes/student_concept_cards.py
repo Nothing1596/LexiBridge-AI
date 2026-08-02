@@ -36,6 +36,9 @@ class StudentConceptCardModels:
     Feedback: Any
     StudentCourseMembership: Any
     CourseStudentVisibilityPolicy: Any
+    KnowledgeSource: Any | None = None
+    KnowledgeChunk: Any | None = None
+    DocumentParseRecord: Any | None = None
 
 
 def register_student_concept_card_routes(
@@ -64,7 +67,7 @@ def register_student_concept_card_routes(
 
     def student_concept_card_error_response(exc, audit_context):
         reason = getattr(exc, "reason", "student_concept_card_error")
-        if reason in {"concept_card_not_available", "missing_card_uid"}:
+        if reason in {"concept_card_not_available", "missing_card_uid", "concept_card_source_unavailable"}:
             return core.api_error_with_audit_context(
                 "RESOURCE_NOT_FOUND",
                 str(exc),
@@ -158,6 +161,8 @@ def register_student_concept_card_routes(
                 feedback_model,
                 user=user,
                 filters=filters,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
             )
             card_uids = [card.card_uid for card in result.items]
             states = student_concept_card_service.get_states_by_card_uid(
@@ -172,6 +177,10 @@ def register_student_concept_card_routes(
                     card,
                     state=states.get(card.card_uid),
                     feedback_count=feedback_counts.get(card.card_uid, 0),
+                    session=db.session,
+                    source_model=models.KnowledgeSource,
+                    chunk_model=models.KnowledgeChunk,
+                    parse_model=models.DocumentParseRecord,
                 )
                 for card in result.items
             ]
@@ -205,6 +214,8 @@ def register_student_concept_card_routes(
                 feedback_model,
                 user=user,
                 filters=filters,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
             )
             card_uids = [card.card_uid for card in result.items]
             states = student_concept_card_service.get_states_by_card_uid(
@@ -240,7 +251,13 @@ def register_student_concept_card_routes(
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
         try:
-            card = student_concept_card_service.get_approved_card(db.session, card_model, card_uid)
+            card = student_concept_card_service.get_publishable_approved_card(
+                db.session,
+                card_model,
+                card_uid,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
+            )
             denied_response = require_student_card_visibility(card, user, audit_context)
             if denied_response:
                 return denied_response
@@ -262,6 +279,10 @@ def register_student_concept_card_routes(
                     card,
                     state=state,
                     feedback_count=feedback_counts.get(card.card_uid, 0),
+                    session=db.session,
+                    source_model=models.KnowledgeSource,
+                    chunk_model=models.KnowledgeChunk,
+                    parse_model=models.DocumentParseRecord,
                 ),
                 "approved_only": True,
             },
@@ -278,7 +299,13 @@ def register_student_concept_card_routes(
         if not isinstance(data, dict):
             data = {}
         try:
-            card = student_concept_card_service.get_approved_card(db.session, card_model, card_uid)
+            card = student_concept_card_service.get_publishable_approved_card(
+                db.session,
+                card_model,
+                card_uid,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
+            )
             denied_response = require_student_card_visibility(card, user, audit_context)
             if denied_response:
                 return denied_response
@@ -322,7 +349,13 @@ def register_student_concept_card_routes(
         if not isinstance(data, dict):
             data = {}
         try:
-            card = student_concept_card_service.get_approved_card(db.session, card_model, card_uid)
+            card = student_concept_card_service.get_publishable_approved_card(
+                db.session,
+                card_model,
+                card_uid,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
+            )
             denied_response = require_student_card_visibility(card, user, audit_context)
             if denied_response:
                 return denied_response

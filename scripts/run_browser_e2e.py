@@ -249,6 +249,10 @@ class FlowCapture:
                 # and verifies the surfaced request_id. Treat that expected negative
                 # path separately from unhandled JavaScript errors.
                 return
+            if "Failed to load resource: the server responded with a status of 409" in msg.text:
+                # Publication integrity browser checks intentionally trigger a stale
+                # review conflict and verify the page-level error state.
+                return
             self.flow["console_errors"].append(msg.text)
 
     def on_request_failed(self, request) -> None:

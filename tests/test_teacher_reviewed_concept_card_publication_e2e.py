@@ -154,6 +154,10 @@ def _card_detail(client, token, card_uid):
 
 
 def _review_action(client, token, card_uid, action, **payload):
+    if "expected_version" not in payload:
+        detail = client.get(f"/api/concept-cards/{card_uid}", headers=bearer(token))
+        if detail.status_code == 200:
+            payload["expected_version"] = _json(detail)["data"]["card"].get("review_token")
     response = client.post(
         f"/api/concept-cards/{card_uid}/review",
         json={"action": action, **payload},
@@ -317,10 +321,26 @@ def test_teacher_reviewed_card_publication_from_uploaded_bilingual_sources(
     assert acceleration_card["status"] == "needs_review"
     assert momentum_card["english_evidence"]
     assert momentum_card["chinese_evidence"]
+    momentum_risk_labels = sorted(set(momentum_card["risk_labels"]))
+    policy_update = client.post(
+        "/api/review-policies",
+        json={
+            "course": course_name,
+            "required_evidence_sides": "both",
+            "min_required_evidence_count": 2,
+            "allow_teacher_override": True,
+            "require_admin_for_override": False,
+            "allow_approve_with_unverified_alignment": False,
+            "override_allowed_risk_labels": momentum_risk_labels,
+        },
+        headers={**bearer(admin_token), "X-Request-ID": f"11b-review-policy-final-{uuid.uuid4().hex[:8]}"},
+    )
+    assert policy_update.status_code == 200, policy_update.get_data(as_text=True)
 
     patch = client.patch(
         f"/api/concept-cards/{momentum_card['card_uid']}",
         json={
+            "expected_version": momentum_card["review_token"],
             "chinese_term": "动量",
             "chinese_explanation": "教师确认：动量是质量与速度的乘积。",
             "english_explanation": "Teacher reviewed explanation for momentum.",
@@ -335,14 +355,10 @@ def test_teacher_reviewed_card_publication_from_uploaded_bilingual_sources(
         "approve",
         reason_code="teacher_verified",
         review_comment="Synthetic bilingual evidence is sufficient for publication flow verification.",
-        allow_risk_override=True,
-        override_reason="11B verifies workflow closure with teacher-reviewed synthetic evidence.",
-        resolved_risk_labels=[
-            "bilingual_alignment_not_verified",
-            "candidate_not_alignment_verified",
-            "weak_candidate_score",
-        ],
-    )
+            allow_risk_override=True,
+            override_reason="11B verifies workflow closure with teacher-reviewed synthetic evidence.",
+            resolved_risk_labels=momentum_risk_labels,
+        )
     assert approval.status_code == 200, approval.get_data(as_text=True)
     approved_card = _json(approval)["data"]["card"]
     assert approved_card["status"] == "approved"

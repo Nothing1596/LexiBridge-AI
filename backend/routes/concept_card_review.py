@@ -52,6 +52,9 @@ class ConceptCardReviewModels:
     CourseReviewPolicy: Any
     CourseReviewPermission: Any
     AlignmentVerificationRun: Any
+    KnowledgeSource: Any | None = None
+    KnowledgeChunk: Any | None = None
+    DocumentParseRecord: Any | None = None
 
 
 def register_concept_card_review_routes(
@@ -78,6 +81,26 @@ def register_concept_card_review_routes(
                 404,
                 audit_context,
                 {"audit_error_code": "concept_card_not_found"},
+            )
+        if isinstance(exc, concept_card_service.ConceptCardStaleReviewError):
+            return core.api_error_with_audit_context(
+                "CONCEPT_CARD_STALE_REVIEW",
+                str(exc),
+                409,
+                audit_context,
+                {"audit_error_code": "concept_card_stale_review"},
+            )
+        if isinstance(exc, concept_card_review_service.ConceptCardSourceUnavailableError):
+            details = {
+                "audit_error_code": "concept_card_source_unavailable",
+                "source_availability": getattr(exc, "details", {}),
+            }
+            return core.api_error_with_audit_context(
+                "CONCEPT_CARD_SOURCE_UNAVAILABLE",
+                str(exc),
+                422,
+                audit_context,
+                details,
             )
         return core.api_error_with_audit_context(
             "VALIDATION_ERROR",
@@ -141,7 +164,13 @@ def register_concept_card_review_routes(
         )
         items = []
         for card in result.items:
-            data = concept_card_review_service.serialize_review_queue_item(card)
+            data = concept_card_review_service.serialize_review_queue_item(
+                card,
+                session=db.session,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
+                parse_model=models.DocumentParseRecord,
+            )
             data.update(concept_card_review_ui_summary(card))
             items.append(data)
         return core.api_success_with_audit_context(
@@ -213,6 +242,9 @@ def register_concept_card_review_routes(
                 audit_context=audit_context,
                 policy_model=models.CourseReviewPolicy,
                 permission_model=models.CourseReviewPermission,
+                source_model=models.KnowledgeSource,
+                chunk_model=models.KnowledgeChunk,
+                require_concurrency_token=True,
                 now_fn=core.current_time_text,
                 commit=True,
             )
@@ -221,7 +253,13 @@ def register_concept_card_review_routes(
             return concept_card_review_error_response(exc, audit_context)
         return core.api_success_with_audit_context(
             {
-                "card": concept_card_service.serialize_concept_card(card),
+                "card": concept_card_review_service.serialize_review_queue_item(
+                    card,
+                    session=db.session,
+                    source_model=models.KnowledgeSource,
+                    chunk_model=models.KnowledgeChunk,
+                    parse_model=models.DocumentParseRecord,
+                ),
                 "review": concept_card_review_service.serialize_review_record(review_record),
             },
             "Concept card review recorded.",

@@ -174,6 +174,7 @@ from services.retrieval_experiments import (
 )
 from services import concept_alignment_cards as concept_card_service
 from services import concept_card_review as concept_card_review_service
+from services import concept_card_publication as concept_card_publication_service
 from services import course_review_policy as course_review_policy_service
 from services import audit_records as audit_record_service
 from services import audit_context as audit_context_service
@@ -11670,6 +11671,8 @@ def concept_card_error_response(exc, audit_context=None):
     }
     if isinstance(exc, concept_card_service.ConceptCardNotFoundError):
         return api_error_with_audit_context("RESOURCE_NOT_FOUND", str(exc), 404, audit_context, details)
+    if isinstance(exc, concept_card_service.ConceptCardStaleReviewError):
+        return api_error_with_audit_context("CONCEPT_CARD_STALE_REVIEW", str(exc), 409, audit_context, details)
     return api_error_with_audit_context("VALIDATION_ERROR", str(exc), 400, audit_context, details)
 
 
@@ -12299,6 +12302,9 @@ register_student_concept_card_routes(
         Feedback=Feedback,
         StudentCourseMembership=StudentCourseMembership,
         CourseStudentVisibilityPolicy=CourseStudentVisibilityPolicy,
+        KnowledgeSource=KnowledgeSource,
+        KnowledgeChunk=KnowledgeChunk,
+        DocumentParseRecord=DocumentParseRecord,
     ),
     student_visible_course_names=student_visible_course_names,
     student_course_access_service=student_course_access_service,
@@ -12595,6 +12601,9 @@ register_concept_card_review_routes(
         CourseReviewPolicy=CourseReviewPolicy,
         CourseReviewPermission=CourseReviewPermission,
         AlignmentVerificationRun=AlignmentVerificationRun,
+        KnowledgeSource=KnowledgeSource,
+        KnowledgeChunk=KnowledgeChunk,
+        DocumentParseRecord=DocumentParseRecord,
     ),
 )
 
@@ -12617,7 +12626,19 @@ def get_concept_card_api(card_uid):
             error_code="concept_card_not_found",
         )
         return concept_card_error_response(exc, audit_context)
-    return api_success_with_audit_context({"card": concept_card_service.serialize_concept_card(card)}, audit_context=audit_context)
+    return api_success_with_audit_context(
+        {
+            "card": concept_card_publication_service.enrich_card_payload(
+                db.session,
+                card,
+                concept_card_service.serialize_concept_card(card),
+                source_model=KnowledgeSource,
+                chunk_model=KnowledgeChunk,
+                parse_model=DocumentParseRecord,
+            )
+        },
+        audit_context=audit_context,
+    )
 
 
 @app.route("/api/concept-cards/<card_uid>", methods=["PATCH"])
@@ -12629,7 +12650,7 @@ def update_concept_card_api(card_uid):
     audit_context = get_route_audit_context(user)
     raw_data = request.get_json() or {}
     data = dict(raw_data) if isinstance(raw_data, dict) else {}
-    invalid_fields = sorted(set(data) - concept_card_service.UPDATE_FIELDS)
+    invalid_fields = sorted(set(data) - (concept_card_service.UPDATE_FIELDS | concept_card_service.CONTROL_FIELDS))
     if invalid_fields:
         message = f"PATCH contains unsupported fields: {', '.join(invalid_fields)}."
         record_concept_card_api_failure(
@@ -12657,6 +12678,7 @@ def update_concept_card_api(card_uid):
             audit_context=audit_context,
             source="api",
             now_fn=current_time_text,
+            require_concurrency_token=True,
         )
     except concept_card_service.ConceptCardError as exc:
         db.session.rollback()
@@ -12684,7 +12706,16 @@ def update_concept_card_api(card_uid):
         db.session.rollback()
         return concept_card_error_response(exc, audit_context)
     return api_success_with_audit_context(
-        {"card": concept_card_service.serialize_concept_card(card)},
+        {
+            "card": concept_card_publication_service.enrich_card_payload(
+                db.session,
+                card,
+                concept_card_service.serialize_concept_card(card),
+                source_model=KnowledgeSource,
+                chunk_model=KnowledgeChunk,
+                parse_model=DocumentParseRecord,
+            )
+        },
         "Concept card updated.",
         audit_context,
     )
@@ -13776,6 +13807,69 @@ def get_governed_knowledge_source_api(source_uid):
         "source": knowledge_governance_service.serialize_knowledge_source(source),
         "chunk_count": chunk_count,
     }, audit_context=audit_context)
+
+
+@app.route("/api/knowledge-sources/<source_uid>", methods=["PATCH"])
+def update_governed_knowledge_source_api(source_uid):
+    audit_context = get_route_audit_context()
+    user, error_response = require_current_user({"teacher", "admin"})
+    if error_response:
+        return attach_request_id_to_response(error_response, audit_context)
+    audit_context = get_route_audit_context(user)
+    raw_data = request.get_json(silent=True) or {}
+    data = dict(raw_data) if isinstance(raw_data, dict) else {}
+    allowed_fields = {
+        "status",
+        "quality_status",
+        "quality_flags",
+        "trust_level",
+        "title",
+        "name",
+        "source_title",
+    }
+    invalid_fields = sorted(set(data) - allowed_fields)
+    if invalid_fields:
+        return api_error_with_audit_context(
+            "VALIDATION_ERROR",
+            f"PATCH contains unsupported fields: {', '.join(invalid_fields)}.",
+            400,
+            audit_context,
+            {"invalid_fields": invalid_fields, "audit_error_code": "invalid_knowledge_source_patch_field"},
+        )
+    try:
+        source = knowledge_governance_service.get_knowledge_source(db.session, KnowledgeSource, source_uid)
+    except knowledge_governance_service.KnowledgeGovernanceError as exc:
+        return knowledge_governance_error_response(exc, audit_context)
+    if user.role == "teacher":
+        course = get_course_by_id_or_name(None, getattr(source, "course", ""))
+        if course is None or not can_manage_course(user, course):
+            return api_error_with_audit_context(
+                "PERMISSION_DENIED",
+                "无权管理该课程知识源。",
+                403,
+                audit_context,
+                {"audit_error_code": "knowledge_source_permission_denied"},
+            )
+    try:
+        source = knowledge_governance_service.update_knowledge_source(
+            db.session,
+            KnowledgeSource,
+            source_uid,
+            data,
+            version_model=KnowledgeVersion,
+            audit_model=AuditRecord,
+            audit_context=audit_context,
+            now_fn=current_time_text,
+            commit=True,
+        )
+    except knowledge_governance_service.KnowledgeGovernanceError as exc:
+        db.session.rollback()
+        return knowledge_governance_error_response(exc, audit_context)
+    return api_success_with_audit_context(
+        {"source": knowledge_governance_service.serialize_knowledge_source(source)},
+        "Knowledge source updated.",
+        audit_context,
+    )
 
 
 @app.route("/api/knowledge-chunks", methods=["GET"])

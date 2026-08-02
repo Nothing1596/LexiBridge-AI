@@ -7,6 +7,7 @@ from services import audit_records
 from services import concept_alignment_cards as concept_cards
 from services import concept_card_review
 from services import course_review_policy
+from test_concept_card_review import create_source_and_chunk, evidence_from_source, with_expected_version
 
 
 def bearer(token):
@@ -42,15 +43,29 @@ def get_user(app_module, role):
 
 
 def create_card(app_module, **overrides):
+    course = overrides.pop("course", "Course Review Policy Course")
+    chapter = overrides.pop("chapter", "Policy Gate")
+    english_term = overrides.pop("english_term", unique_text("Policy Term"))
+    chinese_term = overrides.pop("chinese_term", f"策略术语{uuid.uuid4().hex[:5]}")
+    if "english_evidence" in overrides:
+        english_evidence = overrides.pop("english_evidence")
+    else:
+        en_source, en_chunk = create_source_and_chunk(app_module, term=english_term, course=course, chapter=chapter, language="en")
+        english_evidence = evidence_from_source(en_source, en_chunk, term=english_term, language="en")
+    if "chinese_evidence" in overrides:
+        chinese_evidence = overrides.pop("chinese_evidence")
+    else:
+        zh_source, zh_chunk = create_source_and_chunk(app_module, term=chinese_term, course=course, chapter=chapter, language="zh")
+        chinese_evidence = evidence_from_source(zh_source, zh_chunk, term=chinese_term, language="zh")
     data = {
-        "english_term": unique_text("Policy Term"),
-        "chinese_term": f"策略术语{uuid.uuid4().hex[:5]}",
-        "course": "Course Review Policy Course",
-        "chapter": "Policy Gate",
+        "english_term": english_term,
+        "chinese_term": chinese_term,
+        "course": course,
+        "chapter": chapter,
         "status": "needs_review",
         "risk_labels": [],
-        "english_evidence": evidence("en"),
-        "chinese_evidence": evidence("zh"),
+        "english_evidence": english_evidence,
+        "chinese_evidence": chinese_evidence,
         "confidence_score": None,
     }
     data.update(overrides)
@@ -442,7 +457,7 @@ def test_review_api_uses_course_permission_and_policy_gate(client, app_module, a
     )
     no_permission = client.post(
         f"/api/concept-cards/{card_uid}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "No permission."},
+        json=with_expected_version(app_module, card_uid, {"action": "approve", "reason_code": "teacher_verified", "review_comment": "No permission."}),
         headers={**bearer(teacher_token), "X-Request-ID": f"{request_id}-no-permission"},
     )
     client.post(
@@ -475,7 +490,7 @@ def test_review_api_uses_course_permission_and_policy_gate(client, app_module, a
     )
     approved = client.post(
         f"/api/concept-cards/{card_uid}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Approved with course permission."},
+        json=with_expected_version(app_module, card_uid, {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Approved with course permission."}),
         headers={**bearer(teacher_token), "X-Request-ID": f"{request_id}-approved"},
     )
 
@@ -493,18 +508,18 @@ def test_review_api_uses_course_permission_and_policy_gate(client, app_module, a
         risky = create_card(app_module, course="API Gated Review Course", risk_labels=["input_partial_text"]).card_uid
     blocked = client.post(
         f"/api/concept-cards/{risky}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Risk remains."},
+        json=with_expected_version(app_module, risky, {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Risk remains."}),
         headers={**bearer(teacher_token), "X-Request-ID": f"{request_id}-policy-block"},
     )
     override_blocked = client.post(
         f"/api/concept-cards/{risky}/review",
-        json={
+        json=with_expected_version(app_module, risky, {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Teacher tries override.",
             "allow_risk_override": True,
             "override_reason": "Policy does not allow override.",
-        },
+        }),
         headers={**bearer(teacher_token), "X-Request-ID": f"{request_id}-override-block"},
     )
 

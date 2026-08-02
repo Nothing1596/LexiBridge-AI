@@ -13,6 +13,7 @@ from services import parse_quality_risk
 
 
 VALID_STATUSES = {"draft", "needs_review", "approved", "rejected", "deprecated"}
+CONTROL_FIELDS = {"expected_version"}
 
 CREATE_FIELDS = {
     "english_term",
@@ -82,8 +83,16 @@ class ConceptCardQualityGateError(ConceptCardError):
     """Raised when parse quality risk blocks a trusted card state."""
 
 
+class ConceptCardStaleReviewError(ConceptCardError):
+    """Raised when a card update uses an out-of-date review token."""
+
+    reason = "concept_card_stale_review"
+
+
 def classify_concept_card_error(error: Exception | str) -> str:
     message = str(error or "")
+    if isinstance(error, ConceptCardStaleReviewError) or "stale" in message or "expected_version" in message:
+        return "concept_card_stale_review"
     if isinstance(error, ConceptCardQualityGateError) or "parse quality risk" in message:
         return "concept_card_quality_gate_blocked"
     if isinstance(error, ConceptCardNotFoundError) or "not found" in message:
@@ -278,6 +287,26 @@ def _commit_or_flush(session: Any, commit: bool) -> None:
         session.flush()
 
 
+def _expected_version(data: dict[str, Any]) -> int | None:
+    value = data.get("expected_version")
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConceptCardStaleReviewError("expected_version must be an integer review token.") from exc
+
+
+def require_current_version(card: Any, data: dict[str, Any]) -> int:
+    expected = _expected_version(data or {})
+    if expected is None:
+        raise ConceptCardStaleReviewError("expected_version is required for Concept Card updates.")
+    current = int(getattr(card, "version", 1) or 1)
+    if expected != current:
+        raise ConceptCardStaleReviewError("Concept Card review token is stale.")
+    return expected
+
+
 def _record_failed_operation(
     session: Any,
     audit_model: Any | None,
@@ -423,10 +452,13 @@ def update_concept_card(
     source: str = "service",
     now_fn=None,
     commit: bool = True,
+    require_concurrency_token: bool = False,
 ) -> Any:
     card = get_concept_card(session, card_model, identifier)
     before_snapshot = audit_records.concept_card_snapshot(card)
     try:
+        if require_concurrency_token:
+            require_current_version(card, patch_data or {})
         payload = _normalize_payload(patch_data or {}, UPDATE_FIELDS)
         _apply_parse_quality_risk(patch_data or {}, payload, existing_card=card)
         _validate_payload(payload, existing_card=card)
@@ -581,6 +613,7 @@ def serialize_concept_card(card: Any) -> dict[str, Any]:
         "prompt_version": card.prompt_version,
         "retrieval_version": card.retrieval_version,
         "version": card.version,
+        "review_token": str(card.version or ""),
         "created_at": card.created_at,
         "updated_at": card.updated_at,
     }

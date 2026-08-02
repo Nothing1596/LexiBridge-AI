@@ -16,6 +16,8 @@ from typing import Any
 
 from sqlalchemy import or_
 
+from services import concept_card_publication
+
 
 APPROVED_STATUS = "approved"
 FEEDBACK_SOURCE = "student_concept_card"
@@ -245,6 +247,28 @@ def get_approved_card(session: Any, card_model: Any, card_uid: str) -> Any:
     return card
 
 
+def get_publishable_approved_card(
+    session: Any,
+    card_model: Any,
+    card_uid: str,
+    *,
+    source_model: Any | None = None,
+    chunk_model: Any | None = None,
+) -> Any:
+    card = get_approved_card(session, card_model, card_uid)
+    if source_model is not None and not concept_card_publication.card_is_publishable(
+        session,
+        card,
+        source_model=source_model,
+        chunk_model=chunk_model,
+    ):
+        raise StudentConceptCardError(
+            "Concept card is not available for student learning.",
+            "concept_card_source_unavailable",
+        )
+    return card
+
+
 def get_states_by_card_uid(session: Any, state_model: Any, user_id: int, card_uids: list[str]) -> dict[str, Any]:
     if not card_uids:
         return {}
@@ -324,6 +348,8 @@ def list_student_concept_cards(
     *,
     user: Any,
     filters: dict[str, Any] | None = None,
+    source_model: Any | None = None,
+    chunk_model: Any | None = None,
 ) -> StudentConceptCardListResult:
     filters = dict(filters or {})
     page = _int_range(filters.get("page"), 1, 1, 10_000)
@@ -390,21 +416,40 @@ def list_student_concept_cards(
         elif feedback_card_uids:
             query = query.filter(~card_model.card_uid.in_(feedback_card_uids))
 
-    total = query.count()
-    items = (
+    ordered_items = (
         query.order_by(card_model.updated_at.desc(), card_model.id.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
         .all()
     )
+    if source_model is not None:
+        ordered_items = [
+            card
+            for card in ordered_items
+            if concept_card_publication.card_is_publishable(
+                session,
+                card,
+                source_model=source_model,
+                chunk_model=chunk_model,
+            )
+        ]
+    total = len(ordered_items)
+    items = ordered_items[(page - 1) * per_page: page * per_page]
     return StudentConceptCardListResult(items=items, page=page, per_page=per_page, total=total)
 
 
-def serialize_student_card_summary(card: Any, state: Any | None = None, feedback_count: int = 0) -> dict[str, Any]:
+def serialize_student_card_summary(
+    card: Any,
+    state: Any | None = None,
+    feedback_count: int = 0,
+    *,
+    session: Any | None = None,
+    source_model: Any | None = None,
+    chunk_model: Any | None = None,
+    parse_model: Any | None = None,
+) -> dict[str, Any]:
     english = _card_evidence(card, "english")
     chinese = _card_evidence(card, "chinese")
     state_data = _state_dict(state)
-    return {
+    data = {
         "card_uid": card.card_uid,
         "english_term": card.english_term,
         "chinese_term": card.chinese_term,
@@ -424,15 +469,42 @@ def serialize_student_card_summary(card: Any, state: Any | None = None, feedback
         "public_warning": _public_warning(card),
         "updated_at": card.updated_at,
     }
+    if session is not None:
+        data = concept_card_publication.enrich_card_payload(
+            session,
+            card,
+            data,
+            source_model=source_model,
+            chunk_model=chunk_model,
+            parse_model=parse_model,
+        )
+    return data
 
 
-def serialize_student_card_detail(card: Any, state: Any | None = None, feedback_count: int = 0) -> dict[str, Any]:
-    data = serialize_student_card_summary(card, state=state, feedback_count=feedback_count)
+def serialize_student_card_detail(
+    card: Any,
+    state: Any | None = None,
+    feedback_count: int = 0,
+    *,
+    session: Any | None = None,
+    source_model: Any | None = None,
+    chunk_model: Any | None = None,
+    parse_model: Any | None = None,
+) -> dict[str, Any]:
+    data = serialize_student_card_summary(
+        card,
+        state=state,
+        feedback_count=feedback_count,
+        session=session,
+        source_model=source_model,
+        chunk_model=chunk_model,
+        parse_model=parse_model,
+    )
     data.update({
         "english_explanation": card.english_explanation,
         "chinese_explanation": card.chinese_explanation,
-        "english_evidence": _serialize_evidence(_card_evidence(card, "english")),
-        "chinese_evidence": _serialize_evidence(_card_evidence(card, "chinese")),
+        "english_evidence": data.get("english_evidence") or _serialize_evidence(_card_evidence(card, "english")),
+        "chinese_evidence": data.get("chinese_evidence") or _serialize_evidence(_card_evidence(card, "chinese")),
         "retrieval_version": getattr(card, "retrieval_version", ""),
         "reviewed_by": getattr(card, "reviewed_by", None),
         "reviewed_at": getattr(card, "reviewed_at", ""),

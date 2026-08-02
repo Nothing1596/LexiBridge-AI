@@ -177,6 +177,7 @@ def test_api_patch_concept_card_updates_allowed_fields(client, teacher_token):
     response = client.patch(
         f"/api/concept-cards/{card['card_uid']}",
         json={
+            "expected_version": card["review_token"],
             "english_term": "API Patch Updated",
             "risk_labels": ["patched"],
         },
@@ -217,7 +218,7 @@ def test_api_patch_invalid_confidence_returns_error(client, teacher_token):
     request_id = "api-bad-confidence-request-id"
     response = client.patch(
         f"/api/concept-cards/{card['card_uid']}",
-        json={"confidence_score": 1.5},
+        json={"expected_version": card["review_token"], "confidence_score": 1.5},
         headers={**bearer(teacher_token), "X-Request-ID": request_id},
     )
 
@@ -277,7 +278,7 @@ def test_api_patch_risky_card_to_approved_returns_error(client, teacher_token):
     request_id = "api-patch-risky-approved-request-id"
     response = client.patch(
         f"/api/concept-cards/{card['card_uid']}",
-        json={"status": "approved"},
+        json={"expected_version": card["review_token"], "status": "approved"},
         headers={**bearer(teacher_token), "X-Request-ID": request_id},
     )
 

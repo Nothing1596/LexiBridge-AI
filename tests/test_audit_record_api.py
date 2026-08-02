@@ -50,7 +50,7 @@ def test_api_filter_audit_records_by_target_uid_and_event_type(client, teacher_t
     )
     client.patch(
         f"/api/concept-cards/{card['card_uid']}",
-        json={"chinese_term": "筛选后的审计接口术语"},
+        json={"expected_version": card["review_token"], "chinese_term": "筛选后的审计接口术语"},
         headers={**bearer(teacher_token), "X-Request-ID": update_request_id},
     )
 

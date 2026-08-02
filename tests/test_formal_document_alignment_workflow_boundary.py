@@ -137,7 +137,8 @@ def test_no_auto_approve_and_student_approved_only_boundaries_remain_visible():
     assert "cannot create approved ConceptAlignmentCard" in draft_source
     assert "needs_review" in draft_source
     assert '"can_auto_approve": bool(output.get("can_auto_approve"))' in verification_source
-    assert "get_approved_card" in student_route_source
+    assert "get_publishable_approved_card" in student_route_source
+    assert "get_approved_card" in student_service_source
     assert 'APPROVED_STATUS = "approved"' in student_service_source
     assert "card_model.status == APPROVED_STATUS" in student_service_source
 

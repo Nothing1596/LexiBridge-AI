@@ -673,6 +673,10 @@
       AI_PROVIDER_FAILED: "AI 服务调用失败 / AI provider failed",
       PDF_FONT_UNAVAILABLE: "PDF 字体不可用 / PDF font unavailable",
       TOO_MANY_REQUESTS: "请求过于频繁 / Too many requests",
+      CONCEPT_CARD_STALE_REVIEW: "该卡片已被更新，请重新加载后审核 / This card changed; reload before reviewing",
+      CONCEPT_CARD_SOURCE_UNAVAILABLE: "证据来源已失效，操作已阻断 / Evidence source is unavailable",
+      CONCEPT_CARD_NOT_PUBLISHED: "该卡片当前不可发布 / This card is not published",
+      CONCEPT_CARD_EVIDENCE_INCOMPLETE: "卡片证据不完整 / Concept Card evidence is incomplete",
       INTERNAL_ERROR: "系统内部错误 / Internal server error"
     };
 
@@ -1443,6 +1447,7 @@
             <span class="badge blue">${bilingual(`retrieval_score ${evidenceScore(item)}`, `retrieval_score ${evidenceScore(item)}`)}</span>
           </div>
           <p class="muted">${escapeHtml(item.source_role || "-")} · ${escapeHtml(item.trust_level || "-")} · ${escapeHtml(item.quality_status || "-")} · ${escapeHtml(item.source_locator || "-")}</p>
+          ${renderEvidenceProvenance(item)}
           <div class="snippet">${escapeHtml(String(item.snippet || "").slice(0, 360) || "No snippet.")}</div>
         </div>
       `).join("")}</div>`;
@@ -1620,6 +1625,26 @@
       return score === undefined || score === null || score === "" ? "-" : Number(score).toFixed(2);
     }
 
+    function renderEvidenceProvenance(item) {
+      const location = item.location_available === false
+        ? bilingual("该来源没有页面定位信息", "No page location available")
+        : bilingual(`页 ${item.page_number || "-"} · ${item.source_locator || "-"}`, `page ${item.page_number || "-"} · ${item.source_locator || "-"}`);
+      const bbox = item.bbox_available
+        ? `bbox ${JSON.stringify(item.bbox)}`
+        : bilingual("bbox 不可用", "bbox unavailable");
+      const parser = item.parser || item.parse_quality_status || item.quality_status || "-";
+      const block = item.block_type || "-";
+      const sourceStatus = item.source_available === false
+        ? `<span class="badge bad">${bilingual("来源不可用", "Source unavailable")}: ${escapeHtml(item.source_unavailable_reason || item.source_status || "-")}</span>`
+        : `<span class="badge good">${bilingual("来源有效", "Source active")}</span>`;
+      return `
+        <p class="muted" data-testid="evidence-provenance">
+          ${escapeHtml(location)} · ${escapeHtml(bbox)} · block ${escapeHtml(block)} · parser ${escapeHtml(parser)}
+          ${sourceStatus}
+        </p>
+      `;
+    }
+
     function renderEvidenceItems(items, emptyText) {
       const evidence = arrayValue(items);
       if (!evidence.length) return `<div class="notice error">${emptyText}</div>`;
@@ -1635,6 +1660,7 @@
               <span class="badge blue">${bilingual(`分数 ${evidenceScore(item)}`, `Score ${evidenceScore(item)}`)}</span>
             </div>
             <p class="muted">${escapeHtml(item.source_role || item.source_type || "-")} · ${escapeHtml(item.trust_level || "-")} · ${escapeHtml(item.quality_status || "-")} · ${escapeHtml(item.source_locator || item.page_number || item.slide_number || "-")}</p>
+            ${renderEvidenceProvenance(item)}
             <div class="snippet">${escapeHtml(snippet || "No snippet.")}</div>
             ${Array.isArray(item.risk_labels) && item.risk_labels.length ? `<p>${riskChips(item.risk_labels, "warn")}</p>` : ""}
           </div>
@@ -1687,11 +1713,14 @@
     function renderReviewActionForms(card) {
       if (!card) return "";
       const riskOptions = arrayValue(card.risk_labels).join(", ");
+      const reviewToken = escapeHtml(card.review_token || card.version || "");
+      const reviewTokenInput = `<input type="hidden" name="expected_version" value="${reviewToken}" data-testid="review-expected-version" />`;
       return `
         <div class="stack">
           <details class="review-action" data-testid="review-action-approve" open>
             <summary>${bilingual("Approve", "Approve")}</summary>
             <form class="form-grid" onsubmit="Lexi.submitConceptReview(event, 'approve')">
+              ${reviewTokenInput}
               <div><label>${bilingual("reason_code", "reason_code")}</label><input name="reason_code" required value="teacher_verified" /></div>
               <div><label>${bilingual("resolved_risk_labels", "resolved_risk_labels")}</label><input name="resolved_risk_labels" value="${escapeHtml(riskOptions)}" placeholder="risk_a, risk_b" /></div>
               <div class="full"><label>${bilingual("review_comment", "review_comment")}</label><textarea name="review_comment" required></textarea></div>
@@ -1704,6 +1733,7 @@
           <details class="review-action" data-testid="review-action-reject">
             <summary>${bilingual("Reject", "Reject")}</summary>
             <form class="form-grid" onsubmit="Lexi.submitConceptReview(event, 'reject')">
+              ${reviewTokenInput}
               <div><label>${bilingual("reason_code", "reason_code")}</label><input name="reason_code" required value="chinese_term_wrong" /></div>
               <div class="full"><label>${bilingual("review_comment", "review_comment")}</label><textarea name="review_comment" required></textarea></div>
               <button class="danger" data-testid="review-submit">${bilingual("提交驳回", "Submit Reject")}</button>
@@ -1712,6 +1742,7 @@
           <details class="review-action" data-testid="review-action-request-revision">
             <summary>${bilingual("Request Revision", "Request Revision")}</summary>
             <form class="form-grid" onsubmit="Lexi.submitConceptReview(event, 'request_revision')">
+              ${reviewTokenInput}
               <div><label>${bilingual("reason_code", "reason_code")}</label><input name="reason_code" required value="evidence_insufficient" /></div>
               <div class="full"><label>${bilingual("required_changes", "required_changes")}</label><textarea name="required_changes" required placeholder="一行一个修改项 / one item per line"></textarea></div>
               <div class="full"><label>${bilingual("review_comment", "review_comment")}</label><textarea name="review_comment"></textarea></div>
@@ -1721,6 +1752,7 @@
           <details class="review-action" data-testid="review-action-more-evidence">
             <summary>${bilingual("Mark Needs More Evidence", "Mark Needs More Evidence")}</summary>
             <form class="form-grid" onsubmit="Lexi.submitConceptReview(event, 'mark_needs_more_evidence')">
+              ${reviewTokenInput}
               <div><label>${bilingual("reason_code", "reason_code")}</label><input name="reason_code" required value="evidence_insufficient" /></div>
               <div class="full"><label>${bilingual("review_comment", "review_comment")}</label><textarea name="review_comment"></textarea></div>
               <button class="secondary" data-testid="review-submit">${bilingual("标记证据不足", "Mark Needs Evidence")}</button>
@@ -1729,6 +1761,7 @@
           ${["approved", "rejected", "deprecated"].includes(card.status) ? `<details class="review-action">
             <summary>${bilingual("Reopen", "Reopen")}</summary>
             <form class="form-grid" onsubmit="Lexi.submitConceptReview(event, 'reopen')">
+              ${reviewTokenInput}
               <div><label>${bilingual("reason_code", "reason_code")}</label><input name="reason_code" required value="course_context_mismatch" /></div>
               <div class="full"><label>${bilingual("review_comment", "review_comment")}</label><textarea name="review_comment" required></textarea></div>
               <button class="secondary">${bilingual("重新打开", "Reopen")}</button>
@@ -1737,6 +1770,7 @@
           ${state.user && state.user.role === "admin" ? `<details class="review-action">
             <summary>${bilingual("Deprecate", "Deprecate")}</summary>
             <form class="form-grid" onsubmit="Lexi.submitConceptReview(event, 'deprecate')">
+              ${reviewTokenInput}
               <div><label>${bilingual("reason_code", "reason_code")}</label><input name="reason_code" required value="outdated_card" /></div>
               <div class="full"><label>${bilingual("review_comment", "review_comment")}</label><textarea name="review_comment" required></textarea></div>
               <button class="danger">${bilingual("废弃卡片", "Deprecate Card")}</button>
@@ -1929,6 +1963,7 @@
                 <p class="muted">${escapeHtml(card.course || "-")} · ${escapeHtml(card.chapter || "-")} · ${escapeHtml(card.concept_scope || "")}</p>
                 <p>${riskChips(card.risk_labels, "warn")}</p>
                 <p class="muted">${bilingual(`retrieval_version ${escapeHtml(card.retrieval_version || "-")} · version ${card.version || 1}`, `retrieval_version ${escapeHtml(card.retrieval_version || "-")} · version ${card.version || 1}`)}</p>
+                ${card.source_unavailable ? `<div class="notice error" data-testid="source-unavailable-warning">${bilingual("该卡片关联的核心证据来源已撤回或不可用，后端将阻断批准和学生发布。", "Core evidence source is withdrawn or unavailable; approval and student publication are blocked.")}</div>` : ""}
                 <div class="notice">${bilingual("前端不会直接改状态；所有审核动作都提交到后端 review API，并受课程策略和权限门禁约束。", "The frontend never changes status directly; every review action is submitted to the backend review API and guarded by course policy and permissions.")}</div>
               </div>
               <div class="grid two">
@@ -2879,8 +2914,10 @@
 	        const payload = { action };
 	        const reasonCode = String(form.get("reason_code") || "").trim();
 	        const reviewComment = String(form.get("review_comment") || "").trim();
+	        const expectedVersion = String(form.get("expected_version") || "").trim();
 	        const resolved = String(form.get("resolved_risk_labels") || "").split(",").map(item => item.trim()).filter(Boolean);
 	        const requiredChanges = String(form.get("required_changes") || "").split("\n").map(item => item.trim()).filter(Boolean);
+	        if (expectedVersion) payload.expected_version = Number(expectedVersion);
 	        if (reasonCode) payload.reason_code = reasonCode;
 	        if (reviewComment) payload.review_comment = reviewComment;
 	        if (resolved.length) payload.resolved_risk_labels = resolved;

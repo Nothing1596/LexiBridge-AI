@@ -34,20 +34,97 @@ def evidence(term, language="en", score=0.87):
     }]
 
 
+def source_and_chunk(app_module, *, term, course, chapter="Approved Cards", language="en", score=0.87):
+    role = "english_course_material" if language == "en" else "chinese_reference_material"
+    source = app_module.KnowledgeSource(
+        source_uid=f"src-{uuid.uuid4().hex}",
+        title=f"{term} Source",
+        name=f"{term} Source",
+        source_title=f"{term} Source",
+        course=course,
+        chapter=chapter,
+        language=language,
+        source_role=role,
+        trust_level="teacher_verified",
+        quality_status="native_text_ok",
+        status="active",
+        allow_derivative_cards=True,
+        authorization_status="allowed_for_course_use",
+        created_at=app_module.current_time_text(),
+        updated_at=app_module.current_time_text(),
+    )
+    app_module.db.session.add(source)
+    app_module.db.session.flush()
+    chunk = app_module.KnowledgeChunk(
+        chunk_uid=f"chunk-{uuid.uuid4().hex}",
+        source_uid=source.source_uid,
+        document_id=0,
+        source_id=source.id,
+        knowledge_source_id=source.id,
+        parse_uid=f"parse-{uuid.uuid4().hex}",
+        parse_block_uid=f"block-{uuid.uuid4().hex}",
+        course=course,
+        chapter=chapter,
+        title=source.title,
+        language=language,
+        content=f"{term} evidence snippet for student learning.",
+        normalized_text=f"{term} evidence snippet for student learning.",
+        source_locator="page:8",
+        page_number=8,
+        block_type="paragraph",
+        quality_status="native_text_ok",
+        quality_flags='["native_text_ok"]',
+        trust_level="teacher_verified",
+        status="active",
+        is_active=True,
+        created_at=app_module.current_time_text(),
+        updated_at=app_module.current_time_text(),
+    )
+    app_module.db.session.add(chunk)
+    app_module.db.session.flush()
+    return source, chunk, [{
+        "chunk_uid": chunk.chunk_uid,
+        "source_uid": source.source_uid,
+        "source_title": source.title,
+        "course": course,
+        "chapter": chapter,
+        "language": language,
+        "source_role": role,
+        "trust_level": "teacher_verified",
+        "quality_status": "native_text_ok",
+        "source_locator": chunk.source_locator,
+        "snippet": chunk.content,
+        "score": score,
+        "retrieval_reason": "lexical_match",
+        "risk_labels": [],
+        "parse_uid": chunk.parse_uid,
+        "parse_block_uid": chunk.parse_block_uid,
+    }]
+
+
 def create_concept_card(app_module, *, status="approved", course=None, chapter="Approved Cards", **overrides):
     english_term = overrides.pop("english_term", unique_text("Fourier"))
     chinese_term = overrides.pop("chinese_term", f"学生概念{uuid.uuid4().hex[:5]}")
+    course = course or unique_text("Student Concept Course")
+    if "english_evidence" in overrides:
+        english_evidence = overrides.pop("english_evidence")
+    else:
+        _, _, english_evidence = source_and_chunk(app_module, term=english_term, course=course, chapter=chapter, language="en")
+    if "chinese_evidence" in overrides:
+        chinese_evidence = overrides.pop("chinese_evidence")
+    else:
+        _, _, chinese_evidence = source_and_chunk(app_module, term=chinese_term, course=course, chapter=chapter, language="zh")
     card = app_module.ConceptAlignmentCard(
         card_uid=overrides.pop("card_uid", f"card-{uuid.uuid4().hex}"),
         english_term=english_term,
         chinese_term=chinese_term,
-        course=course or unique_text("Student Concept Course"),
+        course=course,
         chapter=chapter,
         concept_scope=overrides.pop("concept_scope", "Student learning concept scope."),
         english_explanation=overrides.pop("english_explanation", f"{english_term} is explained for students."),
         chinese_explanation=overrides.pop("chinese_explanation", f"{chinese_term} 的学生端解释。"),
-        english_evidence=overrides.pop("english_evidence", evidence(english_term, "en")),
-        chinese_evidence=overrides.pop("chinese_evidence", evidence(chinese_term, "zh")),
+        english_evidence=english_evidence,
+        chinese_evidence=chinese_evidence,
         risk_labels=overrides.pop("risk_labels", ["teacher_reviewed"]),
         status=status,
         reviewed_by=1,

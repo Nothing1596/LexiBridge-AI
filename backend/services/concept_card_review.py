@@ -10,6 +10,7 @@ from sqlalchemy import or_
 
 from services import audit_records
 from services import concept_alignment_cards
+from services import concept_card_publication
 from services import course_review_policy
 from services import parse_quality_risk
 
@@ -94,6 +95,16 @@ ACTION_TO_EVENT = {
 
 class ConceptCardReviewError(ValueError):
     """Raised when review workflow validation fails."""
+
+
+class ConceptCardSourceUnavailableError(ConceptCardReviewError):
+    """Raised when source withdrawal invalidates a review action."""
+
+    reason = "concept_card_source_unavailable"
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -476,12 +487,17 @@ def _persist_review_action(
     audit_context: dict[str, Any] | None = None,
     policy_model: Any | None = None,
     permission_model: Any | None = None,
+    source_model: Any | None = None,
+    chunk_model: Any | None = None,
+    require_concurrency_token: bool = False,
     now_fn=None,
     commit: bool = True,
 ) -> tuple[Any, Any]:
     before = audit_records.concept_card_snapshot(card)
     previous_status = getattr(card, "status", "")
     now = now_fn() if now_fn else ""
+    if require_concurrency_token:
+        concept_alignment_cards.require_current_version(card, data)
     if policy_model is not None and permission_model is not None:
         gate = course_review_policy.evaluate_card_against_review_policy(
             session,
@@ -510,6 +526,16 @@ def _persist_review_action(
             )
             raise ConceptCardReviewError(f"review blocked by course policy: {gate.get('reason')}")
     reviewer = validate_review_action(card, action, data, reviewer_context)
+    if action == "approve" and source_model is not None:
+        try:
+            concept_card_publication.assert_sources_available(
+                session,
+                card,
+                source_model=source_model,
+                chunk_model=chunk_model,
+            )
+        except concept_card_publication.ConceptCardPublicationError as exc:
+            raise ConceptCardSourceUnavailableError(str(exc), getattr(exc, "details", {})) from exc
 
     if action == "approve":
         if data.get("_requires_second_review") and reviewer.get("reviewer_role") != "admin":
@@ -826,8 +852,24 @@ def evidence_summary(card: Any) -> dict[str, Any]:
     }
 
 
-def serialize_review_queue_item(card: Any) -> dict[str, Any]:
+def serialize_review_queue_item(
+    card: Any,
+    *,
+    session: Any | None = None,
+    source_model: Any | None = None,
+    chunk_model: Any | None = None,
+    parse_model: Any | None = None,
+) -> dict[str, Any]:
     data = concept_alignment_cards.serialize_concept_card(card)
     data["blocking_approval_risk_labels"] = _blocking_risks(card)
     data["evidence_summary"] = evidence_summary(card)
+    if session is not None:
+        data = concept_card_publication.enrich_card_payload(
+            session,
+            card,
+            data,
+            source_model=source_model,
+            chunk_model=chunk_model,
+            parse_model=parse_model,
+        )
     return data

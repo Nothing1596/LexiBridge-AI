@@ -34,19 +34,104 @@ def evidence(term="Review Term", score=0.84):
     }]
 
 
+def create_source_and_chunk(app_module, *, term, course, chapter="Quality Control", language="en"):
+    role = "english_course_material" if language == "en" else "chinese_reference_material"
+    source = app_module.KnowledgeSource(
+        source_uid=f"src-{uuid.uuid4().hex}",
+        title=f"{term} {language.upper()} Source",
+        name=f"{term} {language.upper()} Source",
+        source_title=f"{term} {language.upper()} Source",
+        course=course,
+        chapter=chapter,
+        language=language,
+        source_role=role,
+        trust_level="teacher_verified",
+        quality_status="native_text_ok",
+        status="active",
+        allow_derivative_cards=True,
+        authorization_status="allowed_for_course_use",
+        created_at=app_module.current_time_text(),
+        updated_at=app_module.current_time_text(),
+    )
+    app_module.db.session.add(source)
+    app_module.db.session.flush()
+    chunk = app_module.KnowledgeChunk(
+        chunk_uid=f"chunk-{uuid.uuid4().hex}",
+        source_uid=source.source_uid,
+        document_id=0,
+        source_id=source.id,
+        knowledge_source_id=source.id,
+        parse_uid=f"parse-{uuid.uuid4().hex}",
+        parse_block_uid=f"block-{uuid.uuid4().hex}",
+        course=course,
+        chapter=chapter,
+        title=source.title,
+        language=language,
+        content=f"{term} evidence for review workflow.",
+        normalized_text=f"{term} evidence for review workflow.",
+        source_locator="page:12",
+        page_number=12,
+        block_type="paragraph",
+        quality_status="native_text_ok",
+        quality_flags='["native_text_ok"]',
+        trust_level="teacher_verified",
+        status="active",
+        is_active=True,
+        created_at=app_module.current_time_text(),
+        updated_at=app_module.current_time_text(),
+    )
+    app_module.db.session.add(chunk)
+    app_module.db.session.flush()
+    return source, chunk
+
+
+def evidence_from_source(source, chunk, *, term, language="en", score=0.84):
+    return [{
+        "chunk_uid": chunk.chunk_uid,
+        "source_uid": source.source_uid,
+        "source_title": source.title,
+        "course": source.course,
+        "chapter": source.chapter,
+        "language": language,
+        "source_role": source.source_role,
+        "trust_level": source.trust_level,
+        "quality_status": chunk.quality_status,
+        "source_locator": chunk.source_locator,
+        "snippet": f"{term} evidence for review workflow.",
+        "score": score,
+        "parse_uid": chunk.parse_uid,
+        "parse_block_uid": chunk.parse_block_uid,
+    }]
+
+
 def reviewer(role="teacher", reviewer_id=42):
     return {"reviewer_id": reviewer_id, "reviewer_role": role, "reviewer_name": f"{role}-reviewer"}
 
 
 def create_card(app_module, **overrides):
+    course = overrides.pop("course", "Review Workflow Course")
+    chapter = overrides.pop("chapter", "Quality Control")
+    english_term = overrides.pop("english_term", unique_text("Review Term"))
+    chinese_term = overrides.pop("chinese_term", f"审核术语{uuid.uuid4().hex[:5]}")
+    if "english_evidence" in overrides:
+        english_evidence = overrides.pop("english_evidence")
+    else:
+        en_source, en_chunk = create_source_and_chunk(app_module, term=english_term, course=course, chapter=chapter, language="en")
+        english_evidence = evidence_from_source(en_source, en_chunk, term=english_term, language="en")
+    if "chinese_evidence" in overrides:
+        chinese_evidence = overrides.pop("chinese_evidence")
+    else:
+        zh_source, zh_chunk = create_source_and_chunk(app_module, term=chinese_term, course=course, chapter=chapter, language="zh")
+        chinese_evidence = evidence_from_source(zh_source, zh_chunk, term=chinese_term, language="zh")
     data = {
-        "english_term": unique_text("Review Term"),
-        "chinese_term": f"审核术语{uuid.uuid4().hex[:5]}",
-        "course": "Review Workflow Course",
-        "chapter": "Quality Control",
+        "english_term": english_term,
+        "chinese_term": chinese_term,
+        "course": course,
+        "chapter": chapter,
         "status": "needs_review",
         "risk_labels": [],
-        "english_evidence": evidence(),
+        "english_evidence": english_evidence,
+        "chinese_evidence": chinese_evidence,
         "confidence_score": None,
     }
     data.update(overrides)
@@ -97,6 +182,12 @@ def grant_review_access(app_module, course="Review Workflow Course", permission_
         now_fn=app_module.current_time_text,
     )
     return teacher
+
+
+def with_expected_version(app_module, card_uid, payload):
+    with app_module.app.app_context():
+        card = app_module.ConceptAlignmentCard.query.filter_by(card_uid=card_uid).one()
+        return {**payload, "expected_version": card.version}
 
 
 def test_review_record_model_and_json_fields(app_module):
@@ -358,19 +449,19 @@ def test_review_api_queue_history_and_actions(client, app_module, teacher_token)
     )
     blocked = client.post(
         f"/api/concept-cards/{card_uid}/review",
-        json={"action": "approve", "reason_code": "teacher_verified"},
+        json=with_expected_version(app_module, card_uid, {"action": "approve", "reason_code": "teacher_verified"}),
         headers={**bearer(teacher_token), "X-Request-ID": f"{request_id}-blocked"},
     )
     approved = client.post(
         f"/api/concept-cards/{card_uid}/review",
-        json={
+        json=with_expected_version(app_module, card_uid, {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Teacher verified manually.",
             "allow_risk_override": True,
             "override_reason": "Teacher verified against course materials.",
             "resolved_risk_labels": ["bilingual_alignment_not_verified"],
-        },
+        }),
         headers={**bearer(teacher_token), "X-Request-ID": request_id},
     )
     history = client.get(
@@ -426,17 +517,17 @@ def test_review_api_reject_revision_more_evidence_assign_and_errors(client, app_
 
     rejected = client.post(
         f"/api/concept-cards/{reject_uid}/review",
-        json={"action": "reject", "reason_code": "chinese_term_wrong", "review_comment": "Wrong term."},
+        json=with_expected_version(app_module, reject_uid, {"action": "reject", "reason_code": "chinese_term_wrong", "review_comment": "Wrong term."}),
         headers=bearer(teacher_token),
     )
     revision = client.post(
         f"/api/concept-cards/{revision_uid}/review",
-        json={"action": "request_revision", "required_changes": ["Add Chinese evidence"]},
+        json=with_expected_version(app_module, revision_uid, {"action": "request_revision", "required_changes": ["Add Chinese evidence"]}),
         headers=bearer(teacher_token),
     )
     more_evidence = client.post(
         f"/api/concept-cards/{evidence_uid}/review",
-        json={"action": "mark_needs_more_evidence", "reason_code": "evidence_insufficient", "review_comment": "More evidence."},
+        json=with_expected_version(app_module, evidence_uid, {"action": "mark_needs_more_evidence", "reason_code": "evidence_insufficient", "review_comment": "More evidence."}),
         headers=bearer(teacher_token),
     )
     assigned = client.post(
@@ -451,7 +542,7 @@ def test_review_api_reject_revision_more_evidence_assign_and_errors(client, app_
     )
     invalid = client.post(
         f"/api/concept-cards/{assign_uid}/review",
-        json={"action": "not_real"},
+        json=with_expected_version(app_module, assign_uid, {"action": "not_real"}),
         headers=bearer(teacher_token),
     )
 
@@ -492,7 +583,7 @@ def test_review_api_permission_checks(client, app_module, teacher_token, student
     )
     teacher = client.post(
         f"/api/concept-cards/{card_uid}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Approved."},
+        json=with_expected_version(app_module, card_uid, {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Approved."}),
         headers=bearer(teacher_token),
     )
 

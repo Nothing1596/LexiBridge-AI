@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+from test_concept_card_review import with_expected_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED_SCRIPT = ROOT / "scripts" / "seed_review_demo.py"
@@ -147,12 +149,12 @@ def test_review_demo_api_workflow_and_policy_errors(client, app_module):
 
     revision = client.post(
         f"/api/concept-cards/{fourier_uid}/review",
-        json={
+        json=with_expected_version(app_module, fourier_uid, {
             "action": "request_revision",
             "reason_code": "evidence_insufficient",
             "required_changes": ["Add a second Chinese source"],
             "review_comment": "Demo request revision.",
-        },
+        }),
         headers={**bearer(teacher_token), "X-Request-ID": "demo-request-revision"},
     )
     assert revision.status_code == 200, revision.get_data(as_text=True)
@@ -162,13 +164,13 @@ def test_review_demo_api_workflow_and_policy_errors(client, app_module):
     transfer_uid = summary["card_uids"]["transfer"]
     blocked = client.post(
         f"/api/concept-cards/{transfer_uid}/review",
-        json={
+        json=with_expected_version(app_module, transfer_uid, {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Try approving missing Chinese evidence.",
             "allow_risk_override": True,
             "override_reason": "Demo should still be blocked by policy.",
-        },
+        }),
         headers={**bearer(teacher_token), "X-Request-ID": "demo-policy-block"},
     )
     assert blocked.status_code == 400
@@ -178,14 +180,14 @@ def test_review_demo_api_workflow_and_policy_errors(client, app_module):
 
     admin_approved = client.post(
         f"/api/concept-cards/{fourier_uid}/review",
-        json={
+        json=with_expected_version(app_module, fourier_uid, {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Admin manually verified the demo card.",
             "allow_risk_override": True,
             "override_reason": "Admin verified both evidence sides for demo.",
             "resolved_risk_labels": ["bilingual_alignment_not_verified"],
-        },
+        }),
         headers={**bearer(admin_token), "X-Request-ID": "demo-admin-approve"},
     )
     assert admin_approved.status_code == 200, admin_approved.get_data(as_text=True)

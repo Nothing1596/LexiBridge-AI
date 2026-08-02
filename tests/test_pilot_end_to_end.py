@@ -5,6 +5,8 @@ import socket
 import uuid
 from pathlib import Path
 
+from test_concept_card_review import with_expected_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED_SCRIPT = ROOT / "scripts" / "seed_review_demo.py"
@@ -358,11 +360,11 @@ def test_review_student_feedback_and_teacher_analytics_chain(client, app_module)
 
     transfer_blocked = client.post(
         f"/api/concept-cards/{summary['card_uids']['transfer']}/review",
-        json={
+        json=with_expected_version(app_module, summary["card_uids"]["transfer"], {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Attempting to approve missing Chinese evidence.",
-        },
+        }),
         headers={**bearer(teacher_token), "X-Request-ID": "pilot-review-blocked"},
     )
     assert transfer_blocked.status_code == 400
@@ -370,14 +372,14 @@ def test_review_student_feedback_and_teacher_analytics_chain(client, app_module)
     fourier_uid = summary["card_uids"]["fourier"]
     approved = client.post(
         f"/api/concept-cards/{fourier_uid}/review",
-        json={
+        json=with_expected_version(app_module, fourier_uid, {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Admin verifies the card for pilot E2E.",
             "allow_risk_override": True,
             "override_reason": "Admin manually verified evidence for pilot E2E.",
             "resolved_risk_labels": ["bilingual_alignment_not_verified"],
-        },
+        }),
         headers={**bearer(admin_token), "X-Request-ID": "pilot-review-approved"},
     )
     assert approved.status_code == 200, approved.get_data(as_text=True)

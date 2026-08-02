@@ -2,6 +2,8 @@ import importlib.util
 import uuid
 from pathlib import Path
 
+from test_concept_card_review import with_expected_version
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED_SCRIPT = ROOT / "scripts" / "seed_review_demo.py"
@@ -154,13 +156,13 @@ def test_teacher_permission_boundaries(client, app_module):
     transfer_uid = summary["card_uids"]["transfer"]
     blocked_override = client.post(
         f"/api/concept-cards/{transfer_uid}/review",
-        json={
+        json=with_expected_version(app_module, transfer_uid, {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Teacher cannot override policy-blocked missing evidence.",
             "allow_risk_override": True,
             "override_reason": "Matrix override attempt.",
-        },
+        }),
         headers={**bearer(token), "X-Request-ID": "matrix-teacher-override-block"},
     )
     assert blocked_override.status_code == 400

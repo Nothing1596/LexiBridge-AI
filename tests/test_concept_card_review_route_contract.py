@@ -2,7 +2,7 @@ import json
 import uuid
 from urllib.parse import quote
 
-from test_concept_card_review import bearer, create_card, grant_review_access, unique_text
+from test_concept_card_review import bearer, create_card, grant_review_access, unique_text, with_expected_version
 from test_course_review_policy import create_policy, get_user, grant_permission
 from test_openapi_route_parity import REQUIRED_ROUTE_METHODS, actual_api_routes
 
@@ -164,7 +164,7 @@ def test_review_action_status_audit_and_block_contract(client, app_module, teach
 
     blocked = client.post(
         f"/api/concept-cards/{ids['risky']}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Risk remains."},
+        json=with_expected_version(app_module, ids["risky"], {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Risk remains."}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-risk-block"},
     )
     assert blocked.status_code == 400
@@ -173,32 +173,32 @@ def test_review_action_status_audit_and_block_contract(client, app_module, teach
 
     approve = client.post(
         f"/api/concept-cards/{ids['approve']}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Approved."},
+        json=with_expected_version(app_module, ids["approve"], {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Approved."}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-approve"},
     )
     reject = client.post(
         f"/api/concept-cards/{ids['reject']}/review",
-        json={"action": "reject", "reason_code": "chinese_term_wrong", "review_comment": "Wrong term."},
+        json=with_expected_version(app_module, ids["reject"], {"action": "reject", "reason_code": "chinese_term_wrong", "review_comment": "Wrong term."}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-reject"},
     )
     revision = client.post(
         f"/api/concept-cards/{ids['revision']}/review",
-        json={"action": "request_revision", "required_changes": ["Add source evidence."]},
+        json=with_expected_version(app_module, ids["revision"], {"action": "request_revision", "required_changes": ["Add source evidence."]}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-revision"},
     )
     more = client.post(
         f"/api/concept-cards/{ids['more']}/review",
-        json={"action": "mark_needs_more_evidence", "reason_code": "evidence_insufficient", "review_comment": "Need source."},
+        json=with_expected_version(app_module, ids["more"], {"action": "mark_needs_more_evidence", "reason_code": "evidence_insufficient", "review_comment": "Need source."}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-more"},
     )
     reopen = client.post(
         f"/api/concept-cards/{ids['reopen']}/review",
-        json={"action": "reopen", "reason_code": "course_context_mismatch", "review_comment": "Recheck."},
+        json=with_expected_version(app_module, ids["reopen"], {"action": "reopen", "reason_code": "course_context_mismatch", "review_comment": "Recheck."}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-reopen"},
     )
     deprecate = client.post(
         f"/api/concept-cards/{ids['deprecate']}/review",
-        json={"action": "deprecate", "reason_code": "duplicate_card", "review_comment": "Superseded."},
+        json=with_expected_version(app_module, ids["deprecate"], {"action": "deprecate", "reason_code": "duplicate_card", "review_comment": "Superseded."}),
         headers={**bearer(admin_token), "X-Request-ID": "review-contract-deprecate"},
     )
 
@@ -322,7 +322,7 @@ def test_two_step_and_override_contract(client, app_module, teacher_token, admin
 
     first = client.post(
         f"/api/concept-cards/{ids['two_step']}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Teacher review."},
+        json=with_expected_version(app_module, ids["two_step"], {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Teacher review."}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-two-step-teacher"},
     )
     assert first.status_code == 200, first.get_data(as_text=True)
@@ -331,7 +331,7 @@ def test_two_step_and_override_contract(client, app_module, teacher_token, admin
 
     second = client.post(
         f"/api/concept-cards/{ids['two_step']}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "review_comment": "Admin second review."},
+        json=with_expected_version(app_module, ids["two_step"], {"action": "approve", "reason_code": "teacher_verified", "review_comment": "Admin second review."}),
         headers={**bearer(admin_token), "X-Request-ID": "review-contract-two-step-admin"},
     )
     assert second.status_code == 200, second.get_data(as_text=True)
@@ -339,18 +339,18 @@ def test_two_step_and_override_contract(client, app_module, teacher_token, admin
 
     missing_override_reason = client.post(
         f"/api/concept-cards/{ids['missing_reason']}/review",
-        json={"action": "approve", "reason_code": "teacher_verified", "allow_risk_override": True},
+        json=with_expected_version(app_module, ids["missing_reason"], {"action": "approve", "reason_code": "teacher_verified", "allow_risk_override": True}),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-missing-override-reason"},
     )
     forbidden_override = client.post(
         f"/api/concept-cards/{ids['forbidden']}/review",
-        json={
+        json=with_expected_version(app_module, ids["forbidden"], {
             "action": "approve",
             "reason_code": "teacher_verified",
             "review_comment": "Trying forbidden override.",
             "allow_risk_override": True,
             "override_reason": "Forbidden by course policy.",
-        },
+        }),
         headers={**bearer(teacher_token), "X-Request-ID": "review-contract-forbidden-override"},
     )
     assert missing_override_reason.status_code == 400
