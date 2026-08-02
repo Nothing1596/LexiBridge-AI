@@ -162,7 +162,13 @@ def build_document_alignment_processing_dependencies(
             background_job=models.background_job,
         ),
         draft=adapter.DraftVerificationCollaborator(
-            create_or_reuse=concept_card_drafts.create_or_reuse_prepared_concept_card_draft,
+            create_or_reuse=lambda active_session, card_model, **kwargs: concept_card_drafts.create_or_reuse_prepared_concept_card_draft(
+                active_session,
+                card_model,
+                chunk_model=models.knowledge_chunk,
+                source_model=models.knowledge_source,
+                **kwargs,
+            ),
         ),
         governance=adapter.ProviderGovernanceCollaborator(
             provider_type_for=provider_governance.provider_type_for,

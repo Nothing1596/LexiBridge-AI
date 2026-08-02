@@ -153,6 +153,77 @@ def _reference_ids(value: Any) -> tuple[str, ...]:
     return tuple(sorted(set(refs)))
 
 
+def _bounded_text(value: Any, max_chars: int = 300) -> str:
+    text = _text(value)
+    return text if len(text) <= max_chars else f"{text[: max_chars - 1]}..."
+
+
+def _source_title(source: Any | None, fallback: str = "") -> str:
+    if source is None:
+        return fallback
+    return _text(
+        getattr(source, "title", "")
+        or getattr(source, "source_title", "")
+        or getattr(source, "name", "")
+        or fallback
+    )
+
+
+def _evidence_payload_from_chunk_refs(
+    session: Any,
+    chunk_model: Any | None,
+    source_model: Any | None,
+    refs: tuple[str, ...],
+    *,
+    fallback_language: str,
+) -> list[dict[str, Any]]:
+    if chunk_model is None or not refs:
+        return [{"chunk_uid": reference} for reference in refs]
+    chunks = (
+        session.query(chunk_model)
+        .filter(chunk_model.chunk_uid.in_(list(refs)))
+        .all()
+    )
+    chunks_by_uid = {getattr(chunk, "chunk_uid", ""): chunk for chunk in chunks}
+    source_uids = sorted({_text(getattr(chunk, "source_uid", "")) for chunk in chunks if _text(getattr(chunk, "source_uid", ""))})
+    sources_by_uid = {}
+    if source_model is not None and source_uids:
+        sources_by_uid = {
+            getattr(source, "source_uid", ""): source
+            for source in session.query(source_model).filter(source_model.source_uid.in_(source_uids)).all()
+        }
+    evidence = []
+    for reference in refs:
+        chunk = chunks_by_uid.get(reference)
+        if chunk is None:
+            evidence.append({"chunk_uid": reference})
+            continue
+        source_uid = _text(getattr(chunk, "source_uid", ""))
+        source = sources_by_uid.get(source_uid)
+        evidence.append({
+            "chunk_uid": reference,
+            "source_uid": source_uid,
+            "source_title": _source_title(source, getattr(chunk, "title", "")),
+            "course": _text(getattr(chunk, "course", "") or getattr(source, "course", "")),
+            "chapter": _text(getattr(chunk, "chapter", "") or getattr(source, "chapter", "")),
+            "language": _text(getattr(chunk, "language", "") or getattr(source, "language", "") or fallback_language),
+            "source_role": _text(getattr(source, "source_role", "")),
+            "trust_level": _text(getattr(chunk, "trust_level", "") or getattr(source, "trust_level", "")),
+            "quality_status": _text(getattr(chunk, "quality_status", "") or getattr(source, "quality_status", "")),
+            "quality_flags": parse_quality_risk.normalize_labels(getattr(chunk, "quality_flags", "[]") or []),
+            "source_locator": _text(
+                getattr(chunk, "source_locator", "")
+                or getattr(chunk, "source_page", "")
+                or getattr(chunk, "page_number", "")
+                or getattr(chunk, "source_slide", "")
+            ),
+            "snippet": _bounded_text(getattr(chunk, "content", "") or getattr(chunk, "normalized_text", "")),
+            "parse_uid": _text(getattr(chunk, "parse_uid", "")),
+            "parse_block_uid": _text(getattr(chunk, "parse_block_uid", "")),
+        })
+    return evidence
+
+
 def create_or_reuse_prepared_concept_card_draft(
     session: Any,
     card_model: Any,
@@ -165,6 +236,8 @@ def create_or_reuse_prepared_concept_card_draft(
     english_evidence_refs: tuple[str, ...],
     chinese_evidence_refs: tuple[str, ...],
     risk_labels: tuple[str, ...] = (),
+    chunk_model: Any | None = None,
+    source_model: Any | None = None,
     now_fn=None,
 ) -> PreparedConceptCardDraftResult:
     """Create or reuse a safe draft without owning commit or rollback."""
@@ -220,8 +293,20 @@ def create_or_reuse_prepared_concept_card_draft(
     )
     card = card_model(
         **identity,
-        english_evidence=[{"chunk_uid": reference} for reference in requested_english_refs],
-        chinese_evidence=[{"chunk_uid": reference} for reference in requested_chinese_refs],
+        english_evidence=_evidence_payload_from_chunk_refs(
+            session,
+            chunk_model,
+            source_model,
+            requested_english_refs,
+            fallback_language="en",
+        ),
+        chinese_evidence=_evidence_payload_from_chunk_refs(
+            session,
+            chunk_model,
+            source_model,
+            requested_chinese_refs,
+            fallback_language="zh",
+        ),
         risk_labels=merged_risks,
         status="needs_review",
         confidence_score=None,

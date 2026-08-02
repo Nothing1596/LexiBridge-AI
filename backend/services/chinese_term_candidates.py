@@ -486,60 +486,69 @@ def find_candidates_from_bilingual_chunks(
         base_filters["course"] = _text(course)
     if chapter:
         base_filters["chapter"] = _text(chapter)
-    search_filters = {
-        **base_filters,
-        "language": base_filters.get("language") or "mixed",
-        "source_role": base_filters.get("source_role") or "bilingual_reference",
-    }
-    result = evidence_retrieval.search_evidence(
-        session,
-        chunk_model,
-        source_model,
-        term,
-        filters=search_filters,
-        limit=max(_limit(limit) * 3, 20),
-    )
     candidates = []
-    for evidence in result.candidates:
-        extracted = extract_chinese_candidates_from_text_around_english_term(evidence.get("snippet", ""), term)
-        if not extracted:
-            extracted = extract_chinese_candidates_from_text_around_english_term(evidence.get("evidence_snippet", ""), term)
-        for item in extracted:
-            status = _text(evidence.get("status"))
-            quality_status = _text(evidence.get("quality_status"))
-            quality_flags = _labels(evidence.get("quality_flags", []))
-            trust_level = _text(evidence.get("trust_level"))
-            risk_labels = _merge_labels(
-                ["bilingual_pattern_extracted"],
-                _quality_risks(status, quality_status, quality_flags, trust_level),
-                _course_chapter_risks(evidence, _text(course), _text(chapter)),
-                evidence.get("risk_labels", []),
-            )
-            source_type = "manual" if evidence.get("source_type") in {"manual", "teacher_upload"} else "bilingual_chunk"
-            if evidence.get("block_type") == "table" or evidence.get("source_type") == "manual":
-                risk_labels = _merge_labels(risk_labels, ["table_parse_risk"])
-            candidates.append(
-                _candidate(
-                    english_term=term,
-                    chinese_term=item["chinese_term"],
-                    course=evidence.get("course", ""),
-                    chapter=evidence.get("chapter", ""),
-                    source_type=source_type,
-                    source_uid=evidence.get("source_uid", ""),
-                    chunk_uid=evidence.get("chunk_uid", ""),
-                    evidence_snippet=item["evidence_snippet"],
-                    source_locator=evidence.get("source_locator", ""),
-                    trust_level=trust_level,
-                    quality_status=quality_status,
-                    quality_flags=quality_flags,
-                    risk_labels=risk_labels,
-                    retrieval_reason="bilingual pattern extracted from governed KnowledgeChunk",
-                    parse_uid=evidence.get("parse_uid", ""),
-                    parse_block_uid=evidence.get("parse_block_uid", ""),
-                    match_pattern=item["match_pattern"],
-                    score_breakdown={"retrieval_score": evidence.get("score", 0.0)},
+    search_scopes = (
+        ("mixed", "bilingual_reference", "bilingual pattern extracted from governed KnowledgeChunk"),
+        ("zh", "chinese_reference_material", "explicit bilingual pattern extracted from governed Chinese KnowledgeChunk"),
+    )
+    for language, source_role, retrieval_reason in search_scopes:
+        if base_filters.get("language") and base_filters.get("language") != language:
+            continue
+        if base_filters.get("source_role") and base_filters.get("source_role") != source_role:
+            continue
+        search_filters = {
+            **base_filters,
+            "language": language,
+            "source_role": source_role,
+        }
+        result = evidence_retrieval.search_evidence(
+            session,
+            chunk_model,
+            source_model,
+            term,
+            filters=search_filters,
+            limit=max(_limit(limit) * 3, 20),
+        )
+        for evidence in result.candidates:
+            extracted = extract_chinese_candidates_from_text_around_english_term(evidence.get("snippet", ""), term)
+            if not extracted:
+                extracted = extract_chinese_candidates_from_text_around_english_term(evidence.get("evidence_snippet", ""), term)
+            for item in extracted:
+                status = _text(evidence.get("status"))
+                quality_status = _text(evidence.get("quality_status"))
+                quality_flags = _labels(evidence.get("quality_flags", []))
+                trust_level = _text(evidence.get("trust_level"))
+                risk_labels = _merge_labels(
+                    ["bilingual_pattern_extracted"],
+                    _quality_risks(status, quality_status, quality_flags, trust_level),
+                    _course_chapter_risks(evidence, _text(course), _text(chapter)),
+                    evidence.get("risk_labels", []),
                 )
-            )
+                source_type = "manual" if evidence.get("source_type") in {"manual", "teacher_upload"} else "bilingual_chunk"
+                if evidence.get("block_type") == "table" or evidence.get("source_type") == "manual":
+                    risk_labels = _merge_labels(risk_labels, ["table_parse_risk"])
+                candidates.append(
+                    _candidate(
+                        english_term=term,
+                        chinese_term=item["chinese_term"],
+                        course=evidence.get("course", ""),
+                        chapter=evidence.get("chapter", ""),
+                        source_type=source_type,
+                        source_uid=evidence.get("source_uid", ""),
+                        chunk_uid=evidence.get("chunk_uid", ""),
+                        evidence_snippet=item["evidence_snippet"],
+                        source_locator=evidence.get("source_locator", ""),
+                        trust_level=trust_level,
+                        quality_status=quality_status,
+                        quality_flags=quality_flags,
+                        risk_labels=risk_labels,
+                        retrieval_reason=retrieval_reason,
+                        parse_uid=evidence.get("parse_uid", ""),
+                        parse_block_uid=evidence.get("parse_block_uid", ""),
+                        match_pattern=item["match_pattern"],
+                        score_breakdown={"retrieval_score": evidence.get("score", 0.0)},
+                    )
+                )
     return candidates[: _limit(limit)]
 
 
