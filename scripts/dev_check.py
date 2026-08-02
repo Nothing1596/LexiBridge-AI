@@ -70,7 +70,7 @@ def build_steps(python: str) -> list[CheckStep]:
     return [
         CheckStep("release safety check", [python, "scripts/check_release_safety.py"]),
         CheckStep("pytest", [python, "-m", "pytest"]),
-        CheckStep("database initialization", [python, "scripts/migrate_db.py"]),
+        CheckStep("database initialization", [python, "scripts/migrate_db.py", "--apply"]),
         CheckStep("backend import/API smoke", [python, "scripts/dev_check.py", "--backend-smoke-child"]),
     ]
 

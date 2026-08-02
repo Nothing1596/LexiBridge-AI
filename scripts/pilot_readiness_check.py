@@ -828,7 +828,7 @@ def main() -> int:
             pytest_cmd = [PYTHON_CMD, "-m", "pytest", "-q"]
         phases.append(run_command("pytest", pytest_cmd, env, timeout=600))
 
-        phases.append(run_command("fresh database migration", [PYTHON_CMD, "scripts/migrate_db.py"], env, timeout=120))
+        phases.append(run_command("fresh database migration", [PYTHON_CMD, "scripts/migrate_db.py", "--apply"], env, timeout=120))
         phases.append(run_command("existing database upgrade simulation", [PYTHON_CMD, "-m", "pytest", "-q", "tests/test_database_upgrade_path.py"], env, timeout=240))
         phases.append(run_command("demo seed reset", [PYTHON_CMD, "scripts/seed_review_demo.py", "--reset-demo"], env, timeout=120))
         phases.append(run_command("demo seed repeated run", [PYTHON_CMD, "scripts/seed_review_demo.py"], env, timeout=120))

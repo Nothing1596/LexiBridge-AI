@@ -28,7 +28,7 @@ def parse_flow_summary(output):
 
 def test_run_demo_flow_minimum_closed_loop(tmp_path):
     env = env_for_demo(tmp_path)
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/run_demo_flow.py"), "--summary-json"],
         cwd=ROOT,

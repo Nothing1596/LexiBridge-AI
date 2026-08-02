@@ -69,3 +69,18 @@ def test_release_safety_rejects_nested_archive_in_zip(tmp_path):
 
     assert result.returncode == 1
     assert "nested archive" in result.stderr
+
+
+def test_release_safety_rejects_migration_caller_without_apply(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "unsafe.py").write_text(
+        "import subprocess\n"
+        "subprocess.run(['python', 'scripts/migrate_db.py'], check=True)\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "migration CLI call missing explicit --apply" in result.stderr

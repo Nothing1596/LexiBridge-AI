@@ -26,7 +26,7 @@ def test_dev_check_steps_cover_required_gate_commands():
     ]
     assert steps[0].command == ["python", "scripts/check_release_safety.py"]
     assert steps[1].command == ["python", "-m", "pytest"]
-    assert steps[2].command == ["python", "scripts/migrate_db.py"]
+    assert steps[2].command == ["python", "scripts/migrate_db.py", "--apply"]
     assert steps[3].command == ["python", "scripts/dev_check.py", "--backend-smoke-child"]
 
 

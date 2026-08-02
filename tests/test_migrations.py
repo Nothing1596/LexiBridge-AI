@@ -25,7 +25,7 @@ def run_migration(db_path):
     env["DATABASE_URL"] = f"sqlite:///{db_path}"
     env["UPLOAD_FOLDER"] = str(db_path.parent / "uploads")
     return subprocess.run(
-        [PYTHON_CMD, "scripts/migrate_db.py"],
+        [PYTHON_CMD, "scripts/migrate_db.py", "--apply"],
         cwd=ROOT,
         env=env,
         text=True,

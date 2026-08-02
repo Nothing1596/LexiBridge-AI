@@ -138,6 +138,8 @@ LOCAL_PATH_PATTERNS = [
     re.compile(r"[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\"),
 ]
 
+MIGRATION_CLI_CALL_RE = re.compile(r"(?:scripts/|scripts\\)migrate_db\.py")
+
 GENERIC_SECRET_SUFFIXES = {
     ".cfg",
     ".conf",
@@ -354,6 +356,33 @@ def check_content(item: ScanItem) -> list[str]:
         if pattern.search(text):
             issues.append(f"local absolute path: {item.display_path}")
             break
+    issues.extend(check_migration_cli_apply_contract(item, text))
+    return issues
+
+
+def check_migration_cli_apply_contract(item: ScanItem, text: str) -> list[str]:
+    if not item.parts or item.parts[0] not in {"scripts", "tests"}:
+        return []
+    if item.display_path in {
+        "tests/test_migrate_db_cli.py",
+        "tests/test_release_safety.py",
+        "scripts/evaluations/open_source_parser_eval/docling_failure_attribution_runner.py",
+    }:
+        return []
+    suffix = Path(item.display_path).suffix.lower()
+    if suffix not in {".py", ".sh"}:
+        return []
+
+    issues = []
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if not MIGRATION_CLI_CALL_RE.search(line):
+            continue
+        window = "\n".join(lines[max(0, index - 3): min(len(lines), index + 4)])
+        if "py_compile" in window:
+            continue
+        if "--apply" not in window:
+            issues.append(f"migration CLI call missing explicit --apply: {item.display_path}:{index + 1}")
     return issues
 
 

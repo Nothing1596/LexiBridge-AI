@@ -30,7 +30,7 @@ def _migrate(db_path):
         "FORMULA_OCR_PROVIDER": "none",
     })
     return subprocess.run(
-        [PYTHON_CMD, "scripts/migrate_db.py"],
+        [PYTHON_CMD, "scripts/migrate_db.py", "--apply"],
         cwd=ROOT,
         env=env,
         text=True,

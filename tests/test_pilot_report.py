@@ -39,7 +39,7 @@ def test_generate_pilot_report_script_runs(tmp_path):
     env["UPLOAD_FOLDER"] = str(tmp_path / "uploads")
     env["AI_PROVIDER"] = "none"
     env["ALLOW_MOCK_AI"] = "True"
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, str(ROOT / "scripts/seed_demo_data.py")], cwd=ROOT, env=env, check=True)
     output = tmp_path / "pilot_report.md"
 
@@ -64,7 +64,7 @@ def test_export_feedback_summary_script_redacts_student_email(tmp_path):
     env = os.environ.copy()
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'feedback-summary.db'}"
     env["UPLOAD_FOLDER"] = str(tmp_path / "uploads")
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     output = tmp_path / "feedback_summary.csv"
 
     subprocess.run(

@@ -36,7 +36,7 @@ def test_local_file_migration_dry_run_and_apply(app_module, tmp_path):
     env["DATABASE_URL"] = f"sqlite:///{db_path}"
     env["UPLOAD_FOLDER"] = str(uploads)
     env["LOCAL_STORAGE_ROOT"] = str(uploads)
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     legacy_file = uploads / "legacy.txt"
     legacy_file.parent.mkdir(parents=True, exist_ok=True)
     legacy_file.write_text("legacy content", encoding="utf-8")

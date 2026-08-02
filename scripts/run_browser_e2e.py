@@ -63,7 +63,7 @@ def build_env(database: Path, uploads: Path) -> dict[str, str]:
 
 def run_setup(database: Path, uploads: Path, flow_name: str) -> dict[str, Any]:
     env = build_env(database, uploads)
-    subprocess.run([PYTHON_CMD, "scripts/migrate_db.py"], cwd=ROOT, env=env, check=True, capture_output=False)
+    subprocess.run([PYTHON_CMD, "scripts/migrate_db.py", "--apply"], cwd=ROOT, env=env, check=True, capture_output=False)
     subprocess.run([PYTHON_CMD, "scripts/seed_review_demo.py", "--reset-demo"], cwd=ROOT, env=env, check=True, capture_output=False)
 
     os.environ.update(env)

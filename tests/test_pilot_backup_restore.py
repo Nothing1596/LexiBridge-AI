@@ -73,7 +73,7 @@ def prepare_demo_database(tmp_path):
     env, database, uploads = build_env(tmp_path)
     (uploads / "demo").mkdir()
     (uploads / "demo" / "course-note.txt").write_text("local upload fixture", encoding="utf-8")
-    run_cmd(["scripts/migrate_db.py"], env)
+    run_cmd(["scripts/migrate_db.py", "--apply"], env)
     run_cmd(["scripts/seed_review_demo.py", "--reset-demo"], env)
     return env, database, uploads
 

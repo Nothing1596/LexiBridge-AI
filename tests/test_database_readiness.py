@@ -13,7 +13,7 @@ def test_check_database_readiness_script_runs(tmp_path):
     env = os.environ.copy()
     env["DATABASE_URL"] = f"sqlite:///{db_path}"
     env["UPLOAD_FOLDER"] = str(tmp_path / "uploads")
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/check_database_readiness.py")],
         cwd=ROOT,

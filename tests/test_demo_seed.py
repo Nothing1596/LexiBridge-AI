@@ -64,7 +64,7 @@ def test_demo_data_directory_and_gold_terms():
 
 
 def test_seed_demo_data_is_idempotent(tmp_path):
-    run_script("scripts/migrate_db.py", tmp_path)
+    run_script("scripts/migrate_db.py", tmp_path, "--apply")
     first = run_script("scripts/seed_demo_data.py", tmp_path, "--summary-json")
     second = run_script("scripts/seed_demo_data.py", tmp_path, "--summary-json")
     first_summary = parse_summary(first, "DEMO_SEED_JSON=")

@@ -40,7 +40,7 @@ def _migrate(db_path):
         }
     )
     return subprocess.run(
-        [PYTHON_CMD, "scripts/migrate_db.py"],
+        [PYTHON_CMD, "scripts/migrate_db.py", "--apply"],
         cwd=ROOT,
         env=env,
         text=True,

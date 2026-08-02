@@ -14,5 +14,5 @@ elif [ -f ".venv/bin/activate" ]; then
   source ".venv/bin/activate"
 fi
 
-python scripts/migrate_db.py
+python scripts/migrate_db.py --apply
 python backend/app.py

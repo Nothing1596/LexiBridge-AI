@@ -1,15 +1,13 @@
-import importlib.util
+from __future__ import annotations
+
+import argparse
 import sys
 from pathlib import Path
+from typing import Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
-sys.path.insert(0, str(BACKEND))
-
-spec = importlib.util.spec_from_file_location("lexibridge_app", BACKEND / "app.py")
-app_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(app_module)
 
 
 SEED_COURSES = [
@@ -37,7 +35,28 @@ SEED_PLANS = [
 ]
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run LexiBridge database migration and local seed initialization.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Explicitly apply database migrations and seed initialization.",
+    )
+    return parser
+
+
+def _load_app_module():
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    import app as app_module  # noqa: PLC0415
+
+    return app_module
+
+
+def run_migration() -> None:
+    app_module = _load_app_module()
     with app_module.app.app_context():
         app_module.db.create_all()
         app_module.ensure_schema_columns()
@@ -171,5 +190,14 @@ def main():
         )
 
 
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.apply:
+        parser.error("database migration requires explicit --apply")
+    run_migration()
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

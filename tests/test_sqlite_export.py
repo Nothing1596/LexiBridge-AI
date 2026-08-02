@@ -13,7 +13,7 @@ def test_sqlite_export_writes_jsonl_and_redacts_password_hash(tmp_path):
     env = os.environ.copy()
     env["DATABASE_URL"] = f"sqlite:///{db_path}"
     env["UPLOAD_FOLDER"] = str(tmp_path / "uploads")
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     output = tmp_path / "export"
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/export_sqlite_data.py"), "--db", str(db_path), "--output", str(output), "--exclude-personal"],

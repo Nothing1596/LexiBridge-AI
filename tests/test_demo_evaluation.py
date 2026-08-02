@@ -28,7 +28,7 @@ def parse_json_line(output, prefix):
 
 def test_demo_evaluation_run_and_report_files(tmp_path):
     env = demo_env(tmp_path)
-    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py")], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/migrate_db.py"), "--apply"], cwd=ROOT, env=env, check=True)
     flow = subprocess.run(
         [sys.executable, str(ROOT / "scripts/run_demo_flow.py"), "--summary-json"],
         cwd=ROOT,
