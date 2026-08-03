@@ -38,6 +38,7 @@ ERROR_CREDENTIAL_MISSING = "FORMAL_REAL_PROVIDER_EVAL_CREDENTIAL_MISSING"
 
 MAX_11F_PROVIDER_REQUESTS = 35
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_EVALUATION_CAPABILITY_SEAL = object()
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,14 @@ class FormalRealProviderEvaluationDecision:
     provider_type: str = ""
     credential_env_name: str = ""
     request_budget: int = 0
+    evaluation_id: str = ""
+    runner_id: str = ""
+    corpus_sha256: str = ""
+    gold_sha256: str = ""
+    synthetic_only: bool = False
+    database_isolated: bool = False
     gate_checks: dict[str, bool] = field(default_factory=dict)
+    _capability_seal: object | None = field(default=None, repr=False, compare=False)
 
     def to_safe_dict(self) -> dict[str, Any]:
         return {
@@ -62,8 +70,38 @@ class FormalRealProviderEvaluationDecision:
             "provider_type": self.provider_type,
             "credential_env_name": self.credential_env_name,
             "request_budget": self.request_budget,
+            "evaluation_id": self.evaluation_id,
+            "runner_id": self.runner_id,
+            "corpus_sha256": self.corpus_sha256,
+            "gold_sha256": self.gold_sha256,
+            "synthetic_only": self.synthetic_only,
+            "database_isolated": self.database_isolated,
             "gate_checks": dict(sorted(self.gate_checks.items())),
         }
+
+
+def is_trusted_formal_real_provider_evaluation_context(
+    context: Any,
+    *,
+    provider_name: str = "",
+    model_identity: str = "",
+) -> bool:
+    """Recognize only a complete capability issued by this policy module."""
+
+    return bool(
+        isinstance(context, FormalRealProviderEvaluationDecision)
+        and context._capability_seal is _EVALUATION_CAPABILITY_SEAL
+        and context.allowed
+        and context.evaluation_id == REQUIRED_EVALUATION_ID
+        and context.runner_id == REQUIRED_RUNNER_ID
+        and context.corpus_sha256 == EXPECTED_11E_CORPUS_SHA256
+        and context.gold_sha256 == EXPECTED_11E_GOLD_SHA256
+        and context.synthetic_only
+        and context.database_isolated
+        and 1 <= context.request_budget <= MAX_11F_PROVIDER_REQUESTS
+        and (not provider_name or context.provider_name == _text(provider_name))
+        and (not model_identity or context.model_identity == _text(model_identity))
+    )
 
 
 def _truthy(value: Any) -> bool:
@@ -135,6 +173,7 @@ def evaluate_formal_real_provider_evaluation_gate(
     model_identity: str,
     runner_id: str,
     request_budget: int,
+    synthetic_only: bool,
     repository_root: str | Path | None = None,
 ) -> FormalRealProviderEvaluationDecision:
     """Return a safe allow/deny decision for Task 11F-style evaluation runs."""
@@ -151,6 +190,7 @@ def evaluate_formal_real_provider_evaluation_gate(
         "gold_hash_matches": _text(gold_sha256) == EXPECTED_11E_GOLD_SHA256,
         "database_is_isolated": _database_is_isolated(database_url, repo),
         "request_budget_valid": 1 <= budget <= MAX_11F_PROVIDER_REQUESTS,
+        "synthetic_only": synthetic_only is True,
     }
 
     if not gate_checks["explicit_gate_enabled"]:
@@ -167,6 +207,13 @@ def evaluate_formal_real_provider_evaluation_gate(
         return _deny(ERROR_DATABASE_NOT_ISOLATED, "Controlled Formal provider database is not isolated.", gate_checks=gate_checks)
     if not gate_checks["request_budget_valid"]:
         return _deny(ERROR_BUDGET_INVALID, "Controlled Formal provider request budget is invalid.", request_budget=budget, gate_checks=gate_checks)
+    if not gate_checks["synthetic_only"]:
+        return _deny(
+            ERROR_CORPUS_HASH_INVALID,
+            "Controlled Formal provider evaluation is not synthetic-only.",
+            request_budget=budget,
+            gate_checks=gate_checks,
+        )
 
     try:
         provider_adapter = alignment_providers.get_alignment_provider(provider)
@@ -208,4 +255,14 @@ def evaluate_formal_real_provider_evaluation_gate(
     if not gate_checks["provider_executable"]:
         return _deny(ERROR_PROVIDER_NOT_ENABLED, "Controlled Formal provider is not executable.", **common)
 
-    return FormalRealProviderEvaluationDecision(allowed=True, **common)
+    return FormalRealProviderEvaluationDecision(
+        allowed=True,
+        evaluation_id=_text(env.get(EVAL_ID_ENV, "")),
+        runner_id=_text(runner_id),
+        corpus_sha256=_text(corpus_sha256),
+        gold_sha256=_text(gold_sha256),
+        synthetic_only=True,
+        database_isolated=True,
+        _capability_seal=_EVALUATION_CAPABILITY_SEAL,
+        **common,
+    )

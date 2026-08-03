@@ -43,6 +43,7 @@ def _decision(tmp_path, **overrides):
         "model_identity": "deepseek-chat",
         "runner_id": REQUIRED_RUNNER_ID,
         "request_budget": 35,
+        "synthetic_only": True,
     }
     payload.update(overrides)
     return evaluate_formal_real_provider_evaluation_gate(**payload)

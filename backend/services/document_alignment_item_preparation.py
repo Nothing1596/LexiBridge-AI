@@ -133,6 +133,7 @@ class DocumentAlignmentItemPreparationDependencies:
     output_schema_version: str = OUTPUT_SCHEMA_VERSION
     evidence_limit: int = 5
     candidate_limit: int = 10
+    evaluation_context: Any = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         for name in (
@@ -260,7 +261,7 @@ def _load_scope(command, dependencies):
     return (run, item, source, tuple(chunks) if valid else ())
 
 
-def _persisted_provider_selection(run: Any) -> tuple[str, str, str]:
+def _persisted_provider_selection(run: Any, evaluation_context: Any = None) -> tuple[str, str, str]:
     provider_name = str(getattr(run, "provider_preference", "") or "").strip()
     model_identity = str(getattr(run, "model_preference", "") or "").strip()
     prompt_version = str(getattr(run, "prompt_version", "") or "").strip()
@@ -271,16 +272,25 @@ def _persisted_provider_selection(run: Any) -> tuple[str, str, str]:
     except alignment_providers.AlignmentProviderError as exc:
         raise ValueError("Formal workflow provider selection is invalid.") from exc
     if (
-        provider.provider_type not in {"mock", "fake_llm", "replay_llm"}
-        or bool(getattr(provider, "supports_external_calls", False))
+        provider.provider_type in {"mock", "fake_llm", "replay_llm"}
+        and not bool(getattr(provider, "supports_external_calls", False))
     ):
-        raise ValueError("Formal workflow provider selection is invalid.")
-    if provider_name == FORMAL_DEFAULT_PROVIDER_NAME:
+        if provider_name == FORMAL_DEFAULT_PROVIDER_NAME:
+            try:
+                validate_formal_document_alignment_provider_selection(
+                    provider_name=provider_name,
+                    model_identity=model_identity,
+                    prompt_version=prompt_version,
+                )
+            except FormalDocumentAlignmentProviderSelectionError as exc:
+                raise ValueError("Formal workflow provider selection is invalid.") from exc
+    else:
         try:
             validate_formal_document_alignment_provider_selection(
                 provider_name=provider_name,
                 model_identity=model_identity,
                 prompt_version=prompt_version,
+                evaluation_context=evaluation_context,
             )
         except FormalDocumentAlignmentProviderSelectionError as exc:
             raise ValueError("Formal workflow provider selection is invalid.") from exc
@@ -344,7 +354,10 @@ def prepare_document_alignment_item(
             )
 
         try:
-            provider_name, model_identity, prompt_version = _persisted_provider_selection(run)
+            provider_name, model_identity, prompt_version = _persisted_provider_selection(
+                run,
+                dependencies.evaluation_context,
+            )
         except LookupError:
             session.rollback()
             return _result(

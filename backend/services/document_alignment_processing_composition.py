@@ -109,6 +109,7 @@ def build_document_alignment_processing_dependencies(
     lease: Any,
     term_extractor: Callable[[str], Any],
     current_time_factory: Callable[[], datetime] = _utc_now,
+    evaluation_context: Any = None,
 ) -> orchestrator.DocumentAlignmentProcessingDependencies:
     def lease_dependencies():
         return FormalBackgroundJobExecutionDependencies(
@@ -145,6 +146,7 @@ def build_document_alignment_processing_dependencies(
             ),
             candidate_generator=chinese_term_candidates.generate_chinese_term_candidates,
             evidence_retriever=bilingual_evidence_workflow.retrieve_bilingual_evidence,
+            evaluation_context=evaluation_context,
         )
 
     verification_dependencies = adapter.DocumentAlignmentItemVerificationDependencies(

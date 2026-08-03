@@ -17,6 +17,10 @@ from services.document_alignment_workflow_application import (
     DocumentAlignmentWorkflowAuthorizationDecision,
     GovernedKnowledgeSourceSnapshot,
 )
+from services.formal_document_alignment_provider_selection import (
+    resolve_default_formal_document_alignment_provider_selection,
+    resolve_formal_document_alignment_provider_selection,
+)
 
 
 @dataclass(frozen=True)
@@ -156,7 +160,14 @@ def build_document_alignment_workflow_admission_dependencies(
     user: Any,
     current_time_factory: Callable[[], str],
     uid_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
+    evaluation_context: Any = None,
 ) -> DocumentAlignmentWorkflowApplicationDependencies:
+    provider_selection_resolver = resolve_default_formal_document_alignment_provider_selection
+    if evaluation_context is not None:
+        provider_selection_resolver = lambda: resolve_formal_document_alignment_provider_selection(
+            evaluation_context.provider_name,
+            evaluation_context=evaluation_context,
+        )
     return DocumentAlignmentWorkflowApplicationDependencies(
         session=session,
         workflow_run_model=models.workflow_run,
@@ -169,4 +180,5 @@ def build_document_alignment_workflow_admission_dependencies(
         source_admission_checker=_admit_source,
         current_time_factory=current_time_factory,
         uid_factory=uid_factory,
+        provider_selection_resolver=provider_selection_resolver,
     )
