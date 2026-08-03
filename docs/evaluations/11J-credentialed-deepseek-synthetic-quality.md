@@ -1,4 +1,4 @@
-# Task 11J-R Credentialed DeepSeek Synthetic Quality Evaluation
+# Task 11J-R2 Credentialed DeepSeek Synthetic Quality Evaluation
 
 ## Status
 
@@ -9,19 +9,18 @@
 - Transport configured: `DeepSeekHTTPTransport`
 - Provider requests: `0`
 
-## Blocking boundary
+## Attempt history
 
-The evaluation-only real-provider policy gate allowed the frozen corpus, gold,
-runner identity, request budget, isolated database, provider, model, and
-credential checks. The next required boundary did not allow the provider:
-the frozen Formal Workflow server-owned provider selection rejects
-`deepseek-alignment-v1`, and item preparation independently rejects providers
-that support external calls.
+- Attempt 1: credential missing; Provider requests `0`.
+- Attempt 2: Formal Workflow provider admission blocked; Provider requests `0`.
+- Attempt 3 (11J-R2): the 11K sealed capability passed the evaluation gate and
+  Formal Workflow provider selection. Momentum item preparation returned
+  `DOCUMENT_ALIGNMENT_EVIDENCE_INSUFFICIENT`; Provider requests `0`.
 
-Consequently, the required momentum preflight could not reach
-`DeepSeekHTTPTransport` through the Formal Workflow. Continuing would require
-changing production provider selection/preparation or bypassing the workflow
-with a hand-built prepared input. Both actions are forbidden by Task 11J-R.
+Attempt 3 is consistent with the fresh retrieval-only result: momentum misses
+the required English evidence at top 3. Because this failure occurs before the
+Provider, its primary attribution is `ENGLISH_RETRIEVAL_DEFECT`. Task 11J-R2
+forbids changing retrieval, and a failed preflight forbids the 25-item run.
 No direct Provider request, replay, mock substitution, model switch, or runtime
 monkeypatch was used.
 
@@ -51,14 +50,15 @@ ordering, or filtering drift was found.
 
 ## Provider quality
 
-The momentum preflight was not run because Formal Workflow selection blocked
-before transport. Therefore request/retry counts are `0/0`, token usage and
-latency are unavailable, and neither valid-evidence-subset Provider metrics nor
-all-25 end-to-end Provider metrics can be reported. No concept was removed from
-a denominator; the Provider evaluation denominator was never opened.
+The momentum preflight entered Formal Workflow with the verified evaluation
+context and persisted the requested provider/model selection. Item preparation
+then blocked on insufficient frozen evidence before transport. Therefore
+request/retry counts are `0/0`, token usage and latency are unavailable, and
+neither valid-evidence-subset Provider metrics nor all-25 end-to-end Provider
+metrics can be reported. The 25-item run was not started.
 
 Primary attribution:
-`FORMAL_WORKFLOW_EXTERNAL_PROVIDER_SELECTION_UNAVAILABLE`.
+`ENGLISH_RETRIEVAL_DEFECT`.
 
 ## Safety
 
@@ -73,13 +73,13 @@ Primary attribution:
 
 ## Verification
 
-- Targeted Provider, Formal Workflow, retrieval, candidate, and metrics
-  regression: `63 passed`
-- Full pytest: `1222 passed, 20 failed, 12 errors` out of 1254
+- Required targeted regression: `41 passed`
+- Related Formal Workflow, retrieval, and candidate regression: `45 passed`
+- Full pytest: `1233 passed, 20 failed, 12 errors` out of 1265
 - Every full-suite failure/error was caused by the sandbox denying a
   `127.0.0.1` bind with `PermissionError: [Errno 1] Operation not permitted`.
-- dev_check: failed at its internal pytest step for the same loopback sandbox
-  restriction.
+- dev_check: `1233 passed, 20 failed, 12 errors`; failed at its internal pytest
+  step for the same loopback sandbox restriction.
 - release-safety: passed.
 - The loopback restriction is an environment limitation and is not attributed
   to `DeepSeekHTTPTransport`.

@@ -4,7 +4,7 @@
 {"concept_id":"physics-04","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
 {"concept_id":"physics-05","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
 {"concept_id":"physics-06","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
-{"concept_id":"physics-07","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
+{"concept_id":"physics-07","provider_status":"blocked_before_transport","primary_attribution":"ENGLISH_RETRIEVAL_DEFECT","error_code":"DOCUMENT_ALIGNMENT_EVIDENCE_INSUFFICIENT","attempt":3}
 {"concept_id":"physics-08","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
 {"concept_id":"physics-09","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
 {"concept_id":"physics-10","provider_status":"not_run","primary_attribution":"WORKFLOW_OR_PERSISTENCE_DEFECT"}
