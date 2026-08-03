@@ -210,7 +210,7 @@
     },
     "dev_check": {
       "passed": true,
-      "temp_dir": "/var/folders/7q/_0ffnnxj2wb8hvm0b77w647m0000gn/T/lexibridge-dev-check-7hbpby3n",
+      "temp_dir": "host temporary directory, exact path omitted",
       "pytest_passed": 1254,
       "warnings": 6,
       "pytest_duration_seconds": 210.34,

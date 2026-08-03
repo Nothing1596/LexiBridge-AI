@@ -17,7 +17,7 @@ This section records host-executed verification. These commands were run by the 
 | Check | Host result |
 |---|---|
 | Loopback bind | `LOOPBACK_BIND_OK`, Python bound `127.0.0.1:58357` |
-| Tesseract | `/Users/estaraatopos/miniforge3/envs/lexibridge-ocr/bin/tesseract`, version `5.5.3` |
+| Tesseract | host-local Tesseract executable verified, exact path omitted, version `5.5.3` |
 | 11I targeted tests | `47 passed in 3.63s` |
 | Full pytest | `1254 passed, 6 warnings in 207.15s` |
 | `dev_check.py` internal pytest | `1254 passed, 6 warnings in 210.34s` |
@@ -152,7 +152,7 @@ Loopback is unavailable in the Codex sandbox execution environment. Minimal sock
 
 The macOS host terminal successfully bound `127.0.0.1:58357`, so the prior Codex sandbox loopback failure is attributed to the sandbox environment rather than project code.
 
-Tesseract is not available on the Codex default `PATH`, but the host verification used `/Users/estaraatopos/miniforge3/envs/lexibridge-ocr/bin/tesseract` version 5.5.3. This path is recorded only in this verification report, not in production code or configuration.
+Tesseract is not available on the Codex default `PATH`, but the host verification used a host-local Tesseract executable, exact path omitted, version 5.5.3. The executable path is intentionally omitted from this report and is not recorded in production code or configuration.
 
 ## Database Protection
 
