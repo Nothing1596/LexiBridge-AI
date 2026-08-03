@@ -10,6 +10,9 @@ from datetime import datetime
 from typing import Any, Callable
 
 from sqlalchemy.exc import IntegrityError
+from services.formal_real_provider_evaluation_policy import (
+    is_trusted_formal_real_provider_evaluation_context,
+)
 
 from services.document_alignment_workflow_contract import (
     FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE,
@@ -269,6 +272,7 @@ class DocumentAlignmentItemVerificationDependencies:
     current_time_factory: Callable[[], datetime]
     lease_seconds: int = 30
     actor_role: str = "teacher"
+    evaluation_context: Any = field(default=None, repr=False, compare=False)
 
 
 _ALLOWED_PROVIDER_TYPES = frozenset({"mock", "fake_llm", "replay_llm", "local", "deterministic"})
@@ -927,7 +931,15 @@ def execute_document_alignment_item_verification(
         _in_memory_verification_input(prepared, mapping.draft_card_uid)
     )
     provider_type = dependencies.governance.provider_type_for(prepared.provider_name)
-    if provider_type not in _ALLOWED_PROVIDER_TYPES:
+    evaluation_external_allowed = (
+        provider_type == "external_llm"
+        and is_trusted_formal_real_provider_evaluation_context(
+            dependencies.evaluation_context,
+            provider_name=prepared.provider_name,
+            model_identity=prepared.model_identity,
+        )
+    )
+    if provider_type not in _ALLOWED_PROVIDER_TYPES and not evaluation_external_allowed:
         lease_result = _lease_fence(command, dependencies)
         if lease_result.outcome != LEASE_OUTCOME_ACCEPTED:
             session.rollback()
@@ -978,16 +990,21 @@ def execute_document_alignment_item_verification(
         mapping = session.query(models.execution).filter_by(execution_key=execution_key).one()
         item = session.query(models.workflow_item).filter_by(item_uid=command.workflow_item_uid).one()
         try:
+            preflight_kwargs = {
+                "course": prepared.course,
+                "include_replay_dry_run": True,
+                "execution_key": execution_key,
+                "now_fn": lambda: _time_text(dependencies.current_time_factory()),
+                "commit": False,
+            }
+            if dependencies.evaluation_context is not None:
+                preflight_kwargs["evaluation_context"] = dependencies.evaluation_context
             preflight, report = dependencies.governance.run_preflight(
                 session,
                 models.preflight_run,
                 models.provider_policy,
                 prepared.provider_name,
-                course=prepared.course,
-                include_replay_dry_run=True,
-                execution_key=execution_key,
-                now_fn=lambda: _time_text(dependencies.current_time_factory()),
-                commit=False,
+                **preflight_kwargs,
             )
             mapping.preflight_run_uid = preflight.preflight_uid
             if not report.get("overall_ready"):

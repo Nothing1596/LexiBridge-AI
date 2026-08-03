@@ -197,6 +197,7 @@ def build_document_alignment_processing_dependencies(
         fence_active_lease=fence_active_formal_job_lease_in_transaction,
         current_time_factory=current_time_factory,
         actor_role="teacher",
+        evaluation_context=evaluation_context,
     )
 
     return orchestrator.DocumentAlignmentProcessingDependencies(

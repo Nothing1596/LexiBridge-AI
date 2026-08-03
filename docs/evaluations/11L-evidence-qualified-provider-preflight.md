@@ -99,3 +99,20 @@ budget failures stop continuation.
 - Release safety: passed.
 - Accident database SHA-256, size, mtime, and absent WAL/SHM state were
   unchanged.
+
+## R3 preflight follow-up
+
+The first real preflight exposed two additional verification-stage gates after
+Formal preparation: the item verification adapter admitted only offline
+provider types, and provider preflight treated enabled external calls as
+unconditionally unsafe. Both now use the same sealed evaluation context already
+validated by the 11K bridge. Without that context, their original denial
+behavior is unchanged.
+
+The deterministic `physics-21` preflight then reached
+`DeepSeekHTTPTransport` and received one successfully parsed response. Term
+pair, confidence, and evidence references were persisted, but the explanation
+was absent from the persisted verification output. This is a downstream
+`WORKFLOW_OR_PERSISTENCE_DEFECT`, not an evidence-readiness or Provider
+failure. Because explanation persistence is a required systemic preflight
+check, the 25-item run was not started.

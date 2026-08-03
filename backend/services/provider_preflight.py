@@ -15,6 +15,9 @@ from services import alignment_providers
 from services import alignment_verification
 from services import llm_provider_config
 from services import provider_governance
+from services.formal_real_provider_evaluation_policy import (
+    is_trusted_formal_real_provider_evaluation_context,
+)
 
 
 PREFLIGHT_STATUSES = {"passed", "failed", "warning", "blocked"}
@@ -359,6 +362,7 @@ def run_provider_preflight(
     execution_key: str | None = None,
     now_fn=None,
     commit: bool = True,
+    evaluation_context: Any = None,
 ) -> tuple[Any, dict[str, Any]]:
     provider = _text(provider_name)
     course_name = _text(course)
@@ -393,6 +397,13 @@ def run_provider_preflight(
     if per_call_limit not in (None, "") and float(estimated_cost.get("estimated_cost") or 0.0) > float(per_call_limit):
         _append_unique(blocking, "provider_cost_limit_exceeded")
 
+    evaluation_external_allowed = (
+        bool(external_check.get("external_calls_enabled", False))
+        and is_trusted_formal_real_provider_evaluation_context(
+            evaluation_context,
+            provider_name=provider,
+        )
+    )
     overall_ready = (
         bool(provider_check.get("provider_registered"))
         and bool(policy_check.get("policy_present"))
@@ -405,7 +416,10 @@ def run_provider_preflight(
         and per_call_limit not in (None, "")
         and policy_data.get("max_estimated_cost_per_day") not in (None, "")
         and dry_run.get("status") == "passed"
-        and not bool(external_check.get("external_calls_enabled", False))
+        and (
+            not bool(external_check.get("external_calls_enabled", False))
+            or evaluation_external_allowed
+        )
     )
     if blocking:
         check_status = "failed"
