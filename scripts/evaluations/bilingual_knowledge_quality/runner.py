@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -31,6 +32,114 @@ ACCIDENT_DB_FROZEN_SHA256 = "9e6fb68ab13dff2763e2fff18d2aee531486360c557f058eb8a
 DEFAULT_JSON = ROOT / "docs/evaluations/artifacts/11E-bilingual-knowledge-quality-baseline.json"
 DEFAULT_MARKDOWN = ROOT / "docs/evaluations/11E-bilingual-knowledge-quality-baseline.md"
 DEFAULT_REVIEW_PACKET = ROOT / "docs/evaluations/artifacts/11E-bilingual-quality-review-packet.jsonl"
+
+
+@dataclass(frozen=True)
+class FormalProviderReadiness:
+    concept_id: str
+    provider_ready: bool
+    preparation_status: str
+    rejection_code: str = ""
+    rejection_stage: str = ""
+    candidate_count: int = 0
+    english_evidence_count: int = 0
+    chinese_evidence_count: int = 0
+    prepared_input: Any = None
+
+
+@dataclass(frozen=True)
+class FormalProviderPreflightSelection:
+    concept_id: str
+    readiness: FormalProviderReadiness
+    selection_reason: str = "first_provider_ready_in_frozen_order"
+
+
+class FormalProviderReadinessError(RuntimeError):
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def scan_formal_provider_readiness(
+    frozen_concept_order,
+    *,
+    prepare_item,
+) -> tuple[FormalProviderReadiness, ...]:
+    """Call the existing Formal preparation boundary without verification."""
+
+    rows = []
+    for concept_id in tuple(frozen_concept_order):
+        result = prepare_item(concept_id)
+        ready = str(getattr(result, "outcome", "")) == "prepared"
+        rows.append(FormalProviderReadiness(
+            concept_id=str(concept_id),
+            provider_ready=ready,
+            preparation_status=str(getattr(result, "outcome", "") or ""),
+            rejection_code=str(getattr(result, "error_code", "") or ""),
+            rejection_stage="" if ready else "formal_item_preparation",
+            candidate_count=int(getattr(result, "candidate_count", 0) or 0),
+            english_evidence_count=len(tuple(getattr(result, "english_evidence_refs", ()) or ())),
+            chinese_evidence_count=len(tuple(getattr(result, "chinese_evidence_refs", ()) or ())),
+            prepared_input=getattr(result, "prepared_input", None),
+        ))
+    return tuple(rows)
+
+
+def select_formal_provider_preflight(
+    readiness_results,
+    frozen_concept_order,
+) -> FormalProviderPreflightSelection:
+    """Select deterministically without accepting gold or quality scores."""
+
+    by_id = {row.concept_id: row for row in tuple(readiness_results)}
+    for concept_id in tuple(frozen_concept_order):
+        row = by_id.get(str(concept_id))
+        if row is not None and row.provider_ready:
+            return FormalProviderPreflightSelection(str(concept_id), row)
+    raise FormalProviderReadinessError(
+        "FORMAL_PROVIDER_PREFLIGHT_NO_READY_ITEM",
+        "No frozen concept satisfies Formal provider preparation.",
+    )
+
+
+def continue_real_provider_evaluation(
+    frozen_concept_order,
+    readiness_results,
+    *,
+    preflight_result,
+    execute_ready_item,
+    upstream_attribution,
+) -> list[dict[str, Any]]:
+    """Continue past item-level upstream failures; stop on systemic failures."""
+
+    by_id = {row.concept_id: row for row in tuple(readiness_results)}
+    frozen_preflight = dict(preflight_result or {})
+    results: list[dict[str, Any]] = []
+    for concept_id in tuple(frozen_concept_order):
+        concept_id = str(concept_id)
+        readiness = by_id[concept_id]
+        if not readiness.provider_ready:
+            results.append({
+                "concept_id": concept_id,
+                "status": "upstream_not_ready",
+                "provider_called": False,
+                "request_count": 0,
+                "preparation_status": readiness.preparation_status,
+                "error_code": readiness.rejection_code,
+                "primary_attribution": upstream_attribution(concept_id, readiness),
+            })
+            continue
+        if frozen_preflight.get("concept_id") == concept_id:
+            result = {**frozen_preflight, "reused_preflight": True}
+        else:
+            result = dict(execute_ready_item(concept_id))
+            result.setdefault("reused_preflight", False)
+        result.setdefault("concept_id", concept_id)
+        result.setdefault("provider_called", True)
+        results.append(result)
+        if result.get("status") == "provider_failure" and bool(result.get("systemic")):
+            break
+    return results
 
 
 def main(argv: list[str] | None = None) -> int:
