@@ -2,13 +2,35 @@
 
 ## Executive Conclusion
 
-Task status: `FORMAL_DEEPSEEK_TRANSPORT_PARTIAL`
+Task status: `FORMAL_DEEPSEEK_TRANSPORT_CLOSED`
 
 The Formal alignment transport layer now has an evaluation-ready DeepSeek HTTP transport path with fake-executor offline coverage. The implementation adds a distinct `deepseek-alignment-v1` provider configuration, keeps `deepseek-alignment-v1-disabled` permanently fail-closed, and preserves the ordinary Formal Workflow default of `mock-rule-v1`.
 
-The task is marked partial because the current Codex execution environment cannot bind `127.0.0.1`. Full pytest and `dev_check.py` both hit existing loopback-dependent tests with `PermissionError: [Errno 1] Operation not permitted`. The DeepSeek transport, factory, policy, and non-loopback Formal/provider regressions pass.
+The task was initially marked partial because the Codex sandbox could not bind `127.0.0.1`. The same commit was then verified from the macOS host terminal, where loopback binding, full pytest, `dev_check.py`, backend smoke, and release safety all passed. The sandbox loopback failure was environmental, not a project code defect.
 
 No real DeepSeek request was made.
+
+## Host Verification Closure
+
+This section records host-executed verification. These commands were run by the user in a normal macOS Terminal, not inside the Codex sandbox.
+
+| Check | Host result |
+|---|---|
+| Loopback bind | `LOOPBACK_BIND_OK`, Python bound `127.0.0.1:58357` |
+| Tesseract | `/Users/estaraatopos/miniforge3/envs/lexibridge-ocr/bin/tesseract`, version `5.5.3` |
+| 11I targeted tests | `47 passed in 3.63s` |
+| Full pytest | `1254 passed, 6 warnings in 207.15s` |
+| `dev_check.py` internal pytest | `1254 passed, 6 warnings in 210.34s` |
+| `dev_check.py` migration | `scripts/migrate_db.py --apply`, temporary database, database migrated |
+| `dev_check.py` backend smoke | `Backend smoke check passed: /api/test returned success.` |
+| `dev_check.py` final | `All local pre-release checks passed.` |
+| Release safety | `Release safety check passed.` |
+| Worktree after host verification | clean |
+| Real DeepSeek requests | `0` |
+
+Before host verification, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, and `LEXIBRIDGE_FORMAL_REAL_PROVIDER_EVAL_ENABLED` were unset. No Task 11J command, credentialed Provider evaluation runner, or real DeepSeek command was executed.
+
+This closes 11I because the only previous blocker was sandbox-local loopback denial. In the host environment, the same implementation passed targeted tests, the complete suite, `dev_check.py`, backend smoke, and release safety while keeping real Provider requests at 0.
 
 ## Initial Gap
 
@@ -117,17 +139,20 @@ Real DeepSeek requests: `0`.
 | `backend/.venv-macos/bin/python -m pytest tests/test_formal_deepseek_provider_config.py tests/test_formal_deepseek_transport.py tests/test_formal_external_provider_selection.py tests/test_formal_real_provider_evaluation_policy.py tests/test_alignment_external_provider_guard.py -q` | `39 passed` |
 | `backend/.venv-macos/bin/python -m pytest tests/test_alignment_verify_route_characterization.py::test_alignment_verify_provider_modes_and_write_set tests/test_formal_external_provider_selection.py tests/test_formal_deepseek_provider_config.py -q` | `11 passed` |
 | `backend/.venv-macos/bin/python -m pytest tests/test_formal_document_alignment_provider_selection.py tests/test_document_alignment_production_contract_convergence.py tests/test_document_alignment_item_verification_security.py tests/test_alignment_verification_execution_service.py tests/test_alignment_verify_route_characterization.py tests/test_bilingual_knowledge_quality_metrics.py tests/test_bilingual_evidence_workflow.py tests/test_chinese_term_candidates.py -q` | `54 passed` |
-| `LEXIBRIDGE_TESSERACT_CMD=<verified local tesseract> backend/.venv-macos/bin/python -m pytest -q` | `1222 passed, 20 failed, 12 errors, 6 warnings`; all failures/errors are loopback bind failures |
-| `LEXIBRIDGE_TESSERACT_CMD=<verified local tesseract> backend/.venv-macos/bin/python scripts/dev_check.py` | attempted with temporary DB; interrupted after same loopback failures surfaced; not counted as passed |
+| host-executed 11I targeted tests | `47 passed in 3.63s` |
+| host-executed full pytest | `1254 passed, 6 warnings in 207.15s` |
+| host-executed `dev_check.py` | passed; internal pytest `1254 passed, 6 warnings in 210.34s`; temporary DB migrated; backend smoke passed |
 | `backend/.venv-macos/bin/python scripts/check_release_safety.py` | passed |
 
 Warnings were the existing SQLAlchemy `Query.get()` legacy warning and PyMuPDF/Swig deprecation warnings.
 
 ## Environment Findings
 
-Loopback is unavailable in the current Codex execution environment. Minimal socket bind to `127.0.0.1:0` fails with `PermissionError: [Errno 1] Operation not permitted`. The failing full-pytest files all depend on local HTTP server binding.
+Loopback is unavailable in the Codex sandbox execution environment. Minimal socket bind to `127.0.0.1:0` failed there with `PermissionError: [Errno 1] Operation not permitted`. The failing sandbox full-pytest files all depended on local HTTP server binding.
 
-Tesseract is not available on default `PATH`, but a verified OCR environment provides Tesseract 5.5.3. The local path is intentionally not recorded in this committed report.
+The macOS host terminal successfully bound `127.0.0.1:58357`, so the prior Codex sandbox loopback failure is attributed to the sandbox environment rather than project code.
+
+Tesseract is not available on the Codex default `PATH`, but the host verification used `/Users/estaraatopos/miniforge3/envs/lexibridge-ocr/bin/tesseract` version 5.5.3. This path is recorded only in this verification report, not in production code or configuration.
 
 ## Database Protection
 
@@ -162,10 +187,10 @@ All tests that initialized app state used temporary test databases. The accident
 - Existing English retrieval weakness and Chinese candidate quality issues are not fixed in this task.
 - Real course material and teacher blind review remain unvalidated.
 - Production Provider execution remains default-closed.
-- Full pytest and `dev_check.py` still require a host environment that can bind loopback.
+- Codex sandbox loopback remains unavailable, but host verification closed the 11I regression gate.
 
 ## Final Decision
 
-`FORMAL_DEEPSEEK_TRANSPORT_PARTIAL`
+`FORMAL_DEEPSEEK_TRANSPORT_CLOSED`
 
-The implementation is ready for offline review and a loopback-capable full regression environment. The next task, after this is accepted, should be `Task 11J: Credentialed DeepSeek Synthetic Quality Evaluation`.
+The implementation is verified on the host and remains default-closed. The next task, after this is accepted, should be `Task 11J: Credentialed DeepSeek Synthetic Quality Evaluation`.

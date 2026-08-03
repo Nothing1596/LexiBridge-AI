@@ -1,7 +1,7 @@
 {
   "task": "11I",
   "schema_version": "11I-formal-deepseek-transport-v1",
-  "status": "FORMAL_DEEPSEEK_TRANSPORT_PARTIAL",
+  "status": "FORMAL_DEEPSEEK_TRANSPORT_CLOSED",
   "baseline_commit": "164ff06063dda6df917581d480e9eac03e8bfaf1",
   "branch": "feat/formal-deepseek-transport-11i",
   "provider": {
@@ -129,6 +129,7 @@
   "network": {
     "fake_executor_calls": "covered by unit tests",
     "real_deepseek_requests": 0,
+    "credentialed_runner_executed": false,
     "external_network_requests": 0,
     "external_document_api_requests": 0,
     "model_downloads": 0
@@ -145,6 +146,18 @@
     {
       "command": "backend/.venv-macos/bin/python -m pytest tests/test_formal_document_alignment_provider_selection.py tests/test_document_alignment_production_contract_convergence.py tests/test_document_alignment_item_verification_security.py tests/test_alignment_verification_execution_service.py tests/test_alignment_verify_route_characterization.py tests/test_bilingual_knowledge_quality_metrics.py tests/test_bilingual_evidence_workflow.py tests/test_chinese_term_candidates.py -q",
       "result": "54 passed"
+    },
+    {
+      "command": "host-executed 11I targeted tests",
+      "result": "47 passed in 3.63s"
+    },
+    {
+      "command": "host-executed full pytest",
+      "result": "1254 passed, 6 warnings in 207.15s"
+    },
+    {
+      "command": "host-executed dev_check.py",
+      "result": "passed; internal pytest 1254 passed, 6 warnings in 210.34s; temporary database migrated; backend smoke passed"
     },
     {
       "command": "LEXIBRIDGE_TESSERACT_CMD=<verified local tesseract> backend/.venv-macos/bin/python -m pytest -q",
@@ -177,6 +190,48 @@
       "local_absolute_path_committed": false
     }
   },
+  "host_verification": {
+    "environment": "macOS host terminal",
+    "executed_by": "user",
+    "codex_sandbox_execution": false,
+    "loopback_bind": true,
+    "loopback_address": "127.0.0.1",
+    "loopback_port": 58357,
+    "loopback_result": "LOOPBACK_BIND_OK",
+    "tesseract_version": "5.5.3",
+    "targeted_tests": {
+      "passed": 47,
+      "duration_seconds": 3.63
+    },
+    "full_pytest": {
+      "passed": 1254,
+      "warnings": 6,
+      "duration_seconds": 207.15
+    },
+    "dev_check": {
+      "passed": true,
+      "temp_dir": "/var/folders/7q/_0ffnnxj2wb8hvm0b77w647m0000gn/T/lexibridge-dev-check-7hbpby3n",
+      "pytest_passed": 1254,
+      "warnings": 6,
+      "pytest_duration_seconds": 210.34,
+      "migration_command": "scripts/migrate_db.py --apply",
+      "database_migrated": true,
+      "backend_smoke": true,
+      "final_message": "All local pre-release checks passed."
+    },
+    "release_safety": {
+      "passed": true
+    },
+    "worktree_clean_after_host_verification": true,
+    "credentials_unset_before_verification": [
+      "DEEPSEEK_API_KEY",
+      "OPENAI_API_KEY",
+      "LEXIBRIDGE_FORMAL_REAL_PROVIDER_EVAL_ENABLED"
+    ],
+    "real_deepseek_requests": 0,
+    "credentialed_runner_executed": false,
+    "status_upgrade_reason": "Codex sandbox loopback failure was environmental; host verification passed full pytest, dev_check, backend smoke, and release safety."
+  },
   "database_protection": {
     "accident_database_path": "backend/lexibridge.db",
     "expected_frozen_sha256": "9e6fb68ab13dff2763e2fff18d2aee531486360c557f058eb8a471d9209a9eaa",
@@ -206,7 +261,7 @@
     "Existing English retrieval weakness and Chinese candidate quality issues remain unfixed.",
     "Real course material and teacher blind review remain unvalidated.",
     "Production Provider execution remains default-closed.",
-    "Full pytest and dev_check require a loopback-capable host environment."
+    "Codex sandbox loopback remains unavailable, but host verification closed the 11I regression gate."
   ],
   "next_task": "Task 11J: Credentialed DeepSeek Synthetic Quality Evaluation"
 }
