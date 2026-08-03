@@ -72,7 +72,10 @@ def provider_type_for(provider_name: str) -> str:
         return "fake_llm"
     if provider == llm_provider_config.REPLAY_EXTERNAL_PROVIDER_NAME:
         return "replay_llm"
-    if provider == llm_provider_config.DISABLED_EXTERNAL_PROVIDER_NAME:
+    if provider in {
+        llm_provider_config.DISABLED_EXTERNAL_PROVIDER_NAME,
+        llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME,
+    }:
         return "external_llm"
     return "unknown"
 

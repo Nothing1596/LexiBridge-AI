@@ -22,6 +22,7 @@ MOCK_PROVIDER_VERSION = "v1"
 FAKE_LLM_PROVIDER_NAME = "fake-llm-v1"
 FAKE_LLM_PROVIDER_VERSION = "v1"
 DISABLED_EXTERNAL_PROVIDER_NAME = llm_provider_config.DISABLED_EXTERNAL_PROVIDER_NAME
+DEEPSEEK_EXTERNAL_PROVIDER_NAME = llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME
 REPLAY_EXTERNAL_PROVIDER_NAME = llm_provider_config.REPLAY_EXTERNAL_PROVIDER_NAME
 EXTERNAL_PROVIDER_VERSION = "v1"
 LOW_EVIDENCE_SCORE_THRESHOLD = 0.35
@@ -431,7 +432,7 @@ class FakeLLMAlignmentProvider(BaseAlignmentProvider):
 
 
 class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
-    """Guarded external provider adapter with disabled/replay transports only."""
+    """Guarded external provider adapter with explicit transport gates."""
 
     provider_name = DISABLED_EXTERNAL_PROVIDER_NAME
     provider_type = "external_llm"
@@ -449,6 +450,8 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             self.transport = transport
         elif self.config.get("replay_mode"):
             self.transport = llm_transport.ReplayLLMTransport()
+        elif self.provider_name == DEEPSEEK_EXTERNAL_PROVIDER_NAME and self.config.get("executable"):
+            self.transport = llm_transport.DeepSeekHTTPTransport()
         else:
             self.transport = llm_transport.DisabledLLMTransport()
 
@@ -646,7 +649,7 @@ def get_alignment_provider(provider_name: str | None = None):
         return MockAlignmentProvider()
     if provider == FAKE_LLM_PROVIDER_NAME:
         return FakeLLMAlignmentProvider()
-    if provider in {DISABLED_EXTERNAL_PROVIDER_NAME, REPLAY_EXTERNAL_PROVIDER_NAME}:
+    if provider in {DISABLED_EXTERNAL_PROVIDER_NAME, DEEPSEEK_EXTERNAL_PROVIDER_NAME, REPLAY_EXTERNAL_PROVIDER_NAME}:
         return GuardedLLMAlignmentProvider(provider)
     raise AlignmentProviderError(f"Unknown alignment verification provider: {provider}")
 
@@ -674,6 +677,16 @@ def list_alignment_providers() -> list[dict[str, Any]]:
             "is_production_provider": True,
             "supports_external_calls": True,
             "enabled": False,
+        },
+        {
+            "provider_name": DEEPSEEK_EXTERNAL_PROVIDER_NAME,
+            "provider_type": "external_llm",
+            "provider_version": EXTERNAL_PROVIDER_VERSION,
+            "is_production_provider": True,
+            "supports_external_calls": True,
+            "enabled": llm_provider_config.get_llm_provider_config(DEEPSEEK_EXTERNAL_PROVIDER_NAME).get("enabled"),
+            "feature_enabled": llm_provider_config.get_llm_provider_config(DEEPSEEK_EXTERNAL_PROVIDER_NAME).get("feature_enabled"),
+            "executable": llm_provider_config.get_llm_provider_config(DEEPSEEK_EXTERNAL_PROVIDER_NAME).get("executable"),
         },
         {
             "provider_name": REPLAY_EXTERNAL_PROVIDER_NAME,

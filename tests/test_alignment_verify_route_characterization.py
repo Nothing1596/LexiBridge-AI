@@ -3,6 +3,7 @@ import socket
 import uuid
 
 from services import audit_records
+from services import llm_provider_config
 from services import concept_alignment_cards
 from services import provider_governance
 
@@ -199,7 +200,9 @@ def test_alignment_verify_auth_and_role_contract(client, teacher_token, student_
     assert_success(admin, "verify-auth-admin")
 
 
-def test_alignment_verify_provider_modes_and_write_set(client, app_module, teacher_token):
+def test_alignment_verify_provider_modes_and_write_set(client, app_module, teacher_token, monkeypatch):
+    monkeypatch.setenv(llm_provider_config.EXTERNAL_LLM_ENABLED_ENV, "1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "LEXIBRIDGE_FAKE_DEEPSEEK_KEY_FOR_TESTS_ONLY")
     with app_module.app.app_context():
         upsert_replay_policy(app_module, allow_attach=False)
         before = side_effect_counts(app_module)
@@ -240,6 +243,13 @@ def test_alignment_verify_provider_modes_and_write_set(client, app_module, teach
             "failed",
             "provider_policy_missing",
         ),
+        (
+            "verify-mode-formal-deepseek",
+            {**valid_payload(), "provider": llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME},
+            "external_llm",
+            "failed",
+            "provider_policy_missing",
+        ),
     ]
 
     for request_id, payload, provider_type, verification_status, provider_response_status in requests:
@@ -262,15 +272,20 @@ def test_alignment_verify_provider_modes_and_write_set(client, app_module, teach
         assert after["runs"] == before["runs"] + len(requests)
         assert after["usage"] == before["usage"] + len(requests)
         assert after["cards"] == before["cards"]
-        blocked = app_module.AuditRecord.query.filter_by(
+        disabled_blocked = app_module.AuditRecord.query.filter_by(
             request_id="verify-mode-disabled-external",
+            event_type="alignment_verification_blocked_by_policy",
+        ).one()
+        formal_deepseek_blocked = app_module.AuditRecord.query.filter_by(
+            request_id="verify-mode-formal-deepseek",
             event_type="alignment_verification_blocked_by_policy",
         ).one()
         usage = app_module.AuditRecord.query.filter_by(
             request_id="verify-mode-replay",
             event_type="provider_usage_recorded",
         ).one()
-        assert blocked.error_code == "provider_policy_missing"
+        assert disabled_blocked.error_code == "provider_policy_missing"
+        assert formal_deepseek_blocked.error_code == "provider_policy_missing"
         assert usage.target_type == "alignment_provider_policy"
 
 

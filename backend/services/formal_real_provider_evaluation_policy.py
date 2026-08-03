@@ -170,7 +170,7 @@ def evaluate_formal_real_provider_evaluation_gate(
 
     try:
         provider_adapter = alignment_providers.get_alignment_provider(provider)
-        config = llm_provider_config.DEFAULT_PROVIDER_CONFIGS[provider]
+        config = llm_provider_config.get_llm_provider_config(provider, env=env)
     except Exception:
         return _deny(ERROR_PROVIDER_UNKNOWN, "Controlled Formal provider is not registered.", provider_name=provider, model_identity=model, request_budget=budget, gate_checks=gate_checks)
 
@@ -180,10 +180,12 @@ def evaluate_formal_real_provider_evaluation_gate(
         "provider_registered": True,
         "provider_supports_external_calls": bool(getattr(provider_adapter, "supports_external_calls", False)),
         "provider_is_external_llm": provider_type == "external_llm",
-        "external_provider_enabled": _truthy(env.get(llm_provider_config.EXTERNAL_LLM_ENABLED_ENV, "")),
+        "provider_config_enabled": bool(config.get("enabled")),
+        "external_provider_enabled": bool(config.get("feature_enabled")),
+        "provider_executable": bool(config.get("executable")),
         "model_matches_allowlist": model == _text(config.get("model_name")),
         "credential_env_configured": bool(credential_env_name),
-        "credential_present": bool(_text(env.get(credential_env_name, ""))) if credential_env_name else False,
+        "credential_present": bool(config.get("credential_present")) if credential_env_name else False,
         "credential_not_placeholder": not ai_registry.is_placeholder_secret(env.get(credential_env_name, "")) if credential_env_name else False,
     })
 
@@ -197,11 +199,13 @@ def evaluate_formal_real_provider_evaluation_gate(
     }
     if not gate_checks["provider_supports_external_calls"] or not gate_checks["provider_is_external_llm"]:
         return _deny(ERROR_PROVIDER_NOT_EXTERNAL, "Controlled Formal provider is not an external LLM provider.", **common)
-    if not gate_checks["external_provider_enabled"]:
+    if not gate_checks["provider_config_enabled"] or not gate_checks["external_provider_enabled"]:
         return _deny(ERROR_PROVIDER_NOT_ENABLED, "Controlled Formal provider external execution is disabled.", **common)
     if not gate_checks["model_matches_allowlist"]:
         return _deny(ERROR_MODEL_NOT_ALLOWED, "Controlled Formal provider model is not allowlisted.", **common)
     if not gate_checks["credential_env_configured"] or not gate_checks["credential_present"] or not gate_checks["credential_not_placeholder"]:
         return _deny(ERROR_CREDENTIAL_MISSING, "Controlled Formal provider credential is missing or invalid.", **common)
+    if not gate_checks["provider_executable"]:
+        return _deny(ERROR_PROVIDER_NOT_ENABLED, "Controlled Formal provider is not executable.", **common)
 
     return FormalRealProviderEvaluationDecision(allowed=True, **common)

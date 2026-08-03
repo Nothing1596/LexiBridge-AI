@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import copy
 import os
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 
 DISABLED_EXTERNAL_PROVIDER_NAME = "deepseek-alignment-v1-disabled"
+DEEPSEEK_EXTERNAL_PROVIDER_NAME = "deepseek-alignment-v1"
 REPLAY_EXTERNAL_PROVIDER_NAME = "external-llm-replay-v1"
 EXTERNAL_LLM_ENABLED_ENV = "LEXIBRIDGE_EXTERNAL_LLM_ENABLED"
 
@@ -23,7 +24,18 @@ DEFAULT_MAX_OUTPUT_CHARS = 4000
 LLM_PROVIDER_ERROR_CODES = {
     "provider_disabled",
     "provider_not_configured",
+    "credential_missing",
     "missing_api_key",
+    "authentication_failed",
+    "rate_limited",
+    "provider_server_error",
+    "connection_timeout",
+    "read_timeout",
+    "network_error",
+    "invalid_request",
+    "invalid_json",
+    "malformed_provider_response",
+    "missing_response_content",
     "provider_timeout",
     "provider_rate_limited",
     "provider_bad_response",
@@ -34,6 +46,7 @@ LLM_PROVIDER_ERROR_CODES = {
     "provider_cost_limit_exceeded",
     "provider_output_too_long",
 }
+PERMANENTLY_DISABLED_PROVIDER_NAMES = frozenset({DISABLED_EXTERNAL_PROVIDER_NAME})
 
 
 class LLMProviderConfigError(ValueError):
@@ -80,6 +93,24 @@ DEFAULT_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "replay_mode": False,
         "api_key_env_name": "DEEPSEEK_API_KEY",
     },
+    DEEPSEEK_EXTERNAL_PROVIDER_NAME: {
+        "provider_name": DEEPSEEK_EXTERNAL_PROVIDER_NAME,
+        "provider_type": "external_llm",
+        "base_url": "https://api.deepseek.com",
+        "model_name": "deepseek-chat",
+        "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "max_prompt_chars": DEFAULT_MAX_PROMPT_CHARS,
+        "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
+        "cost_per_1k_input_tokens": None,
+        "cost_per_1k_output_tokens": None,
+        "max_estimated_cost": None,
+        "enabled": True,
+        "replay_mode": False,
+        "transport_mode": "deepseek_http",
+        "requires_credentials": True,
+        "api_key_env_name": "DEEPSEEK_API_KEY",
+    },
     REPLAY_EXTERNAL_PROVIDER_NAME: {
         "provider_name": REPLAY_EXTERNAL_PROVIDER_NAME,
         "provider_type": "replay_llm",
@@ -112,8 +143,15 @@ def _coerce_float(value: Any, default: float | None = None) -> float | None:
         return default
 
 
-def is_external_llm_enabled() -> bool:
-    return _truthy(os.environ.get(EXTERNAL_LLM_ENABLED_ENV, ""))
+def is_external_llm_enabled(env: Mapping[str, str] | None = None) -> bool:
+    source = os.environ if env is None else env
+    return _truthy(source.get(EXTERNAL_LLM_ENABLED_ENV, ""))
+
+
+def external_llm_credential_present(config: dict[str, Any], env: Mapping[str, str] | None = None) -> bool:
+    source = os.environ if env is None else env
+    api_key_env_name = str(config.get("api_key_env_name") or "").strip()
+    return bool(api_key_env_name and str(source.get(api_key_env_name) or "").strip())
 
 
 def normalize_provider_timeout(value: Any) -> int:
@@ -160,7 +198,11 @@ def sanitize_provider_config(config: dict[str, Any] | None) -> dict[str, Any]:
     return safe
 
 
-def get_llm_provider_config(provider_name: str, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+def get_llm_provider_config(
+    provider_name: str,
+    overrides: dict[str, Any] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     provider = str(provider_name or "").strip()
     if provider not in DEFAULT_PROVIDER_CONFIGS:
         raise LLMProviderConfigError("provider_not_configured", f"LLM provider is not configured: {provider}")
@@ -178,14 +220,28 @@ def get_llm_provider_config(provider_name: str, overrides: dict[str, Any] | None
         for key in allowed_overrides:
             if key in overrides:
                 config[key] = overrides[key]
+    if provider in PERMANENTLY_DISABLED_PROVIDER_NAMES:
+        config["enabled"] = False
     config["timeout_seconds"] = normalize_provider_timeout(config.get("timeout_seconds"))
     config["max_retries"] = normalize_provider_retry_policy(config.get("max_retries")).get("max_retries", 0)
     config["max_prompt_chars"] = max(500, int(config.get("max_prompt_chars") or DEFAULT_MAX_PROMPT_CHARS))
     config["max_output_chars"] = max(500, int(config.get("max_output_chars") or DEFAULT_MAX_OUTPUT_CHARS))
+    config["configured"] = True
     if config.get("provider_type") == "external_llm":
-        config["enabled"] = bool(config.get("enabled")) and is_external_llm_enabled()
+        config["enabled"] = bool(config.get("enabled"))
+        config["feature_enabled"] = is_external_llm_enabled(env)
+        config["credential_present"] = external_llm_credential_present(config, env)
+        config["executable"] = bool(
+            config.get("enabled")
+            and config.get("feature_enabled")
+            and config.get("credential_present")
+            and not config.get("replay_mode")
+        )
     else:
         config["enabled"] = bool(config.get("enabled"))
+        config["feature_enabled"] = False
+        config["credential_present"] = False
+        config["executable"] = bool(config.get("enabled"))
     config["replay_mode"] = bool(config.get("replay_mode"))
     return config
 
@@ -194,13 +250,17 @@ def require_external_llm_enabled(provider_name: str, config: dict[str, Any] | No
     cfg = config or get_llm_provider_config(provider_name)
     if cfg.get("replay_mode"):
         return True
-    if not cfg.get("enabled"):
+    if provider_name in PERMANENTLY_DISABLED_PROVIDER_NAMES or not cfg.get("enabled"):
         raise LLMProviderConfigError("provider_disabled", f"External LLM provider is disabled: {provider_name}")
+    if cfg.get("provider_type") == "external_llm":
+        feature_enabled = bool(cfg.get("feature_enabled")) if "feature_enabled" in cfg else is_external_llm_enabled()
+        if not feature_enabled:
+            raise LLMProviderConfigError("provider_disabled", f"External LLM provider is disabled: {provider_name}")
     api_key_env_name = str(cfg.get("api_key_env_name") or "").strip()
     if not api_key_env_name:
         raise LLMProviderConfigError("provider_not_configured", "External LLM provider API key environment name is not configured.")
-    if not os.environ.get(api_key_env_name):
-        raise LLMProviderConfigError("missing_api_key", f"Missing API key environment variable: {api_key_env_name}")
+    if not external_llm_credential_present(cfg):
+        raise LLMProviderConfigError("credential_missing", f"Missing API key environment variable: {api_key_env_name}")
     return True
 
 

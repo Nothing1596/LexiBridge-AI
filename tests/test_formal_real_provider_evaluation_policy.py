@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from services import alignment_providers
+from services import alignment_providers, llm_provider_config
 from services.formal_document_alignment_provider_selection import (
     FORMAL_DEFAULT_PROVIDER_NAME,
     FormalDocumentAlignmentProviderSelectionError,
@@ -39,7 +39,7 @@ def _decision(tmp_path, **overrides):
         "database_url": f"sqlite:///{tmp_path / 'evaluation.sqlite'}",
         "corpus_sha256": EXPECTED_11E_CORPUS_SHA256,
         "gold_sha256": EXPECTED_11E_GOLD_SHA256,
-        "provider_name": alignment_providers.DISABLED_EXTERNAL_PROVIDER_NAME,
+        "provider_name": llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME,
         "model_identity": "deepseek-chat",
         "runner_id": REQUIRED_RUNNER_ID,
         "request_budget": 35,
@@ -58,18 +58,30 @@ def test_default_formal_selection_stays_mock_and_external_still_fails_closed():
         )
 
 
-def test_complete_11f_evaluation_gate_allows_existing_external_provider_without_leaking_secret(tmp_path):
+def test_complete_11f_evaluation_gate_allows_formal_deepseek_provider_without_leaking_secret(tmp_path):
     decision = _decision(tmp_path)
 
     assert decision.allowed is True
     assert decision.safe_error_code == ""
-    assert decision.provider_name == alignment_providers.DISABLED_EXTERNAL_PROVIDER_NAME
+    assert decision.provider_name == llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME
     assert decision.model_identity == "deepseek-chat"
     serialized = json.dumps(decision.to_safe_dict(), sort_keys=True)
     assert SECRET not in serialized
     assert "DEEPSEEK_API_KEY" in serialized
     assert "authorization" not in serialized.lower()
     assert "bearer" not in serialized.lower()
+
+
+def test_disabled_deepseek_provider_fails_closed_even_with_complete_gate(tmp_path):
+    decision = _decision(
+        tmp_path,
+        provider_name=alignment_providers.DISABLED_EXTERNAL_PROVIDER_NAME,
+    )
+
+    assert decision.allowed is False
+    assert decision.safe_error_code == "FORMAL_REAL_PROVIDER_EVAL_PROVIDER_NOT_ENABLED"
+    assert decision.gate_checks["provider_config_enabled"] is False
+    assert decision.gate_checks["provider_executable"] is False
 
 
 @pytest.mark.parametrize(

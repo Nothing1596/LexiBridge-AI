@@ -100,7 +100,9 @@ def allow_replay_policy(app_module, *, allow_attach=True):
         )
 
 
-def test_llm_provider_config_defaults_and_sanitization():
+def test_llm_provider_config_defaults_and_sanitization(monkeypatch):
+    monkeypatch.delenv(llm_provider_config.EXTERNAL_LLM_ENABLED_ENV, raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     config = llm_provider_config.get_llm_provider_config("deepseek-alignment-v1-disabled")
     sanitized = llm_provider_config.sanitize_provider_config({
         **config,
@@ -117,12 +119,23 @@ def test_llm_provider_config_defaults_and_sanitization():
     with pytest.raises(llm_provider_config.LLMProviderConfigError) as disabled:
         llm_provider_config.require_external_llm_enabled("deepseek-alignment-v1-disabled", config=config)
     assert disabled.value.error_code == "provider_disabled"
-    with pytest.raises(llm_provider_config.LLMProviderConfigError) as missing_key:
+    with pytest.raises(llm_provider_config.LLMProviderConfigError) as still_disabled:
         llm_provider_config.require_external_llm_enabled(
             "deepseek-alignment-v1-disabled",
             config={**config, "enabled": True, "replay_mode": False, "api_key_env_name": "LEXIBRIDGE_TEST_MISSING_KEY"},
         )
-    assert missing_key.value.error_code == "missing_api_key"
+    assert still_disabled.value.error_code == "provider_disabled"
+
+    formal = llm_provider_config.get_llm_provider_config(
+        llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME,
+        env={llm_provider_config.EXTERNAL_LLM_ENABLED_ENV: "1"},
+    )
+    with pytest.raises(llm_provider_config.LLMProviderConfigError) as missing_key:
+        llm_provider_config.require_external_llm_enabled(
+            llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME,
+            config=formal,
+        )
+    assert missing_key.value.error_code == "credential_missing"
 
 
 def test_cost_timeout_and_retry_helpers():
@@ -281,7 +294,7 @@ def test_alignment_verify_api_disabled_and_replay_provider_audit(client, app_mod
         json={
             **valid_payload(),
             "provider": "deepseek-alignment-v1-disabled",
-            "Authorization": "Bearer should-not-persist",
+            "Authorization": "redacted-test-header",
             "DEEPSEEK_API_KEY": "should-not-persist",
         },
         headers={**bearer(teacher_token), "X-Request-ID": disabled_request_id},
