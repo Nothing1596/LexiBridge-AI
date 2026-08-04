@@ -1,4 +1,4 @@
-# Task 11J-R3 Credentialed DeepSeek Synthetic Quality Evaluation
+# Task 11J-R4 Credentialed DeepSeek Synthetic Quality Evaluation
 
 ## Status
 
@@ -7,7 +7,8 @@
 - Credential present: `true`
 - Provider/model: `deepseek-alignment-v1` / `deepseek-chat`
 - Transport configured: `DeepSeekHTTPTransport`
-- Provider requests: `1`
+- Provider requests in Attempt 5: `0`
+- Cumulative historical Provider requests: `1`
 
 ## Attempt history
 
@@ -22,6 +23,13 @@
   evidence references. The required explanation was absent from persisted
   verification output, so the systemic preflight failed with
   `WORKFLOW_OR_PERSISTENCE_DEFECT`. The 25-item run was not started.
+- Attempt 5 (11J-R4): 11M closed the explanation persistence contract and all
+  offline gates passed. Fresh synthetic upload, ingestion, and production
+  Formal bootstrap produced exact frozen items only for `physics-23` through
+  `physics-25`; `physics-01` through `physics-22`, including the historical
+  preflight item `physics-21`, were not bootstrapped. Substituting gold English
+  terms for the production extractor would make readiness gold-dependent and
+  was rejected. The run stopped before transport with Provider requests `0`.
 
 Attempt 3 is consistent with the fresh retrieval-only result: momentum misses
 the required English evidence at top 3. Because this failure occurs before the
@@ -65,6 +73,14 @@ ordering, or filtering drift was found.
 Formal readiness is the production preparation predicate and does not read gold
 scoring data. The gold-valid subset remains a separate evaluation metric.
 
+Attempt 5 could not reproduce this matrix through the current production
+bootstrap boundary. Only 3 of the 25 exact frozen concept items were emitted;
+22 were absent before Formal item preparation. Consequently no valid
+all-25 readiness matrix or deterministic preflight selection exists for R4.
+The earliest R4 attribution is `CANDIDATE_EXTRACTION_DEFECT`. No Provider
+request was made and the historical R3 metrics below were not reused as R4
+results.
+
 The selected preflight entered the complete Formal Workflow and
 `DeepSeekHTTPTransport`. Request/retry counts were `1/0`; wall latency was
 approximately `5 seconds`. The Provider did not report usage, so the runner's
@@ -90,11 +106,11 @@ Primary attribution:
 
 ## Verification
 
-- Required targeted and evaluation-boundary regression: `56 passed`
-- Full pytest: `1238 passed, 20 failed, 12 errors` out of 1270
+- Required targeted and evaluation-boundary regression: `105 passed`
+- Full pytest: `1240 passed, 20 failed, 12 errors` out of 1272
 - Every full-suite failure/error was caused by the sandbox denying a
   `127.0.0.1` bind with `PermissionError: [Errno 1] Operation not permitted`.
-- dev_check: `1238 passed, 20 failed, 12 errors`; failed at its internal pytest
+- dev_check: `1240 passed, 20 failed, 12 errors`; failed at its internal pytest
   step for the same loopback sandbox restriction.
 - release-safety: passed.
 - The loopback restriction is an environment limitation and is not attributed
