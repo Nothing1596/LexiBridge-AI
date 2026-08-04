@@ -1,0 +1,152 @@
+import builtins
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_runner_module():
+    spec = importlib.util.spec_from_file_location("run_browser_e2e", ROOT / "scripts" / "run_browser_e2e.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_readiness_module():
+    spec = importlib.util.spec_from_file_location("pilot_readiness_check", ROOT / "scripts" / "pilot_readiness_check.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def passing_flow(module, name):
+    flow = module.flow_result(name)
+    flow["status"] = "PASS"
+    module.add_step(flow, "sample step")
+    return flow
+
+
+def test_flow_result_json_schema_shape():
+    module = load_runner_module()
+    flow = module.flow_result("student")
+    assert flow["name"] == "student"
+    assert flow["status"] == "SKIPPED"
+    for key in ["steps", "console_errors", "page_errors", "failed_requests", "downloads"]:
+        assert isinstance(flow[key], list)
+
+
+def test_overall_pass_requires_requested_flows_to_pass():
+    module = load_runner_module()
+    result = module.build_overall_result(
+        student_flow=passing_flow(module, "student"),
+        teacher_flow=passing_flow(module, "teacher"),
+        blocked_external_requests=[],
+    )
+    assert result["status"] == "PASS"
+    assert result["student_flow"]["status"] == "PASS"
+    assert result["teacher_flow"]["status"] == "PASS"
+
+
+def test_student_failure_makes_overall_fail():
+    module = load_runner_module()
+    student = passing_flow(module, "student")
+    student["status"] = "FAIL"
+    result = module.build_overall_result(
+        student_flow=student,
+        teacher_flow=passing_flow(module, "teacher"),
+        blocked_external_requests=[],
+    )
+    assert result["status"] == "FAIL"
+
+
+def test_teacher_failure_makes_overall_fail():
+    module = load_runner_module()
+    teacher = passing_flow(module, "teacher")
+    teacher["status"] = "FAIL"
+    result = module.build_overall_result(
+        student_flow=passing_flow(module, "student"),
+        teacher_flow=teacher,
+        blocked_external_requests=[],
+    )
+    assert result["status"] == "FAIL"
+
+
+def test_console_error_makes_flow_and_overall_fail():
+    module = load_runner_module()
+    teacher = passing_flow(module, "teacher")
+    teacher["console_errors"].append("Unhandled browser error")
+    assert module.flow_has_failures(teacher, []) is True
+    result = module.build_overall_result(
+        student_flow=passing_flow(module, "student"),
+        teacher_flow=teacher,
+        blocked_external_requests=[],
+    )
+    assert result["status"] == "FAIL"
+
+
+def test_external_page_dependency_makes_overall_fail():
+    module = load_runner_module()
+    blocked = [{"flow": "student", "source": "page", "url": "https://cdn.example.invalid/app.js"}]
+    result = module.build_overall_result(
+        student_flow=passing_flow(module, "student"),
+        teacher_flow=passing_flow(module, "teacher"),
+        blocked_external_requests=blocked,
+    )
+    assert result["status"] == "FAIL"
+    assert result["external_dependency_requests"] == blocked
+
+
+def test_expected_probe_failed_request_does_not_fail_flow():
+    module = load_runner_module()
+    flow = passing_flow(module, "student")
+    flow["failed_requests"].append(
+        {
+            "url": "https://example.invalid/lexibridge-e2e-probe.json",
+            "failure": "net::ERR_FAILED",
+            "expected": True,
+        }
+    )
+    assert module.flow_has_failures(flow, []) is False
+
+
+def test_runtime_detection_reports_missing_playwright(monkeypatch):
+    module = load_runner_module()
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "playwright.sync_api":
+            raise ImportError("missing playwright for test")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(RuntimeError, match="E2E_ENVIRONMENT_UNAVAILABLE"):
+        module.assert_playwright_available()
+
+
+def test_artifact_path_fixture_is_outside_git_workspace(tmp_path):
+    artifact_dir = tmp_path / "browser-e2e-artifacts"
+    assert not str(artifact_dir.resolve()).startswith(str(ROOT.resolve()))
+
+
+def test_readiness_e2e_summary_maps_json_fields():
+    readiness = load_readiness_module()
+    summary = readiness.summarize_browser_e2e_result(
+        {
+            "status": "PASS",
+            "browser": {"name": "chromium", "version": "148.0.7778.96"},
+            "student_flow": {"status": "PASS", "console_errors": [], "page_errors": []},
+            "teacher_flow": {"status": "PASS", "console_errors": [], "page_errors": []},
+            "blocked_external_requests": [{"source": "probe", "url": "https://example.invalid"}],
+            "external_dependency_requests": [],
+        }
+    )
+    assert summary["browser_e2e_status"] == "PASS"
+    assert summary["browser_name"] == "chromium"
+    assert summary["student_flow_status"] == "PASS"
+    assert summary["teacher_flow_status"] == "PASS"
+    assert summary["js_error_count"] == 0
+    assert summary["external_dependency_count"] == 0
+    assert summary["blocked_external_request_count"] == 1
