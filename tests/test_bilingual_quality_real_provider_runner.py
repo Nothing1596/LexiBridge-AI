@@ -64,3 +64,51 @@ def test_systemic_provider_failure_stops_later_calls():
     assert calls == ["physics-21"]
     assert len(results) == 1
     assert results[0]["status"] == "provider_failure"
+
+
+def test_bootstrap_rows_and_batch_share_the_same_25_item_universe():
+    benchmark = tuple(
+        runner.FrozenBenchmarkIdentity(
+            f"physics-{index:02d}", f"term {index}"
+        )
+        for index in range(1, 26)
+    )
+    candidates = (
+        runner.ProductionCandidateBindingInput("candidate-23", "term 23", {}),
+        runner.ProductionCandidateBindingInput("candidate-24", "term 24", {}),
+        runner.ProductionCandidateBindingInput("candidate-25", "term 25", {}),
+    )
+    rows = runner.build_frozen_evaluation_bootstrap(
+        benchmark,
+        candidates,
+        prepare_candidate=lambda candidate: type(
+            "Prepared",
+            (),
+            {
+                "outcome": "prepared",
+                "error_code": "",
+                "candidate_count": 1,
+                "english_evidence_refs": ("en",),
+                "chinese_evidence_refs": ("zh",),
+                "prepared_input": candidate.system_payload,
+            },
+        )(),
+    )
+
+    results = runner.continue_frozen_evaluation(
+        rows,
+        preflight_result={
+            "concept_id": "physics-23",
+            "status": "provider_success",
+            "request_count": 1,
+        },
+        execute_ready_item=lambda row: {
+            "concept_id": row.benchmark_concept_id,
+            "status": "provider_success",
+            "request_count": 1,
+        },
+    )
+
+    assert len(rows) == len(results) == 25
+    assert sum(result["status"] == "upstream_not_ready" for result in results) == 22
+    assert results[22]["reused_preflight"] is True

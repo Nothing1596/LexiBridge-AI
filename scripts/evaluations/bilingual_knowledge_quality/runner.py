@@ -60,6 +60,177 @@ class FormalProviderReadinessError(RuntimeError):
         self.error_code = error_code
 
 
+@dataclass(frozen=True)
+class FrozenBenchmarkIdentity:
+    """Scoring-envelope identity; binding_term never becomes system input."""
+
+    concept_id: str
+    binding_term: str = ""
+
+
+@dataclass(frozen=True)
+class ProductionCandidateBindingInput:
+    """Candidate emitted by the production extractor."""
+
+    candidate_id: str
+    candidate_term: str
+    system_payload: Any
+
+
+@dataclass(frozen=True)
+class FrozenEvaluationBootstrapRow:
+    benchmark_concept_id: str
+    binding_status: str
+    system_candidate_id: str = ""
+    system_candidate_term: str = ""
+    provider_ready: bool = False
+    provider_called: bool = False
+    execution_status: str = "upstream_not_ready"
+    preparation_status: str = ""
+    primary_attribution: str = ""
+    included_in_denominator: bool = True
+    rejection_code: str = ""
+    candidate_count: int = 0
+    english_evidence_count: int = 0
+    chinese_evidence_count: int = 0
+    prepared_input: Any = None
+
+
+def _evaluation_binding_key(value: Any) -> str:
+    """Mirror the R4 exact binding without aliases, stemming, or gold repair."""
+
+    return str(value or "").strip().casefold()
+
+
+def build_frozen_evaluation_bootstrap(
+    benchmark_items,
+    production_candidates,
+    *,
+    prepare_candidate,
+) -> tuple[FrozenEvaluationBootstrapRow, ...]:
+    """Keep the benchmark denominator while executing only system candidates."""
+
+    candidates_by_key: dict[str, list[ProductionCandidateBindingInput]] = {}
+    for candidate in tuple(production_candidates):
+        key = _evaluation_binding_key(candidate.candidate_term)
+        if key:
+            candidates_by_key.setdefault(key, []).append(candidate)
+
+    rows = []
+    for benchmark in tuple(benchmark_items):
+        matches = candidates_by_key.get(
+            _evaluation_binding_key(benchmark.binding_term), []
+        )
+        if len(matches) != 1:
+            rows.append(FrozenEvaluationBootstrapRow(
+                benchmark_concept_id=str(benchmark.concept_id),
+                binding_status="missing" if not matches else "ambiguous",
+                execution_status="upstream_not_ready",
+                primary_attribution="CANDIDATE_EXTRACTION_DEFECT",
+                rejection_code=(
+                    "PRODUCTION_CANDIDATE_MISSING"
+                    if not matches
+                    else "PRODUCTION_CANDIDATE_AMBIGUOUS"
+                ),
+            ))
+            continue
+
+        candidate = matches[0]
+        prepared = prepare_candidate(candidate)
+        ready = str(getattr(prepared, "outcome", "")) == "prepared"
+        rows.append(FrozenEvaluationBootstrapRow(
+            benchmark_concept_id=str(benchmark.concept_id),
+            binding_status="matched",
+            system_candidate_id=str(candidate.candidate_id),
+            system_candidate_term=str(candidate.candidate_term),
+            provider_ready=ready,
+            execution_status="provider_ready" if ready else "upstream_not_ready",
+            preparation_status=str(getattr(prepared, "outcome", "") or ""),
+            primary_attribution="" if ready else "ENGLISH_RETRIEVAL_DEFECT",
+            rejection_code=str(getattr(prepared, "error_code", "") or ""),
+            candidate_count=int(getattr(prepared, "candidate_count", 0) or 0),
+            english_evidence_count=len(tuple(
+                getattr(prepared, "english_evidence_refs", ()) or ()
+            )),
+            chinese_evidence_count=len(tuple(
+                getattr(prepared, "chinese_evidence_refs", ()) or ()
+            )),
+            prepared_input=getattr(prepared, "prepared_input", None),
+        ))
+    return tuple(rows)
+
+
+def select_frozen_evaluation_preflight(
+    bootstrap_rows,
+) -> FormalProviderPreflightSelection:
+    """Select the first system-ready row in the preserved frozen order."""
+
+    for row in tuple(bootstrap_rows):
+        if row.provider_ready:
+            readiness = FormalProviderReadiness(
+                concept_id=row.benchmark_concept_id,
+                provider_ready=True,
+                preparation_status=row.preparation_status,
+                candidate_count=row.candidate_count,
+                english_evidence_count=row.english_evidence_count,
+                chinese_evidence_count=row.chinese_evidence_count,
+                prepared_input=row.prepared_input,
+            )
+            return FormalProviderPreflightSelection(
+                row.benchmark_concept_id, readiness
+            )
+    raise FormalProviderReadinessError(
+        "FORMAL_PROVIDER_PREFLIGHT_NO_READY_ITEM",
+        "No system-derived frozen evaluation item satisfies Formal preparation.",
+    )
+
+
+def continue_frozen_evaluation(
+    bootstrap_rows,
+    *,
+    preflight_result,
+    execute_ready_item,
+) -> list[dict[str, Any]]:
+    """Freeze one result per benchmark row and continue past item failures."""
+
+    frozen_preflight = dict(preflight_result or {})
+    results = []
+    for row in tuple(bootstrap_rows):
+        concept_id = row.benchmark_concept_id
+        if not row.provider_ready:
+            results.append({
+                "benchmark_concept_id": concept_id,
+                "concept_id": concept_id,
+                "binding_status": row.binding_status,
+                "system_candidate_id": row.system_candidate_id,
+                "system_candidate_term": row.system_candidate_term,
+                "provider_ready": False,
+                "provider_called": False,
+                "status": "upstream_not_ready",
+                "primary_attribution": row.primary_attribution,
+                "included_in_denominator": True,
+                "error_code": row.rejection_code,
+            })
+            continue
+        if frozen_preflight.get("concept_id") == concept_id:
+            result = {**frozen_preflight, "reused_preflight": True}
+        else:
+            result = dict(execute_ready_item(row))
+            result.setdefault("reused_preflight", False)
+        result.setdefault("benchmark_concept_id", concept_id)
+        result.setdefault("concept_id", concept_id)
+        result.setdefault("binding_status", row.binding_status)
+        result.setdefault("system_candidate_id", row.system_candidate_id)
+        result.setdefault("system_candidate_term", row.system_candidate_term)
+        result.setdefault("provider_ready", True)
+        result.setdefault("provider_called", True)
+        result.setdefault("included_in_denominator", True)
+        results.append(result)
+        if result.get("status") == "provider_failure" and result.get("systemic"):
+            break
+    return results
+
+
 def scan_formal_provider_readiness(
     frozen_concept_order,
     *,
