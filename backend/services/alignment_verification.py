@@ -443,12 +443,18 @@ def build_safe_alignment_verification_persistence(
     raw_summary = raw_summary if isinstance(raw_summary, dict) else {}
     prompt_summary = output_data.get("prompt_summary")
     prompt_summary = prompt_summary if isinstance(prompt_summary, dict) else {}
+    explanation = _safe_provider_text(output_data.get("explanation"), max_length=2000)
+    if not explanation and _text(output_data.get("verification_status")) != "failed":
+        raise AlignmentVerificationError(
+            "formal verification explanation must be nonempty before persistence."
+        )
     safe_output = {
         "provider_name": _safe_provider_text(output_data.get("provider_name"), max_length=120),
         "provider_type": _safe_provider_text(output_data.get("provider_type"), max_length=80),
         "provider_version": _safe_provider_text(output_data.get("provider_version"), max_length=120),
         "alignment_decision": _safe_provider_text(output_data.get("alignment_decision"), max_length=80),
         "alignment_confidence": output_data.get("alignment_confidence"),
+        "explanation": explanation,
         "recommendation": _safe_provider_text(
             output_data.get("recommendation"), fallback="needs_review", max_length=80
         ) or "needs_review",
@@ -736,6 +742,7 @@ def serialize_alignment_verification_run(run: Any) -> dict[str, Any]:
         "alignment_confidence": getattr(run, "alignment_confidence", None),
         "verification_status": getattr(run, "verification_status", ""),
         "alignment_decision": output_payload.get("alignment_decision", ""),
+        "explanation": output_payload.get("explanation", ""),
         "recommendation": getattr(run, "recommendation", ""),
         "risk_labels": _loads_json(getattr(run, "risk_labels", "[]"), []),
         "prompt_version": getattr(run, "prompt_version", ""),
