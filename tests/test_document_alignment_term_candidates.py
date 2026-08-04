@@ -178,12 +178,12 @@ def test_single_chunk_extractor_failure_fails_the_whole_result_without_text_leak
     assert sentinel not in repr(result)
 
 
-def test_more_than_fifty_candidates_is_blocked_without_truncation():
+def test_more_than_fifty_candidates_are_bounded_with_explicit_overflow():
     terms = [{"english_term": f"Term Candidate {index:02d}"} for index in range(FORMAL_DOCUMENT_ALIGNMENT_MAX_ITEMS + 1)]
     result = _extract([_chunk("chunk-a", 0, "content")], lambda text: terms)
-    assert result.outcome == EXTRACTION_OUTCOME_ITEM_LIMIT_EXCEEDED
-    assert result.error_code == ERROR_ITEM_LIMIT_EXCEEDED
-    assert result.candidates == ()
+    assert result.outcome == EXTRACTION_OUTCOME_EXTRACTED
+    assert len(result.candidates) == FORMAL_DOCUMENT_ALIGNMENT_MAX_ITEMS
+    assert len(result.overflow_candidates) == 1
     assert result.canonical_candidate_count == FORMAL_DOCUMENT_ALIGNMENT_MAX_ITEMS + 1
 
 

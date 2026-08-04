@@ -38,6 +38,17 @@ def test_boundary_and_fragmentation_precede_generic_extraction():
     ) == "CANDIDATE_FRAGMENTATION_DEFECT"
 
 
+def test_diagnosis_distinguishes_governance_overflow_from_true_missing():
+    overflow = _trace(
+        candidate_governance_overflow_present=True,
+        candidate_overflow_match_present=True,
+    )
+    missing = _trace(candidate_governance_overflow_present=True)
+
+    assert diagnosis.attribute_failure(overflow) == "CANDIDATE_GOVERNANCE_OVERFLOW"
+    assert diagnosis.attribute_failure(missing) == "CANDIDATE_EXTRACTION_DEFECT"
+
+
 def test_unicode_and_case_are_diagnostic_only():
     comparison = diagnosis.compare_candidate("Electric Potential", "ｅｌｅｃｔｒｉｃ potential")
     assert comparison["normalized_exact"] is True

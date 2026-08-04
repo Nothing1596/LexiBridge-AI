@@ -170,6 +170,10 @@ class BootstrapDocumentAlignmentItemsResult:
     created_item_count: int = 0
     reused_item_count: int = 0
     warning_count: int = 0
+    admitted_candidate_count: int = 0
+    overflow_candidate_count: int = 0
+    overflow_candidate_ids: tuple[str, ...] = ()
+    governance_status: str = ""
     retryable: bool = False
     error_code: str = ""
     error_message: str = ""
@@ -181,11 +185,19 @@ class BootstrapDocumentAlignmentItemsResult:
             "created_item_count",
             "reused_item_count",
             "warning_count",
+            "admitted_candidate_count",
+            "overflow_candidate_count",
         ):
             value = int(getattr(self, name) or 0)
             if value < 0:
                 raise ValueError(f"{name} must be non-negative.")
             object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "overflow_candidate_ids",
+            tuple(str(value or "")[:80] for value in self.overflow_candidate_ids if str(value or "")),
+        )
+        object.__setattr__(self, "governance_status", str(self.governance_status or "")[:80])
         object.__setattr__(self, "error_code", str(self.error_code or "")[:120])
         if self.error_message:
             object.__setattr__(self, "error_message", _safe_message(self.error_message, "Item bootstrap failed."))
@@ -366,10 +378,11 @@ def _persist_candidates(
     command: BootstrapDocumentAlignmentItemsCommand,
     dependencies: BootstrapDocumentAlignmentItemsDependencies,
     run: Any,
-    candidates: tuple[ChunkScopedTermCandidate, ...],
-    warning_count: int,
+    extraction: ChunkScopedTermCandidateExtractionResult,
     now_text: str,
 ):
+    candidates = extraction.candidates
+    warning_count = extraction.warning_count
     model = dependencies.workflow_item_model
     expected_keys = {
         dependencies.item_key_builder(candidate.normalized_term, candidate.source_chunk_uids): candidate
@@ -450,6 +463,32 @@ def _persist_candidates(
     run.stage = ROOT_STAGE_EVIDENCE_RETRIEVAL
     run.total_items = len(expected_keys)
     run.warning_count = warning_count
+    if extraction.overflow_candidates:
+        run.risk_summary = json.dumps(
+            {
+                "candidate_set_overflow": {
+                    "admitted_count": len(extraction.candidates),
+                    "canonical_count": extraction.canonical_candidate_count,
+                    "governance_reason": "candidate_set_item_limit_exceeded",
+                    "item_limit": extraction.item_limit,
+                    "overflow_candidates": [
+                        {
+                            "candidate_id": candidate.candidate_id,
+                            "governance_reason": candidate.governance_reason,
+                            "normalized_term": candidate.normalized_term,
+                            "source_chunk_uids": list(candidate.source_chunk_uids),
+                            "source_uid": candidate.source_uid,
+                        }
+                        for candidate in extraction.overflow_candidates
+                    ],
+                    "overflow_count": len(extraction.overflow_candidates),
+                    "selection_order": "first_chunk_index,normalized_term,candidate_term",
+                }
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     run.error_code = ""
     run.error_message = ""
     run.started_at = run.started_at or now_text
@@ -462,6 +501,13 @@ def _persist_candidates(
         run_status=run.status,
         run_stage=run.stage,
         candidate_count=len(candidates),
+        canonical_candidate_count=extraction.canonical_candidate_count,
+        admitted_candidate_count=len(candidates),
+        overflow_candidate_count=len(extraction.overflow_candidates),
+        overflow_candidate_ids=tuple(
+            candidate.candidate_id for candidate in extraction.overflow_candidates
+        ),
+        governance_status=extraction.governance_status,
         created_item_count=created,
         reused_item_count=reused,
         warning_count=warning_count,
@@ -560,7 +606,7 @@ def _fenced_persistence(
                 error_message=extraction.error_message,
             )
         return _persist_blocked_extraction(command, dependencies, run, extraction, now_text)
-    return _persist_candidates(command, dependencies, run, extraction.candidates, extraction.warning_count, now_text)
+    return _persist_candidates(command, dependencies, run, extraction, now_text)
 
 
 def bootstrap_document_alignment_workflow_items(
