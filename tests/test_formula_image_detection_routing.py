@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import run_mainline_core_capability_acceptance as acceptance
-from services import formula_detection
+from services import document_parse_quality, formula_detection, ocr
 
 
 def _fixture_pdf(tmp_path: Path, fixture_id: str) -> Path:
@@ -171,7 +173,57 @@ def test_upload_persists_formula_region_without_latex_or_formal_item_pollution(a
     assert "FormulaBlock" not in json.dumps(payload["cards"], ensure_ascii=False)
 
 
-def test_acceptance_recheck_reports_formula_region_detection_without_recognition(monkeypatch, tmp_path):
+class _DeterministicAcceptanceOCRProvider:
+    provider_name = "deterministic-acceptance-ocr"
+
+    def is_available(self):
+        return True
+
+    def supports_language(self, language=""):
+        return True
+
+    def recognize_image(self, image_path, language=""):
+        return ocr.OCRTextResult(
+            status="ok",
+            text=(
+                "Fourier Transform Laplace Transform Impulse Response Convolution "
+                "Voltage Divider Operational Amplifier Equivalent Resistance "
+                "Boundary Condition Eigenvalue Time Complexity "
+                "傅里叶变换 拉普拉斯变换 冲激响应 卷积 分压器 运算放大器 "
+                "等效电阻 边界条件 特征值 时间复杂度"
+            ),
+            confidence=100,
+            provider=self.provider_name,
+            language=language or "mixed",
+            blocks=[
+                {
+                    "text": "Deterministic synthetic OCR fixture",
+                    "confidence": 100,
+                    "page_number": 1,
+                    "bbox": [0, 0, 100, 20],
+                }
+            ],
+        )
+
+
+@pytest.mark.parametrize("host_tesseract_available", [False, True])
+def test_acceptance_recheck_reports_formula_region_detection_without_recognition(
+    monkeypatch,
+    tmp_path,
+    host_tesseract_available,
+):
+    discovery = ocr.TesseractExecutableDiscovery(
+        executable_path="synthetic-tesseract" if host_tesseract_available else "",
+        discovery_source="path" if host_tesseract_available else "not_found",
+        safe_error_code=None if host_tesseract_available else "TESSERACT_EXECUTABLE_NOT_FOUND",
+    )
+    monkeypatch.setattr(ocr, "discover_tesseract_executable", lambda **kwargs: discovery)
+    monkeypatch.setattr(ocr, "get_ocr_provider", lambda *args, **kwargs: _DeterministicAcceptanceOCRProvider())
+    monkeypatch.setattr(
+        document_parse_quality,
+        "get_ocr_provider",
+        lambda *args, **kwargs: _DeterministicAcceptanceOCRProvider(),
+    )
     monkeypatch.setenv("OCR_PROVIDER", "none")
     monkeypatch.setenv("FORMULA_OCR_PROVIDER", "none")
     monkeypatch.setenv("LEXIBRIDGE_10CP0_OCR_PROVIDER", "auto")
