@@ -1,14 +1,14 @@
 import os
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 from services.document_alignment_workflow_contract import FORMAL_DOCUMENT_ALIGNMENT_JOB_TYPE
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / "backend" / ".venv-macos" / "bin" / "python"
-PYTHON_CMD = str(PYTHON)
+PYTHON_CMD = sys.executable
 
 LEASE_COLUMNS = {
     "job_uid",
@@ -47,6 +47,24 @@ def _columns(db_path):
 def _indexes(db_path):
     with sqlite3.connect(db_path) as connection:
         return {row[1] for row in connection.execute("pragma index_list(background_job)")}
+
+
+def test_migration_subprocess_uses_active_test_interpreter(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _migrate(tmp_path / "interpreter-contract.db")
+
+    assert captured["command"] == [sys.executable, "scripts/migrate_db.py", "--apply"]
+    assert captured["kwargs"]["cwd"] == ROOT
+    assert captured["kwargs"]["env"]["DATABASE_URL"].endswith("/interpreter-contract.db")
+    assert captured["kwargs"]["check"] is False
 
 
 def test_fresh_and_repeated_migration_create_formal_lease_schema(tmp_path):
