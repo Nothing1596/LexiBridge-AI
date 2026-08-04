@@ -200,7 +200,7 @@ def _candidate_diagnostics(term: str, candidates: list[dict[str, Any]]) -> dict[
         and (
             comp["token_order_independent_exact"]
             or comp["token_overlap"] >= 0.75
-            or (comp["containment"] and len(_tokens(candidate["text"])) >= len(_tokens(term)))
+            or normalize(candidate["text"]).startswith(f"{normalize(term)} ")
         )
     ]
     overlong = [
