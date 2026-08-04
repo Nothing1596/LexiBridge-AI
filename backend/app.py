@@ -5168,6 +5168,7 @@ TERM_NGRAM_STOPWORDS = {
 
 TERM_ACTION_WORDS = {
     "is", "are", "was", "were", "be", "been", "being",
+    "measures", "describes",
     "use", "uses", "used", "using",
     "combine", "combines", "combined", "combining",
     "convert", "converts", "converted", "converting",
@@ -5180,6 +5181,8 @@ TERM_ACTION_WORDS = {
     "has", "have", "had", "do", "does", "did",
     "can", "will", "would", "could", "should", "may", "might", "must"
 }
+
+TERM_DEFINITION_PREDICATES = ("is", "are", "measures", "describes")
 
 TERM_SYMBOL_WORDS = {
     "omega", "lambda", "theta", "sigma", "delta", "mu", "pi", "sqrt", "integral",
@@ -5354,7 +5357,12 @@ def extract_terms_from_text(text):
             continue
 
         definition_subject = re.match(
-            r"^\s*((?:[A-Za-z][A-Za-z0-9]*(?:[-/][A-Za-z0-9]+)?(?:\s+|$)){1,4}?)(?:is|are)\b",
+            (
+                r"^\s*((?:[A-Za-z][A-Za-z0-9]*(?:[-/][A-Za-z0-9]+)?"
+                r"(?:\s+|$)){1,4}?)(?:"
+                + "|".join(TERM_DEFINITION_PREDICATES)
+                + r")\b"
+            ),
             sentence,
             re.I,
         )
