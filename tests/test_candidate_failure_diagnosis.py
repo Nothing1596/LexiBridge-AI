@@ -49,6 +49,20 @@ def test_diagnosis_distinguishes_governance_overflow_from_true_missing():
     assert diagnosis.attribute_failure(missing) == "CANDIDATE_EXTRACTION_DEFECT"
 
 
+def test_residual_boundary_requires_a_term_leading_definition_fragment():
+    mass = diagnosis._candidate_diagnostics(
+        "mass",
+        [{"id": "1", "text": "Mass measures the amount", "length": 24, "normalized": "mass measures the amount"}],
+    )
+    force = diagnosis._candidate_diagnostics(
+        "force",
+        [{"id": "2", "text": "Centripetal force", "length": 17, "normalized": "centripetal force"}],
+    )
+
+    assert mass["overlong"]
+    assert force["overlong"] == []
+
+
 def test_unicode_and_case_are_diagnostic_only():
     comparison = diagnosis.compare_candidate("Electric Potential", "ｅｌｅｃｔｒｉｃ potential")
     assert comparison["normalized_exact"] is True

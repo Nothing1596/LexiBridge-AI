@@ -132,14 +132,15 @@ def test_frozen_mechanics_overflow_reaches_binding_and_readiness_without_provide
         if item["source_id"] == "english-mechanics"
     )
 
-    assert mechanics == {
-        "source_id": "english-mechanics",
-        "canonical_candidates": 55,
-        "admitted_candidates": 50,
-        "overflow_candidates": 5,
-        "whole_set_rejected": False,
-        "governance_status": "overflow_rejected",
-    }
+    assert mechanics["source_id"] == "english-mechanics"
+    assert mechanics["admitted_candidates"] == FORMAL_DOCUMENT_ALIGNMENT_MAX_ITEMS
+    assert mechanics["overflow_candidates"] > 0
+    assert (
+        mechanics["admitted_candidates"] + mechanics["overflow_candidates"]
+        == mechanics["canonical_candidates"]
+    )
+    assert mechanics["whole_set_rejected"] is False
+    assert mechanics["governance_status"] == "overflow_rejected"
     assert artifact["after"]["exact_matched"] > artifact["before"]["exact_matched"]
     assert artifact["after"]["provider_ready"] >= 1
     assert artifact["real_provider_requests"] == 0

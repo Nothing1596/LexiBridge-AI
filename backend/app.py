@@ -5338,6 +5338,7 @@ def extract_terms_from_text(text):
     display_form = {}
     contexts = {}
     boosts = {}
+    definition_subject_keys = set()
 
     add_known_kb_terms(text, raw_counts, display_form, contexts, boosts)
 
@@ -5352,6 +5353,17 @@ def extract_terms_from_text(text):
         if not tokens:
             continue
 
+        definition_subject = re.match(
+            r"^\s*((?:[A-Za-z][A-Za-z0-9]*(?:[-/][A-Za-z0-9]+)?(?:\s+|$)){1,4}?)(?:is|are)\b",
+            sentence,
+            re.I,
+        )
+        if definition_subject:
+            subject = " ".join(definition_subject.group(1).split())
+            subject_words = subject.split()
+            if not is_ngram_noise(subject_words):
+                definition_subject_keys.add(subject.casefold())
+
         for ngram_size in (4, 3, 2, 1):
             if len(tokens) < ngram_size:
                 continue
@@ -5364,6 +5376,13 @@ def extract_terms_from_text(text):
 
                 term = " ".join(words)
                 add_candidate(raw_counts, display_form, contexts, boosts, text, term)
+
+    # A leading "X is/are ..." clause is a production-derived definition
+    # boundary. It admits the exact subject span without treating the whole
+    # definition as a term or relying on a domain vocabulary.
+    for key in definition_subject_keys:
+        if key in raw_counts:
+            boosts[key] = max(boosts.get(key, 0), 12)
 
     scored = []
 
