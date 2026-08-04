@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from services.document_alignment_item_bootstrap import (
     BOOTSTRAP_OUTCOME_CREATED,
     BOOTSTRAP_OUTCOME_INVALID_RUN_STATE,
-    BOOTSTRAP_OUTCOME_ITEM_LIMIT_EXCEEDED,
     BOOTSTRAP_OUTCOME_ITEM_IDEMPOTENCY_CONFLICT,
     BOOTSTRAP_OUTCOME_LEASE_EXPIRED,
     BOOTSTRAP_OUTCOME_LEASE_NOT_OWNED,
@@ -327,7 +326,7 @@ def test_repeated_bootstrap_reuses_items_without_resetting_downstream_state(app_
     _cleanup(app_module)
 
 
-def test_no_candidates_and_item_limit_block_root_without_creating_items(app_module):
+def test_no_candidates_block_but_item_overflow_preserves_bounded_items(app_module):
     _, _, lease = _setup(app_module)
     no_candidates = bootstrap_document_alignment_workflow_items(
         _command(lease),
@@ -347,10 +346,22 @@ def test_no_candidates_and_item_limit_block_root_without_creating_items(app_modu
         _dependencies(app_module, extractor=lambda text: terms),
     )
     run = app_module.DocumentAlignmentWorkflowRun.query.filter_by(run_uid="workflow-bootstrap-9c5a").one()
-    assert limited.outcome == BOOTSTRAP_OUTCOME_ITEM_LIMIT_EXCEEDED
-    assert run.status == ROOT_STATUS_BLOCKED
-    assert run.error_code == "DOCUMENT_ALIGNMENT_ITEM_LIMIT_EXCEEDED"
-    assert app_module.DocumentAlignmentWorkflowItem.query.count() == 0
+    governance = json.loads(run.risk_summary)["candidate_set_overflow"]
+    assert limited.outcome == BOOTSTRAP_OUTCOME_CREATED
+    assert limited.canonical_candidate_count == 51
+    assert limited.admitted_candidate_count == 50
+    assert limited.overflow_candidate_count == 1
+    assert len(limited.overflow_candidate_ids) == 1
+    assert run.status == ROOT_STATUS_PROCESSING
+    assert run.error_code == ""
+    assert app_module.DocumentAlignmentWorkflowItem.query.count() == 50
+    assert governance["canonical_count"] == 51
+    assert governance["admitted_count"] == 50
+    assert governance["overflow_count"] == 1
+    assert governance["item_limit"] == 50
+    assert governance["overflow_candidates"][0]["candidate_id"] == limited.overflow_candidate_ids[0]
+    assert governance["overflow_candidates"][0]["source_uid"] == "source-bootstrap-9c5a"
+    assert governance["overflow_candidates"][0]["source_chunk_uids"]
     _cleanup(app_module)
 
 

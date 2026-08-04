@@ -242,4 +242,4 @@ def test_acceptance_recheck_reports_formula_region_detection_without_recognition
     assert formula["formula"]["formula_detection_methods"] == ["pdf_raster_image_formula_heuristic"]
     assert formula["formula"]["formula_region_hashes_present"] is True
     assert formula["formula"]["formula_provenance_present"] is True
-    assert result["final_status"] == "CANDIDATE_GOVERNANCE_BLOCKS_MAINLINE"
+    assert result["final_status"] == "BILINGUAL_EVIDENCE_PIPELINE_BLOCKS_MAINLINE"

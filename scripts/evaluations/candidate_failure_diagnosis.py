@@ -50,6 +50,8 @@ class DiagnosticTrace:
     benchmark_status: str
     candidate_alias_present: bool = False
     source_candidate_limit_exceeded: bool = False
+    candidate_governance_overflow_present: bool = False
+    candidate_overflow_match_present: bool = False
     ambiguous_binding: bool = False
 
 
@@ -93,6 +95,8 @@ def attribute_failure(trace: DiagnosticTrace) -> str:
         return "CHUNKING_DEFECT"
     if trace.binding_status == "matched":
         return "NO_DEFECT_MATCHED"
+    if trace.candidate_overflow_match_present:
+        return "CANDIDATE_GOVERNANCE_OVERFLOW"
     if trace.source_candidate_limit_exceeded or trace.overlong_candidate_present:
         return "CANDIDATE_BOUNDARY_DEFECT"
     if trace.fragmented_candidate_present:
@@ -334,7 +338,20 @@ def run_diagnosis() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[st
                     }
                     for candidate in formal.candidates
                 ]
-                candidate_diag = _candidate_diagnostics(gold.english_term, final_candidates or raw_candidates)
+                overflow_candidates = [
+                    {
+                        "id": candidate.candidate_id,
+                        "text": candidate.candidate_term,
+                        "chunk_uids": list(candidate.source_chunk_uids),
+                        "length": len(candidate.candidate_term),
+                        "normalized": candidate.normalized_term,
+                    }
+                    for candidate in formal.overflow_candidates
+                ]
+                candidate_diag = _candidate_diagnostics(
+                    gold.english_term,
+                    final_candidates or overflow_candidates or raw_candidates,
+                )
                 source_present, _ = _contains(en_source.text, (gold.english_term, *english_aliases))
                 parsed_present, _ = _contains(en_doc.parsed_text, (gold.english_term, *english_aliases))
                 chunk_present = any(_contains(chunk.content, (gold.english_term, *english_aliases))[0] for chunk in en_chunks)
@@ -342,6 +359,10 @@ def run_diagnosis() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[st
                 zh_parsed_present, _ = _contains(zh_doc.parsed_text, (chinese_term, *chinese_aliases))
                 zh_chunk_present = any(_contains(chunk.content, (chinese_term, *chinese_aliases))[0] for chunk in zh_chunks)
                 exact_final = [item for item in final_candidates if normalize(item["text"]) == normalize(gold.english_term)]
+                exact_overflow = [
+                    item for item in overflow_candidates
+                    if normalize(item["text"]) == normalize(gold.english_term)
+                ]
                 binding = "matched" if len(exact_final) == 1 else ("ambiguous" if len(exact_final) > 1 else "missing")
                 trace = DiagnosticTrace(
                     concept_id=gold.concept_id,
@@ -356,6 +377,8 @@ def run_diagnosis() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[st
                     binding_status=binding,
                     benchmark_status=audit["benchmark_status"],
                     source_candidate_limit_exceeded=formal.outcome == "item_limit_exceeded",
+                    candidate_governance_overflow_present=bool(formal.overflow_candidates),
+                    candidate_overflow_match_present=bool(exact_overflow),
                     ambiguous_binding=binding == "ambiguous",
                 )
                 primary = attribute_failure(trace)
@@ -364,6 +387,7 @@ def run_diagnosis() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[st
                     "CHUNKING_DEFECT": "chunking",
                     "CANDIDATE_EXTRACTION_DEFECT": "candidate_extraction",
                     "CANDIDATE_BOUNDARY_DEFECT": "candidate_boundary",
+                    "CANDIDATE_GOVERNANCE_OVERFLOW": "candidate_governance",
                     "CANDIDATE_FRAGMENTATION_DEFECT": "candidate_fragmentation",
                     "NORMALIZATION_DEFECT": "normalization",
                     "BINDING_DEFECT": "binding",
@@ -392,6 +416,8 @@ def run_diagnosis() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[st
                     "earliest_failure_stage": earliest,
                     "disappearance_stage": earliest,
                     "primary_attribution": primary,
+                    "candidate_governance_overflow_present": trace.candidate_governance_overflow_present,
+                    "candidate_overflow_match_present": trace.candidate_overflow_match_present,
                     "english_source_id": en_source.source_id,
                     "chinese_source_id": zh_source.source_id,
                     "chunk_ids": [str(chunk.chunk_uid) for chunk in en_chunks if _contains(chunk.content, (gold.english_term,))[0]][:5],
@@ -407,6 +433,8 @@ def run_diagnosis() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[st
                         f"formal_extraction_outcome={formal.outcome}",
                         f"raw_candidate_count={len(raw_candidates)}",
                         f"canonical_candidate_count={formal.canonical_candidate_count}",
+                        f"admitted_candidate_count={formal.admitted_candidate_count}",
+                        f"overflow_candidate_count={formal.overflow_candidate_count}",
                         *audit["secondary_observations"],
                     ],
                     "included_in_denominator": True,
