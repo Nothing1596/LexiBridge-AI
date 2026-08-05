@@ -609,6 +609,7 @@ def retrieve_bilingual_evidence(
                 chinese_candidates,
                 generated_candidates,
                 pair_candidates,
+                consistency_backend=reranker_backend,
             )
     risk_labels = _merge_labels(
         classify_bilingual_evidence_risks(english_candidates, chinese_candidates, input_data),

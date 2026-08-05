@@ -40,6 +40,11 @@ def _input(**overrides):
         "reranker_model_revision": "fixed",
         "english_representation_hash": "a" * 64,
         "chinese_representation_hash": "b" * 64,
+        "pair_consistency_score": 7.0,
+        "english_binding_status": "matched",
+        "retrieval_status": "ready",
+        "candidate_pool_status": "ready",
+        "pair_execution_status": "succeeded",
     }
     value.update(overrides)
     return qualification.BilingualEvidenceQualificationInput(**value)
@@ -106,6 +111,16 @@ def test_workflow_adapter_consumes_only_the_production_selected_top1():
         "chinese_representation_hash": "b" * 64,
         "score_components": {},
     }
+    class _ConsistencyBackend:
+        model_id = "BAAI/bge-reranker-v2-m3"
+        model_revision = "79c481748842b7efa0a12db59915db91731f0b93"
+
+        def readiness(self):
+            return type("Readiness", (), {"ready": True})()
+
+        def score_pairs(self, pairs):
+            return [7.0 for _ in pairs]
+
     result = qualification.qualify_workflow_top1(
         {
             "english_candidate_uid": "en-candidate-1",
@@ -131,6 +146,7 @@ def test_workflow_adapter_consumes_only_the_production_selected_top1():
             "retrieval_rank": 1,
         }],
         [pair, {**pair, "rank": 2, "chinese_candidate_uid": "other", "final_score": 1.5}],
+        consistency_backend=_ConsistencyBackend(),
     )
     assert result.decision == qualification.QUALIFIED
     assert result.chinese_provenance["chunk_uid"] == "zh-chunk-1"

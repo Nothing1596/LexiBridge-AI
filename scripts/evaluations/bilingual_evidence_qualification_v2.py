@@ -235,7 +235,7 @@ def evaluate(backends):
                 ),
                 "",
             )
-            result = qualification.qualify_bilingual_evidence(
+            result = qualification.qualify_bilingual_evidence_v1(
                 _qualification_input(item, row, english_context, chinese_context)
             )
             row["qualification_decision"] = result.decision
@@ -307,7 +307,7 @@ def evaluate(backends):
         "reason_counts": dict(sorted(reasons.items())),
         "rows": rows,
         "confusion_groups": _confusion_rows(rows),
-        "policy": qualification.policy_manifest(),
+        "policy": qualification.legacy_policy_manifest(),
         "external_api_requests": 0,
         "real_provider_requests": 0,
         "scoring_reference_data_used_by_policy": False,
