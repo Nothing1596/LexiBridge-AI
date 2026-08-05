@@ -22,6 +22,7 @@ from services.formal_document_alignment_provider_selection import (
 
 PREPARATION_OUTCOME_PREPARED = "prepared"
 PREPARATION_OUTCOME_EVIDENCE_INSUFFICIENT = "evidence_insufficient"
+PREPARATION_OUTCOME_EVIDENCE_QUALIFICATION_REQUIRED = "evidence_qualification_required"
 PREPARATION_OUTCOME_CHINESE_CANDIDATE_UNAVAILABLE = "chinese_candidate_unavailable"
 PREPARATION_OUTCOME_SOURCE_CHANGED = "source_changed"
 PREPARATION_OUTCOME_CHUNK_NOT_AVAILABLE = "chunk_not_available"
@@ -466,6 +467,29 @@ def prepare_document_alignment_item(
         chinese_refs = tuple(sorted({_evidence_ref(candidate) for candidate in chinese_candidates if _evidence_ref(candidate)}))
         candidate_ref = _candidate_ref(selected)
         risk_labels = _labels(item.risk_labels, candidate_risk_labels, evidence.risk_labels)
+        qualification = getattr(evidence, "evidence_qualification", None)
+        if evidence.bilingual_pair_candidates and (
+            not isinstance(qualification, dict)
+            or qualification.get("decision") != "QUALIFIED"
+        ):
+            session.rollback()
+            reasons = (
+                qualification.get("reason_codes", [])
+                if isinstance(qualification, dict)
+                else ["EVIDENCE_QUALIFICATION_INPUT_INCOMPLETE"]
+            )
+            return _result(
+                command,
+                PREPARATION_OUTCOME_EVIDENCE_QUALIFICATION_REQUIRED,
+                english_evidence_refs=english_refs,
+                chinese_evidence_refs=chinese_refs,
+                chinese_candidate_values=(selected["chinese_term"],),
+                chinese_candidate_provenance_refs=(candidate_ref,),
+                risk_labels=_labels(risk_labels, reasons),
+                candidate_count=len(candidate_values),
+                error_code="DOCUMENT_ALIGNMENT_EVIDENCE_QUALIFICATION_REQUIRED",
+                error_message="Governed bilingual evidence qualification is required.",
+            )
         if not english_refs or not chinese_refs:
             session.rollback()
             return _result(
@@ -508,6 +532,18 @@ def prepare_document_alignment_item(
             parser_version=dependencies.parser_version,
             output_schema_version=dependencies.output_schema_version,
             risk_labels=risk_labels,
+            evidence_qualification_result_id=str(
+                (qualification or {}).get("result_id") or ""
+            ),
+            evidence_qualification_decision=str(
+                (qualification or {}).get("decision") or ""
+            ),
+            evidence_qualification_policy=(
+                f"{(qualification or {}).get('policy_id')}@"
+                f"{(qualification or {}).get('policy_version')}"
+                if qualification
+                else ""
+            ),
         )
         session.rollback()
         return _result(
