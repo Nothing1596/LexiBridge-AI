@@ -299,6 +299,9 @@ class DocumentAlignmentItemVerificationDependencies:
     lease_seconds: int = 30
     actor_role: str = "teacher"
     evaluation_context: Any = field(default=None, repr=False, compare=False)
+    evaluate_provider_readiness: Callable[..., Any] | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 _ALLOWED_PROVIDER_TYPES = frozenset({"mock", "fake_llm", "replay_llm", "local", "deterministic"})
@@ -767,6 +770,44 @@ def _block_item(
     )
 
 
+def _hold_item_for_provider_readiness(
+    command,
+    dependencies,
+    mapping,
+    item,
+):
+    """Keep a non-ready item in governed review without executing a Provider."""
+
+    error_code = "DOCUMENT_ALIGNMENT_PROVIDER_READINESS_NOT_APPROVED"
+    mapping.execution_status = ITEM_VERIFICATION_EXECUTION_STATUS_NEEDS_REVIEW
+    mapping.safe_error_code = error_code
+    mapping.safe_error_message = error_code
+    item.status = ITEM_STATUS_NEEDS_REVIEW
+    item.stage = ITEM_STAGE_TERMINAL
+    item.error_code = error_code
+    item.error_message = error_code
+    audit_created = _audit_once(
+        dependencies,
+        execution_key=mapping.execution_key,
+        event_type="item_provider_readiness_not_approved",
+        command=command,
+        result="success",
+        error_code=error_code,
+        error_message=error_code,
+    )
+    dependencies.session.commit()
+    return _result(
+        command,
+        outcome="needs_review",
+        mapping=mapping,
+        item=item,
+        audit_events_created=int(audit_created),
+        recommendation="needs_review",
+        error_code=error_code,
+        error_message=error_code,
+    )
+
+
 def execute_document_alignment_item_verification(
     command: ExecuteDocumentAlignmentItemVerificationCommand,
     dependencies: DocumentAlignmentItemVerificationDependencies,
@@ -959,6 +1000,31 @@ def execute_document_alignment_item_verification(
         item.stage = ITEM_STAGE_DRAFT_CREATION
         session.commit()
         reused_draft = draft_result.reused
+
+    if dependencies.evaluate_provider_readiness is not None:
+        readiness = dependencies.evaluate_provider_readiness(
+            prepared,
+            session=session,
+            policy_model=models.provider_policy,
+            execution_key=execution_key,
+        )
+        if not bool(getattr(readiness, "execution_admission", False)):
+            lease_result = _lease_fence(command, dependencies)
+            if lease_result.outcome != LEASE_OUTCOME_ACCEPTED:
+                session.rollback()
+                return _lease_rejection_result(command, lease_result)
+            mapping = session.query(models.execution).filter_by(
+                execution_key=execution_key
+            ).one()
+            item = session.query(models.workflow_item).filter_by(
+                item_uid=command.workflow_item_uid
+            ).one()
+            return _hold_item_for_provider_readiness(
+                command,
+                dependencies,
+                mapping,
+                item,
+            )
 
     verification_input = dependencies.verification.validate_input(
         _in_memory_verification_input(prepared, mapping.draft_card_uid)

@@ -18,6 +18,7 @@ from services import document_alignment_item_verification_adapter as adapter
 from services import document_alignment_processing_orchestrator as orchestrator
 from services import provider_governance
 from services import provider_preflight
+from services import provider_readiness
 from services.document_alignment_item_bootstrap import (
     BootstrapDocumentAlignmentItemsCommand,
     BootstrapDocumentAlignmentItemsDependencies,
@@ -198,6 +199,7 @@ def build_document_alignment_processing_dependencies(
         current_time_factory=current_time_factory,
         actor_role="teacher",
         evaluation_context=evaluation_context,
+        evaluate_provider_readiness=provider_readiness.evaluate_formal_prepared_readiness,
     )
 
     return orchestrator.DocumentAlignmentProcessingDependencies(

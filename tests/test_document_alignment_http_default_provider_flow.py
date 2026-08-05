@@ -96,13 +96,7 @@ def test_http_admission_default_selection_reaches_ready_for_review_without_run_m
         assert all(item.status == ITEM_STATUS_NEEDS_REVIEW for item in items)
         assert app_module.AlignmentProviderPreflightRun.query.filter(
             app_module.AlignmentProviderPreflightRun.execution_key.in_(execution_keys)
-        ).count() == 2
-        assert all(
-            preflight.overall_ready
-            for preflight in app_module.AlignmentProviderPreflightRun.query.filter(
-                app_module.AlignmentProviderPreflightRun.execution_key.in_(execution_keys)
-            ).all()
-        )
+        ).count() == 0
         assert {
             "runs": app_module.AlignmentRun.query.count(),
             "cards": app_module.TerminologyCard.query.count(),

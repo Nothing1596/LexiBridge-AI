@@ -114,7 +114,9 @@ def test_real_http_retryable_requeue_and_next_claim_recovers_five_rounds(app_mod
                 assert second_lease.execution_attempt == 2
                 assert job.status == "completed"
                 assert job.attempt_count == 1
-                assert logical_counts(app_module, run_uid)["usage"] == 2
+                # Legacy inline bilingual evidence is held for review before
+                # Provider execution by the Task 12H readiness gate.
+                assert logical_counts(app_module, run_uid)["usage"] == 0
 
 
 def test_claim_crash_stale_reclaim_fences_every_old_attempt_finalizer(app_module):
@@ -153,7 +155,7 @@ def test_claim_crash_stale_reclaim_fences_every_old_attempt_finalizer(app_module
             assert new_lease.execution_attempt == 2
             assert job.attempt_count == 0
             assert job.status == "completed"
-            assert logical_counts(app_module, run_uid)["usage"] == 2
+            assert logical_counts(app_module, run_uid)["usage"] == 0
 
 
 def test_partial_checkpoint_crash_resumes_without_duplicate_logical_records(app_module):
@@ -166,7 +168,7 @@ def test_partial_checkpoint_crash_resumes_without_duplicate_logical_records(app_
             before = logical_counts(app_module, run_uid)
             assert interrupted.outcome == "retryable_interruption"
             assert before["needs_review"] == 1
-            assert before["usage"] == 1
+            assert before["usage"] == 0
             assert find_job_for_run(app_module, run_uid).attempt_count == 0
 
             new_lease = reclaim_after_expiry(
@@ -181,7 +183,7 @@ def test_partial_checkpoint_crash_resumes_without_duplicate_logical_records(app_
             after = logical_counts(app_module, run_uid)
             assert result.outcome == "completed"
             assert after["items"] == after["needs_review"] == 2
-            assert after["preflights"] == after["verifications"] == after["usage"] == 2
+            assert after["preflights"] == after["verifications"] == after["usage"] == 0
             assert find_job_for_run(app_module, run_uid).attempt_count == 0
 
 

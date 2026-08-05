@@ -74,7 +74,7 @@ def test_partial_business_failure_completes_transport_with_warnings(app_module):
         assert statuses.count("blocked") == run.body["data"]["blocked_items"]
         with app_module.app.app_context():
             assert find_job_for_run(app_module, run_uid).status == "completed"
-            assert logical_counts(app_module, run_uid)["usage"] == 1
+            assert logical_counts(app_module, run_uid)["usage"] == 0
 
 
 def test_all_business_blocked_is_not_transport_failure(app_module):

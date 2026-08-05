@@ -66,8 +66,8 @@ def test_real_http_admission_retryable_requeue_next_claim_and_resume(
         assert counts == {
             "items": 2,
             "needs_review": 2,
-            "preflights": 2,
-            "verifications": 2,
-            "usage": 2,
+            "preflights": 0,
+            "verifications": 0,
+            "usage": 0,
             "failed_audits": 0,
         }
