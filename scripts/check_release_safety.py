@@ -16,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_TEXT_BYTES = 2_000_000
+MAX_RELEASE_FILE_BYTES = 25_000_000
 
 ALLOWED_ENV_EXAMPLES = {
     ".env.example",
@@ -39,6 +40,8 @@ FORBIDDEN_DIRS = {
     "__pycache__",
     ".pytest_cache",
     "node_modules",
+    "model_cache",
+    "models",
     "uploads",
 }
 
@@ -52,6 +55,11 @@ FORBIDDEN_SUFFIXES = {
     ".tmp",
     ".temp",
     ".bak",
+    ".gguf",
+    ".onnx",
+    ".pt",
+    ".pth",
+    ".safetensors",
     ".swp",
 }
 
@@ -114,7 +122,7 @@ PLACEHOLDER_TOKENS = {
 }
 
 ENV_SECRET_VALUE_RE = re.compile(
-    r"(?im)^\s*([A-Z0-9_]*(?:API_KEY|SECRET|TOKEN|PASSWORD|APP_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*)"
+    r"(?m)^\s*([A-Z0-9_]*(?:API_KEY|SECRET|TOKEN|PASSWORD|APP_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*)"
     r"\s*=\s*([^\s#]+)"
 )
 
@@ -162,6 +170,7 @@ class ScanItem:
     display_path: str
     parts: tuple[str, ...]
     data: bytes | None = None
+    size_bytes: int = 0
 
 
 def is_allowed_placeholder(value: str) -> bool:
@@ -249,7 +258,7 @@ def iter_directory_items(root: Path, use_git_candidates: bool) -> list[ScanItem]
                 data = path.read_bytes()
             except OSError:
                 data = None
-        items.append(ScanItem(display, parts, data))
+        items.append(ScanItem(display, parts, data, path.stat().st_size))
     return items
 
 
@@ -267,7 +276,7 @@ def iter_zip_items(path: Path) -> list[ScanItem]:
                     data = archive.read(info)
                 except (OSError, zipfile.BadZipFile):
                     data = None
-            items.append(ScanItem(display, parts, data))
+            items.append(ScanItem(display, parts, data, info.file_size))
     return items
 
 
@@ -284,7 +293,7 @@ def iter_tar_items(path: Path) -> list[ScanItem]:
                 extracted = archive.extractfile(member)
                 if extracted:
                     data = extracted.read(MAX_TEXT_BYTES + 1)
-            items.append(ScanItem(display, parts, data))
+            items.append(ScanItem(display, parts, data, member.size))
     return items
 
 
@@ -312,6 +321,8 @@ def check_path(item: ScanItem) -> list[str]:
         issues.append(f"forbidden runtime suffix: {item.display_path}")
     if suffix in ARCHIVE_SUFFIXES or suffix == ".tar.gz":
         issues.append(f"nested archive/release package: {item.display_path}")
+    if item.size_bytes > MAX_RELEASE_FILE_BYTES:
+        issues.append(f"oversized release file: {item.display_path}")
     for part in item.parts[:-1]:
         if part in FORBIDDEN_DIRS:
             issues.append(f"forbidden path component '{part}': {item.display_path}")
