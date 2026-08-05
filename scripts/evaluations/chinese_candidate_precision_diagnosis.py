@@ -539,6 +539,12 @@ def run_diagnosis() -> dict[str, Any]:
                     "evidence_readiness_status": str(prepared.outcome),
                     "evidence_qualified": str(prepared.outcome) == "prepared",
                     "provider_ready": str(prepared.outcome) == "prepared",
+                    "prepared_english_evidence_refs": list(
+                        getattr(prepared, "english_evidence_refs", ()) or ()
+                    ),
+                    "prepared_chinese_evidence_refs": list(
+                        getattr(prepared, "chinese_evidence_refs", ()) or ()
+                    ),
                     "earliest_failure_stage": _earliest_stage(attribution),
                     "primary_attribution": attribution,
                     "secondary_observations": observations,
