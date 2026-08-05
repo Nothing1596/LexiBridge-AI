@@ -17,12 +17,18 @@ from services import cross_language_retrieval
 from services import evidence_retrieval
 from services import parse_quality_risk
 from services.local_multilingual_embedding import LocalMultilingualEmbeddingBackend
+from services.local_bilingual_reranker import (
+    BILINGUAL_RERANKER_BACKEND_UNAVAILABLE,
+    LocalBilingualReranker,
+    LocalBilingualRerankerError,
+)
 
 
 BILINGUAL_RETRIEVAL_VERSION = "lexical-v1"
 LOW_EVIDENCE_SCORE_THRESHOLD = 0.35
 MAX_BILINGUAL_LIMIT = 20
 CROSS_LANGUAGE_BACKEND_NAME = "local-multilingual-e5-small"
+BILINGUAL_RERANKER_BACKEND_NAME = "local-bge-reranker-v2-m3"
 
 
 class BilingualEvidenceWorkflowError(ValueError):
@@ -449,6 +455,7 @@ def retrieve_bilingual_evidence(
     discipline: str = "",
     cross_language_embedding_backend: Any | None = None,
     bilingual_pairing_backend: Any | None = None,
+    bilingual_reranker_backend: Any | None = None,
 ) -> BilingualEvidenceResult:
     del audit_context
     input_data = build_bilingual_evidence_query({
@@ -553,6 +560,24 @@ def retrieve_bilingual_evidence(
                 model_cache_dir=cache_dir
             )
         if pairing_backend is not None:
+            reranker_backend = bilingual_reranker_backend
+            reranker_configured = os.environ.get(
+                "LEXIBRIDGE_BILINGUAL_RERANKER_BACKEND", ""
+            ).strip()
+            if (
+                reranker_backend is None
+                and reranker_configured == BILINGUAL_RERANKER_BACKEND_NAME
+            ):
+                cache_dir = os.environ.get(
+                    "LEXIBRIDGE_MODEL_CACHE_DIR", ""
+                ).strip()
+                if not cache_dir:
+                    raise LocalBilingualRerankerError(
+                        BILINGUAL_RERANKER_BACKEND_UNAVAILABLE
+                    )
+                reranker_backend = LocalBilingualReranker(
+                    model_cache_dir=cache_dir
+                )
             english_provenance = {}
             if english_candidates:
                 english_provenance = {
@@ -572,6 +597,7 @@ def retrieve_bilingual_evidence(
                     ),
                     generated_candidates,
                     pairing_backend,
+                    reranker_backend=reranker_backend,
                 )
             ]
     risk_labels = _merge_labels(

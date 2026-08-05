@@ -114,7 +114,7 @@ def _chinese_passages(manifest):
     return passages
 
 
-def evaluate(backend):
+def evaluate(backend, reranker_backend=None):
     timed = TimedBackend(backend)
     gold = json.loads((FIX / "gold.json").read_text())
     manifest = json.loads((FIX / "manifest.json").read_text())
@@ -144,6 +144,7 @@ def evaluate(backend):
             "pair_summaries": "",
             "correct_pair_rank": "",
             "semantic_score": "",
+            "cross_encoder_score": "",
             "final_score": "",
             "score_margin": "",
             "primary_attribution": "",
@@ -228,6 +229,7 @@ def evaluate(backend):
                 ),
                 candidates,
                 timed,
+                reranker_backend=reranker_backend,
             )
             ranking_seconds += time.perf_counter() - started
             pairs_scored += len(pairs)
@@ -276,6 +278,11 @@ def evaluate(backend):
             ),
             "correct_pair_rank": correct_pair_rank or "",
             "semantic_score": correct_pair.semantic_score if correct_pair else "",
+            "cross_encoder_score": (
+                correct_pair.cross_encoder_score
+                if correct_pair and correct_pair.cross_encoder_score is not None
+                else ""
+            ),
             "final_score": correct_pair.final_score if correct_pair else "",
             "score_margin": margin,
             "primary_attribution": attribution,
