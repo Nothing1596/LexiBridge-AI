@@ -147,6 +147,26 @@ def evaluate(backend, reranker_backend=None):
             "cross_encoder_score": "",
             "final_score": "",
             "score_margin": "",
+            "selected_pair_text": "",
+            "selected_pair_uid": "",
+            "selected_pair_semantic_score": "",
+            "selected_pair_cross_encoder_score": "",
+            "selected_pair_final_score": "",
+            "selected_pair_margin": "",
+            "selected_pair_source_uid": "",
+            "selected_pair_chunk_uid": "",
+            "selected_pair_retrieval_rank": "",
+            "selected_pair_retrieval_score": "",
+            "selected_pair_extraction_rank": "",
+            "selected_pair_extraction_score": "",
+            "selected_pair_backend_id": "",
+            "selected_pair_model_id": "",
+            "selected_pair_model_revision": "",
+            "selected_pair_reranker_backend_id": "",
+            "selected_pair_reranker_model_id": "",
+            "selected_pair_reranker_model_revision": "",
+            "selected_pair_english_hash": "",
+            "selected_pair_chinese_hash": "",
             "primary_attribution": "",
         }
         if binding != "matched":
@@ -255,6 +275,22 @@ def evaluate(backend, reranker_backend=None):
             if correct_pair and strongest_wrong
             else ""
         )
+        selected_pair = pairs[0] if pairs else None
+        selected_candidate = next(
+            (
+                candidate
+                for candidate in candidates
+                if selected_pair
+                and candidate.get("candidate_uid")
+                == selected_pair.chinese_candidate_uid
+            ),
+            None,
+        )
+        selected_margin = (
+            round(pairs[0].final_score - pairs[1].final_score, 6)
+            if len(pairs) > 1
+            else (round(pairs[0].final_score, 6) if pairs else "")
+        )
         if not identification_eligible:
             attribution = "UPSTREAM_CROSS_LANGUAGE_RETRIEVAL_MISS"
         elif not pairing_eligible:
@@ -285,6 +321,70 @@ def evaluate(backend, reranker_backend=None):
             ),
             "final_score": correct_pair.final_score if correct_pair else "",
             "score_margin": margin,
+            "selected_pair_text": (
+                selected_pair.chinese_candidate_text if selected_pair else ""
+            ),
+            "selected_pair_uid": (
+                selected_pair.chinese_candidate_uid if selected_pair else ""
+            ),
+            "selected_pair_semantic_score": (
+                selected_pair.semantic_score if selected_pair else ""
+            ),
+            "selected_pair_cross_encoder_score": (
+                selected_pair.cross_encoder_score
+                if selected_pair and selected_pair.cross_encoder_score is not None
+                else ""
+            ),
+            "selected_pair_final_score": (
+                selected_pair.final_score if selected_pair else ""
+            ),
+            "selected_pair_margin": selected_margin,
+            "selected_pair_source_uid": (
+                selected_pair.source_uid if selected_pair else ""
+            ),
+            "selected_pair_chunk_uid": (
+                selected_pair.chunk_uid if selected_pair else ""
+            ),
+            "selected_pair_retrieval_rank": (
+                selected_pair.retrieval_rank if selected_pair else ""
+            ),
+            "selected_pair_retrieval_score": (
+                selected_candidate.get("retrieval_score", "")
+                if selected_candidate
+                else ""
+            ),
+            "selected_pair_extraction_rank": (
+                selected_pair.extraction_rank if selected_pair else ""
+            ),
+            "selected_pair_extraction_score": (
+                selected_candidate.get("score", "")
+                if selected_candidate
+                else ""
+            ),
+            "selected_pair_backend_id": (
+                selected_pair.backend_id if selected_pair else ""
+            ),
+            "selected_pair_model_id": (
+                selected_pair.model_id if selected_pair else ""
+            ),
+            "selected_pair_model_revision": (
+                selected_pair.model_revision if selected_pair else ""
+            ),
+            "selected_pair_reranker_backend_id": (
+                selected_pair.reranker_backend_id if selected_pair else ""
+            ),
+            "selected_pair_reranker_model_id": (
+                selected_pair.reranker_model_id if selected_pair else ""
+            ),
+            "selected_pair_reranker_model_revision": (
+                selected_pair.reranker_model_revision if selected_pair else ""
+            ),
+            "selected_pair_english_hash": (
+                selected_pair.english_representation_hash if selected_pair else ""
+            ),
+            "selected_pair_chinese_hash": (
+                selected_pair.chinese_representation_hash if selected_pair else ""
+            ),
             "primary_attribution": attribution,
         })
         rows.append(base)

@@ -74,6 +74,8 @@ def build_formal_item_verification_input_fingerprint(
     course: str,
     chapter: str,
     retrieval_version: str,
+    evidence_qualification_result_id: str = "",
+    evidence_qualification_policy: str = "",
 ) -> str:
     payload = {
         "version": FORMAL_ITEM_VERIFICATION_INPUT_FINGERPRINT_VERSION,
@@ -103,6 +105,15 @@ def build_formal_item_verification_input_fingerprint(
         "chapter": _normalized_text(chapter, field="chapter"),
         "retrieval_version": _normalized_text(retrieval_version, field="retrieval_version"),
     }
+    if evidence_qualification_result_id:
+        payload["evidence_qualification_result_id"] = _normalized_text(
+            evidence_qualification_result_id,
+            field="evidence_qualification_result_id",
+        )
+        payload["evidence_qualification_policy"] = _normalized_text(
+            evidence_qualification_policy,
+            field="evidence_qualification_policy",
+        )
     return _digest(payload)
 
 

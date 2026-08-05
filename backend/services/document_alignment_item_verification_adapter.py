@@ -117,6 +117,9 @@ class PreparedFormalItemVerificationInput:
     parser_version: str = ""
     output_schema_version: str = ""
     risk_labels: tuple[str, ...] = ()
+    evidence_qualification_result_id: str = ""
+    evidence_qualification_decision: str = ""
+    evidence_qualification_policy: str = ""
 
     def __post_init__(self):
         required = (
@@ -148,6 +151,29 @@ class PreparedFormalItemVerificationInput:
         if len(self.chinese_candidate_values) != 1 or len(self.chinese_candidate_provenance_refs) != 1:
             raise ValueError("V1 requires one selected Chinese candidate and one provenance reference.")
         object.__setattr__(self, "risk_labels", _normalized_values(self.risk_labels, "risk_labels", allow_empty=True))
+        if self.evidence_qualification_result_id:
+            object.__setattr__(
+                self,
+                "evidence_qualification_result_id",
+                _required_text(
+                    self.evidence_qualification_result_id,
+                    "evidence_qualification_result_id",
+                    160,
+                ),
+            )
+            if self.evidence_qualification_decision != "QUALIFIED":
+                raise ValueError(
+                    "Formal readiness requires a QUALIFIED evidence decision."
+                )
+            object.__setattr__(
+                self,
+                "evidence_qualification_policy",
+                _required_text(
+                    self.evidence_qualification_policy,
+                    "evidence_qualification_policy",
+                    160,
+                ),
+            )
         for name, refs_name in (
             ("english_snippets", "english_evidence_refs"),
             ("chinese_snippets", "chinese_evidence_refs"),
@@ -342,6 +368,8 @@ def _execution_identity(prepared: PreparedFormalItemVerificationInput) -> tuple[
         course=prepared.course,
         chapter=prepared.chapter,
         retrieval_version=prepared.retrieval_version,
+        evidence_qualification_result_id=prepared.evidence_qualification_result_id,
+        evidence_qualification_policy=prepared.evidence_qualification_policy,
     )
     execution_key = build_formal_item_verification_execution_key(
         workflow_run_uid=prepared.workflow_run_uid,
@@ -617,6 +645,11 @@ def _in_memory_verification_input(prepared: PreparedFormalItemVerificationInput,
         "retrieval_version": prepared.retrieval_version,
         "provider_options": {"prompt_version": prepared.prompt_version},
         "risk_labels": list(prepared.risk_labels),
+        "evidence_qualification": {
+            "result_id": prepared.evidence_qualification_result_id,
+            "decision": prepared.evidence_qualification_decision,
+            "policy": prepared.evidence_qualification_policy,
+        } if prepared.evidence_qualification_result_id else None,
     }
 
 

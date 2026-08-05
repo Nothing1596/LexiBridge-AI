@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from services import chinese_term_candidates
+from services import bilingual_evidence_qualification
 from services import bilingual_semantic_pairing
 from services import cross_language_retrieval
 from services import evidence_retrieval
@@ -50,6 +51,7 @@ class BilingualEvidenceResult:
     selected_chinese_candidate: dict[str, Any] | None
     risk_labels: list[str]
     draft_payload: dict[str, Any]
+    evidence_qualification: dict[str, Any] | None = None
 
 
 def _text(value: Any) -> str:
@@ -542,6 +544,7 @@ def retrieve_bilingual_evidence(
                 candidate_risk_labels, identified.risk_labels
             )
     pair_candidates: list[dict[str, Any]] = []
+    qualification_result = None
     if generated_candidates and input_data["english_context"]:
         pairing_backend = (
             bilingual_pairing_backend
@@ -600,6 +603,13 @@ def retrieve_bilingual_evidence(
                     reranker_backend=reranker_backend,
                 )
             ]
+            qualification_result = bilingual_evidence_qualification.qualify_workflow_top1(
+                input_data,
+                english_candidates,
+                chinese_candidates,
+                generated_candidates,
+                pair_candidates,
+            )
     risk_labels = _merge_labels(
         classify_bilingual_evidence_risks(english_candidates, chinese_candidates, input_data),
         candidate_risk_labels,
@@ -612,6 +622,11 @@ def retrieve_bilingual_evidence(
         selected_candidate,
     )
     draft_payload["risk_labels"] = risk_labels
+    draft_payload["evidence_qualification"] = (
+        bilingual_evidence_qualification.serialize_qualification_result(
+            qualification_result
+        )
+    )
     return BilingualEvidenceResult(
         english_term=input_data["english_term"],
         chinese_term=effective_chinese_term,
@@ -626,6 +641,11 @@ def retrieve_bilingual_evidence(
         selected_chinese_candidate=selected_candidate,
         risk_labels=risk_labels,
         draft_payload=draft_payload,
+        evidence_qualification=(
+            bilingual_evidence_qualification.serialize_qualification_result(
+                qualification_result
+            )
+        ),
     )
 
 
@@ -658,4 +678,9 @@ def serialize_bilingual_evidence_result(result: BilingualEvidenceResult) -> dict
         ),
         "risk_labels": list(result.risk_labels),
         "draft_payload": dict(result.draft_payload),
+        "evidence_qualification": (
+            dict(result.evidence_qualification)
+            if result.evidence_qualification is not None
+            else None
+        ),
     }
