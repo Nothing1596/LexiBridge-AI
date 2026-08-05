@@ -419,7 +419,17 @@ def prepare_document_alignment_item(
             candidate_risk_labels = list(
                 _labels(candidate_risk_labels, evidence.risk_labels)
             )
-            selected = select_primary_chinese_candidate(candidate_values)
+            top_pair = next(iter(evidence.bilingual_pair_candidates), None)
+            paired_uid = str(
+                (top_pair or {}).get("chinese_candidate_uid") or ""
+            )
+            selected = next(
+                (
+                    candidate for candidate in candidate_values
+                    if str(candidate.get("candidate_uid") or "") == paired_uid
+                ),
+                None,
+            )
         if selected is None:
             session.rollback()
             return _result(

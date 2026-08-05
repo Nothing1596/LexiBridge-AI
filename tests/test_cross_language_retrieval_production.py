@@ -107,6 +107,12 @@ def test_production_workflow_uses_semantic_backend_and_chinese_governance(app_mo
         assert candidate["provenance"]["chunk_uid"] == correct.chunk_uid
         assert result.chinese_term == ""
         assert result.chinese_term_candidates[0]["chinese_term"] == "电场"
+        assert result.bilingual_pair_candidates[0]["chinese_candidate_text"] == "电场"
+        assert result.bilingual_pair_candidates[0]["pairing_method"] == (
+            "multilingual_e5_semantic_pairing_v1"
+        )
+        assert result.bilingual_pair_candidates[0]["source_uid"]
+        assert result.bilingual_pair_candidates[0]["chunk_uid"] == correct.chunk_uid
         assert result.selected_chinese_candidate is None
         assert "missing_chinese_term" in result.risk_labels
 

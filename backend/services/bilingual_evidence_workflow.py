@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from services import chinese_term_candidates
+from services import bilingual_semantic_pairing
 from services import cross_language_retrieval
 from services import evidence_retrieval
 from services import parse_quality_risk
@@ -39,6 +40,7 @@ class BilingualEvidenceResult:
     english_evidence_candidates: list[dict[str, Any]]
     chinese_evidence_candidates: list[dict[str, Any]]
     chinese_term_candidates: list[dict[str, Any]]
+    bilingual_pair_candidates: list[dict[str, Any]]
     selected_chinese_candidate: dict[str, Any] | None
     risk_labels: list[str]
     draft_payload: dict[str, Any]
@@ -446,6 +448,7 @@ def retrieve_bilingual_evidence(
     english_context: str = "",
     discipline: str = "",
     cross_language_embedding_backend: Any | None = None,
+    bilingual_pairing_backend: Any | None = None,
 ) -> BilingualEvidenceResult:
     del audit_context
     input_data = build_bilingual_evidence_query({
@@ -531,6 +534,46 @@ def retrieve_bilingual_evidence(
             candidate_risk_labels = _merge_labels(
                 candidate_risk_labels, identified.risk_labels
             )
+    pair_candidates: list[dict[str, Any]] = []
+    if generated_candidates and input_data["english_context"]:
+        pairing_backend = (
+            bilingual_pairing_backend
+            or cross_language_embedding_backend
+        )
+        configured = os.environ.get(
+            "LEXIBRIDGE_CROSS_LANGUAGE_RETRIEVAL_BACKEND", ""
+        ).strip()
+        if pairing_backend is None and configured == CROSS_LANGUAGE_BACKEND_NAME:
+            cache_dir = os.environ.get("LEXIBRIDGE_MODEL_CACHE_DIR", "").strip()
+            if not cache_dir:
+                raise bilingual_semantic_pairing.BilingualPairingError(
+                    "LOCAL_MULTILINGUAL_EMBEDDING_BACKEND_UNAVAILABLE"
+                )
+            pairing_backend = LocalMultilingualEmbeddingBackend(
+                model_cache_dir=cache_dir
+            )
+        if pairing_backend is not None:
+            english_provenance = {}
+            if english_candidates:
+                english_provenance = {
+                    "source_uid": _text(english_candidates[0].get("source_uid")),
+                    "chunk_uid": _text(english_candidates[0].get("chunk_uid")),
+                }
+            pair_candidates = [
+                bilingual_semantic_pairing.serialize_bilingual_pair_result(pair)
+                for pair in bilingual_semantic_pairing.rank_bilingual_pairs(
+                    bilingual_semantic_pairing.EnglishPairingInput(
+                        english_candidate_uid=input_data["english_candidate_uid"],
+                        canonical_english_term=input_data["english_term"],
+                        normalized_english_term=input_data["normalized_english_term"],
+                        english_context=input_data["english_context"],
+                        discipline=input_data["discipline"],
+                        provenance=english_provenance,
+                    ),
+                    generated_candidates,
+                    pairing_backend,
+                )
+            ]
     risk_labels = _merge_labels(
         classify_bilingual_evidence_risks(english_candidates, chinese_candidates, input_data),
         candidate_risk_labels,
@@ -553,6 +596,7 @@ def retrieve_bilingual_evidence(
         english_evidence_candidates=english_candidates,
         chinese_evidence_candidates=chinese_candidates,
         chinese_term_candidates=generated_candidates,
+        bilingual_pair_candidates=pair_candidates,
         selected_chinese_candidate=selected_candidate,
         risk_labels=risk_labels,
         draft_payload=draft_payload,
@@ -578,6 +622,9 @@ def serialize_bilingual_evidence_result(result: BilingualEvidenceResult) -> dict
         "chinese_term_candidates": [
             chinese_term_candidates.serialize_chinese_term_candidate(candidate)
             for candidate in result.chinese_term_candidates
+        ],
+        "bilingual_pair_candidates": [
+            dict(candidate) for candidate in result.bilingual_pair_candidates
         ],
         "selected_chinese_candidate": (
             chinese_term_candidates.serialize_chinese_term_candidate(result.selected_chinese_candidate)
