@@ -25,13 +25,17 @@ def test_gitignore_covers_model_and_huggingface_caches():
         assert marker in text
 
 
-def test_backend_is_not_imported_by_production_retrieval():
+def test_backend_is_only_imported_by_explicit_cross_language_production_path():
     for path in (
         ROOT / "backend/services/evidence_retrieval.py",
         ROOT / "backend/services/retrieval_backends.py",
-        ROOT / "backend/services/bilingual_evidence_workflow.py",
     ):
         assert "local_multilingual_embedding" not in path.read_text(encoding="utf-8")
+    workflow = (
+        ROOT / "backend/services/bilingual_evidence_workflow.py"
+    ).read_text(encoding="utf-8")
+    assert "LocalMultilingualEmbeddingBackend" in workflow
+    assert 'CROSS_LANGUAGE_BACKEND_NAME = "local-multilingual-e5-small"' in workflow
 
 
 def test_backend_source_does_not_read_gold_or_call_external_apis():

@@ -7,17 +7,21 @@ ConceptAlignmentCard.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from services import chinese_term_candidates
+from services import cross_language_retrieval
 from services import evidence_retrieval
 from services import parse_quality_risk
+from services.local_multilingual_embedding import LocalMultilingualEmbeddingBackend
 
 
 BILINGUAL_RETRIEVAL_VERSION = "lexical-v1"
 LOW_EVIDENCE_SCORE_THRESHOLD = 0.35
 MAX_BILINGUAL_LIMIT = 20
+CROSS_LANGUAGE_BACKEND_NAME = "local-multilingual-e5-small"
 
 
 class BilingualEvidenceWorkflowError(ValueError):
@@ -85,6 +89,10 @@ def build_bilingual_evidence_query(input_data: dict[str, Any] | None) -> dict[st
         "course": _text(data.get("course")),
         "chapter": _text(data.get("chapter")),
         "concept_scope": _text(data.get("concept_scope")),
+        "english_candidate_uid": _text(data.get("english_candidate_uid")),
+        "normalized_english_term": _text(data.get("normalized_english_term")) or english_term.casefold(),
+        "english_context": _text(data.get("english_context"))[:cross_language_retrieval.MAX_CONTEXT_CHARS],
+        "discipline": _text(data.get("discipline")),
         "limit": limit,
         "auto_generate_chinese_candidates": _as_bool(data.get("auto_generate_chinese_candidates")),
         "candidate_limit": candidate_limit,
@@ -195,6 +203,86 @@ def retrieve_chinese_evidence(
         {**base, "language": "zh"},
     ]
     return _search_with_attempts(session, chunk_model, source_model, term, attempts, limit)
+
+
+def retrieve_cross_language_chinese_evidence(
+    session: Any, chunk_model: Any, source_model: Any, input_data: dict[str, Any],
+    *, embedding_backend: Any | None = None,
+) -> list[dict[str, Any]]:
+    configured = os.environ.get("LEXIBRIDGE_CROSS_LANGUAGE_RETRIEVAL_BACKEND", "").strip()
+    if configured != CROSS_LANGUAGE_BACKEND_NAME and embedding_backend is None:
+        return []
+    if embedding_backend is None:
+        cache_dir = os.environ.get("LEXIBRIDGE_MODEL_CACHE_DIR", "").strip()
+        if not cache_dir:
+            raise cross_language_retrieval.CrossLanguageRetrievalError(
+                "LOCAL_MULTILINGUAL_EMBEDDING_BACKEND_UNAVAILABLE"
+            )
+        embedding_backend = LocalMultilingualEmbeddingBackend(model_cache_dir=cache_dir)
+    chunk_query = session.query(chunk_model)
+    if hasattr(chunk_model, "language"):
+        chunk_query = chunk_query.filter(chunk_model.language == "zh")
+    if hasattr(chunk_model, "status"):
+        chunk_query = chunk_query.filter(chunk_model.status == "active")
+    if input_data.get("course") and hasattr(chunk_model, "course"):
+        chunk_query = chunk_query.filter(chunk_model.course == input_data["course"])
+    if input_data.get("chapter") and hasattr(chunk_model, "chapter"):
+        chunk_query = chunk_query.filter(chunk_model.chapter == input_data["chapter"])
+    governed_source_uid = _text(input_data.get("filters", {}).get("source_uid"))
+    if governed_source_uid and hasattr(chunk_model, "source_uid"):
+        chunk_query = chunk_query.filter(chunk_model.source_uid == governed_source_uid)
+    chunks = chunk_query.order_by(chunk_model.id.asc()).limit(
+        cross_language_retrieval.MAX_PASSAGE_CANDIDATES
+    ).all()
+    source_map = evidence_retrieval._sources_for_chunks(session, source_model, chunks)
+    passages = []
+    allowed = []
+    for chunk in chunks:
+        source = evidence_retrieval._source_for_chunk(chunk, source_map)
+        if not evidence_retrieval.should_include_chunk_as_evidence(
+            chunk, {"language": "zh"}, source=source
+        ):
+            continue
+        source_uid = evidence_retrieval._source_uid(chunk, source)
+        allowed.append(source_uid)
+        content = evidence_retrieval._chunk_text(chunk)
+        passages.append(cross_language_retrieval.SemanticPassage(
+            source_uid=source_uid,
+            chunk_uid=evidence_retrieval._text(evidence_retrieval._field(chunk, "chunk_uid", "")),
+            content=content, language="zh",
+            source_status=evidence_retrieval._text(evidence_retrieval._field(source, "status", "active")),
+            quality_status=evidence_retrieval._combined_field(chunk, source, "quality_status", ""),
+            content_hash=evidence_retrieval._text(
+                evidence_retrieval._field(chunk, "content_hash", "")
+            ) or __import__("hashlib").sha256(content.encode()).hexdigest(),
+        ))
+    request = cross_language_retrieval.CrossLanguageRetrievalQuery(
+        english_candidate_uid=input_data["english_candidate_uid"],
+        canonical_english_term=input_data["english_term"],
+        normalized_english_term=input_data["normalized_english_term"],
+        english_context=input_data["english_context"],
+        discipline=input_data["discipline"],
+        allowed_chinese_source_uids=tuple(sorted(set(allowed))),
+        top_k=input_data["limit"],
+        retrieval_budget=cross_language_retrieval.MAX_PASSAGE_CANDIDATES,
+    )
+    return [
+        {
+            "evidence_uid": result.query_hash[:12] + result.chunk_uid[:12],
+            "chunk_uid": result.chunk_uid, "source_uid": result.source_uid,
+            "language": result.language, "status": result.source_status,
+            "quality_status": result.quality_status, "snippet": result.snippet,
+            "score": result.score, "rank": result.rank,
+            "retrieval_reason": result.retrieval_method,
+            "retrieval_method": result.retrieval_method,
+            "backend_id": result.backend_id, "model_id": result.model_id,
+            "model_revision": result.model_revision, "query_hash": result.query_hash,
+            "provenance": result.provenance, "risk_labels": [],
+        }
+        for result in cross_language_retrieval.rank_chinese_passages(
+            request, passages, embedding_backend
+        )
+    ]
 
 
 def _candidate_has_review_risk(candidate: dict[str, Any]) -> bool:
@@ -353,6 +441,11 @@ def retrieve_bilingual_evidence(
     term_model: Any | None = None,
     terminology_card_model: Any | None = None,
     audit_context: dict[str, Any] | None = None,
+    english_candidate_uid: str = "",
+    normalized_english_term: str = "",
+    english_context: str = "",
+    discipline: str = "",
+    cross_language_embedding_backend: Any | None = None,
 ) -> BilingualEvidenceResult:
     del audit_context
     input_data = build_bilingual_evidence_query({
@@ -366,6 +459,10 @@ def retrieve_bilingual_evidence(
         "auto_generate_chinese_candidates": auto_generate_chinese_candidates,
         "candidate_limit": candidate_limit,
         "selected_chinese_candidate_uid": selected_chinese_candidate_uid,
+        "english_candidate_uid": english_candidate_uid,
+        "normalized_english_term": normalized_english_term,
+        "english_context": english_context,
+        "discipline": discipline,
     })
     english_candidates = retrieve_english_evidence(
         session,
@@ -409,16 +506,17 @@ def retrieve_bilingual_evidence(
             effective_chinese_term = _text(selected_candidate.get("chinese_term"))
             input_data["chinese_term"] = effective_chinese_term
 
-    chinese_candidates = retrieve_chinese_evidence(
-        session,
-        chunk_model,
-        source_model,
-        effective_chinese_term,
-        course=input_data["course"],
-        chapter=input_data["chapter"],
-        limit=input_data["limit"],
-        filters=input_data["filters"],
-    )
+    if effective_chinese_term:
+        chinese_candidates = retrieve_chinese_evidence(
+            session, chunk_model, source_model, effective_chinese_term,
+            course=input_data["course"], chapter=input_data["chapter"],
+            limit=input_data["limit"], filters=input_data["filters"],
+        )
+    else:
+        chinese_candidates = retrieve_cross_language_chinese_evidence(
+            session, chunk_model, source_model, input_data,
+            embedding_backend=cross_language_embedding_backend,
+        )
     risk_labels = _merge_labels(
         classify_bilingual_evidence_risks(english_candidates, chinese_candidates, input_data),
         candidate_risk_labels,
