@@ -33,6 +33,12 @@ EXPECTED_HASHES = {
     "corpus_sha256": "33715999c16a74610091b1e40896ee41921570a3740ebc2815565cf0ab7202dc",
     "gold_sha256": "199baed9a8cb6deb68ae3480c3a67679b2daf273d3733e909d4e861685d45302",
 }
+DIAGNOSTIC_SCOPE = "inline_bilingual_fixture_path"
+DIAGNOSIS_STATUS = "INLINE_BILINGUAL_CHINESE_CANDIDATE_DIAGNOSIS_COMPLETED"
+DOMINANT_ROOT_CAUSE = "INLINE_BILINGUAL_CHINESE_CANDIDATE_BOUNDARY_DEFECT"
+RECOMMENDED_NEXT_TASK = (
+    "English-to-Chinese cross-corpus alignment architecture audit"
+)
 CHINESE_PREDICATES = (
     "是",
     "指",
@@ -690,7 +696,13 @@ def run_diagnosis() -> dict[str, Any]:
     pairing_audit = _pairing_audit(rows)
     return {
         "task": "12C.1",
-        "status": "CHINESE_CANDIDATE_PRECISION_DIAGNOSIS_COMPLETED",
+        "status": DIAGNOSIS_STATUS,
+        "diagnostic_scope": DIAGNOSTIC_SCOPE,
+        "production_core_path_represented": False,
+        "cross_corpus_alignment_validated": False,
+        "dominant_root_cause": DOMINANT_ROOT_CAUSE,
+        "recommended_next_task": RECOMMENDED_NEXT_TASK,
+        "production_quality_modified": False,
         "frozen_hashes": frozen_hashes,
         "metrics": metrics,
         "attribution_counts": attribution_counts,
@@ -743,6 +755,16 @@ def _matrix_payload(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
         "task": artifact["task"],
         "status": artifact["status"],
+        "diagnostic_scope": artifact["diagnostic_scope"],
+        "production_core_path_represented": artifact[
+            "production_core_path_represented"
+        ],
+        "cross_corpus_alignment_validated": artifact[
+            "cross_corpus_alignment_validated"
+        ],
+        "dominant_root_cause": artifact["dominant_root_cause"],
+        "recommended_next_task": artifact["recommended_next_task"],
+        "production_quality_modified": artifact["production_quality_modified"],
         "frozen_hashes": artifact["frozen_hashes"],
         "metrics": artifact["metrics"],
         "attribution_counts": artifact["attribution_counts"],
@@ -757,6 +779,16 @@ def _pairing_payload(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
         "task": artifact["task"],
         "status": artifact["status"],
+        "diagnostic_scope": artifact["diagnostic_scope"],
+        "production_core_path_represented": artifact[
+            "production_core_path_represented"
+        ],
+        "cross_corpus_alignment_validated": artifact[
+            "cross_corpus_alignment_validated"
+        ],
+        "dominant_root_cause": artifact["dominant_root_cause"],
+        "recommended_next_task": artifact["recommended_next_task"],
+        "production_quality_modified": artifact["production_quality_modified"],
         "frozen_hashes": artifact["frozen_hashes"],
         "pairing_audit": artifact["pairing_audit"],
         "bilingual_pair_top1_accuracy": artifact["metrics"][

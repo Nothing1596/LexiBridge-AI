@@ -1,22 +1,41 @@
-# Task 12C.1 — Frozen Chinese Candidate Precision and Pairing Diagnosis
+# Task 12C.1 — Inline Bilingual Chinese Candidate Boundary Diagnosis
 
-Status: `CHINESE_CANDIDATE_PRECISION_DIAGNOSIS_COMPLETED`
+Status: `INLINE_BILINGUAL_CHINESE_CANDIDATE_DIAGNOSIS_COMPLETED`
 
 ## Executive conclusion
 
-The current Task 12B.3 English pipeline binds all 25 frozen concepts exactly,
-so the complete benchmark population now reaches the Chinese diagnostic
-boundary. The historical Chinese top1 and top3 results were recomputed rather
-than reused. Both remain 0.0000.
+This diagnosis is scoped to the frozen synthetic **inline bilingual fixture
+path**: an English term and its Chinese definition occur in the same fixture
+fragment, and production applies an inline bilingual regex to that fragment.
+It is not a complete or representative validation of the product's core
+English-to-Chinese cross-corpus alignment path.
 
-The dominant and earliest failure is a Chinese candidate boundary defect, not
-retrieval, ranking, pairing, or Provider readiness. All 25 gold Chinese terms
-exist in the frozen source, parsed text, and chunks. The production
-candidate-source retrieval finds every gold-bearing chunk within its top three.
-However, the explicit bilingual pattern captures up to 32 Chinese or
+The result proves that the inline bilingual regex has a real greedy boundary
+defect. It does not prove that independent Chinese-source term identification
+or cross-corpus semantic alignment has the same dominant root cause. A
+cross-corpus architecture audit is required before any production repair is
+selected.
+
+The product core path is materially broader: English course material produces
+English technical terms; an independent Chinese knowledge source is retrieved;
+a Chinese standard term is identified; the English and Chinese terms are
+semantically aligned; and evidence qualification determines whether a concept
+card may proceed. English course material normally need not contain a Chinese
+term or Chinese definition.
+
+Within the synthetic inline fixture, the current Task 12B.3 English pipeline
+binds all 25 frozen concepts exactly, so the full benchmark population reaches
+the inline Chinese diagnostic boundary. The historical Chinese top1 and top3
+results were recomputed rather than reused. Both remain 0.0000.
+
+The dominant and earliest failure **for this inline fixture path** is
+`INLINE_BILINGUAL_CHINESE_CANDIDATE_BOUNDARY_DEFECT`. All 25 gold Chinese terms
+exist in the same synthetic source fragments, parsed text, and chunks. The
+candidate-source retrieval finds every gold-bearing fixture chunk within its
+top three. The explicit bilingual pattern then captures up to 32 Chinese or
 alphanumeric characters after `English term 即` without stopping at Chinese
-definition predicates. It therefore emits definition fragments such as
-`术语 + 是/表示/描述/说明 + explanation` instead of the exact term.
+definition predicates, emitting `术语 + 是/表示/描述/说明 + explanation`
+instead of the exact term.
 
 Production generated at least one Chinese candidate for every concept, but
 generated zero exact or accepted-alias candidates. Pairing consequently
@@ -24,10 +43,16 @@ received 25 correct English inputs and zero correct Chinese inputs. There is
 no independently observable pairing-selection defect in this population
 because the correct Chinese candidate never reaches that layer.
 
-Task 12C.1 added only evaluation scripts, tests, sanitized artifacts, and this
-report. It did not change production quality.
+Task 12C.1 and this correction added only evaluation scripts, tests, sanitized
+artifact metadata, and documentation. Production quality was not modified,
+and cross-corpus alignment was not validated.
 
-## Current 25-item Chinese baseline
+## Current 25-item inline-fixture baseline
+
+Every metric below is limited to the frozen synthetic inline bilingual
+fixture. Chinese source presence of 25/25 means the fixture deliberately
+contains the Chinese definition adjacent to the English term; it does not
+measure presence in an independent Chinese textbook or knowledge base.
 
 | Metric | Current result |
 | --- | ---: |
@@ -50,10 +75,11 @@ report. It did not change production quality.
 No benchmark concept defines an additional accepted Chinese alias, so alias
 generation and alias-source presence are not applicable to this fixture.
 
-## Retrieval results
+## Inline-fixture retrieval results
 
 The production candidate-generation retrieval, queried with the system-derived
-English candidate against governed Chinese reference chunks, produced:
+English candidate against the synthetic fixture's governed Chinese reference
+chunks, produced:
 
 - hit@1: 0.6000 (15/25);
 - hit@3: 1.0000 (25/25);
@@ -67,9 +93,10 @@ the production retrieval scope.
 
 For historical comparability, the second retrieval performed after selecting
 the generated Chinese fragment produced hit@1 1.0000, hit@3 1.0000, and MRR
-1.0000. This apparently perfect evidence retrieval is not a term-quality
-success: the overlong selected fragment is copied from the definition chunk,
-so it retrieves that same chunk exactly. The historical evidence hit@3 result
+1.0000. This apparently perfect evidence retrieval may simply re-hit the same
+synthetic Chinese definition chunk from which the overlong candidate was
+copied. It is not evidence of independent Chinese-corpus retrieval quality and
+cannot be extrapolated to that setting. The historical evidence hit@3 result
 therefore coexists with zero Chinese candidate accuracy.
 
 ## Candidate morphology audit
@@ -101,18 +128,22 @@ capture because every competing candidate is itself a definition fragment.
 No simplified/traditional or full-width/half-width competition was observed
 in the frozen fixture.
 
-## Attribution counts
+## Scoped attribution counts
 
 | Primary attribution | Count | Denominator |
 | --- | ---: | ---: |
-| `CHINESE_CANDIDATE_BOUNDARY_DEFECT` | 25 | 25 |
+| `INLINE_BILINGUAL_CHINESE_CANDIDATE_BOUNDARY_DEFECT` | 25 | 25 |
 | All other attribution classes | 0 | 25 |
 
-The generator did not merely fail to emit output: every item produced one or
-more candidates. The exact term was present at every upstream stage, and the
-retrieval scope included every correct chunk. The first divergence was
+The original frozen row-level diagnostic label
+`CHINESE_CANDIDATE_BOUNDARY_DEFECT` is retained in the artifacts to avoid
+altering or rescoring the 25 historical rows. Its corrected interpretation is
+the scoped label above: the generator did not merely fail to emit output in
+the synthetic inline path; every item produced one or more candidates, and
+the first divergence was
 `extract_chinese_candidates_from_text_around_english_term`, where
 `CHINESE_PATTERN` greedily included the definition predicate and explanation.
+This attribution does not cover the independent cross-corpus architecture.
 
 There were no benchmark fixture defects and no benchmark alias gaps.
 
@@ -135,7 +166,7 @@ candidate UID includes source/chunk identity, so an equal-score selection can
 change across fresh synthetic ingestions that receive new UUIDs. That behavior
 did not hide a correct candidate in this benchmark because none was generated.
 
-## Bilingual pairing audit
+## Inline-fixture pairing audit
 
 Pairing inputs and outcomes:
 
@@ -146,20 +177,20 @@ Pairing inputs and outcomes:
 - truncation loss of a correct Chinese input: 0;
 - source/chunk provenance retained: yes.
 
-Production candidate discovery uses exact English lexical matching and
-proximity to the English term inside a governed Chinese/bilingual chunk.
+In this synthetic path, production candidate discovery uses exact English
+lexical matching and proximity to the English term inside the same governed
+Chinese/bilingual fixture chunk.
 Candidate scoring uses source type, exact English match, course/chapter,
 trust, source role, bilingual-pattern status, duplicate-source support, and
 risk penalties. It does not use cross-language surface overlap, definition
 similarity, retrieval rank, or abbreviation mapping.
 
-The pairing/selection boundary chooses the highest-scoring generated candidate;
-it does not independently verify semantic equivalence. There is no explicit
-pair-failure reason code. Instead, candidates carry
+The pairing/selection boundary observed here chooses the highest-scoring
+generated candidate; it does not independently verify semantic equivalence.
+There is no explicit pair-failure reason code. Instead, candidates carry
 `candidate_not_alignment_verified`, and formal preparation may continue if
-evidence exists. This is a separate governance limitation, but it cannot be
-classified as the primary defect until correct Chinese candidates are supplied
-to the layer.
+evidence exists. This observation does not validate how independent
+English-source and Chinese-source candidates should be semantically aligned.
 
 ## Evidence readiness audit
 
@@ -177,8 +208,9 @@ preparation. None is classified as `EVIDENCE_READINESS_DEFECT`, because every
 concept had already failed at the earlier Chinese boundary stage.
 
 Operational readiness does not mean the pair is correct. All five ready items
-still selected overlong Chinese definition fragments. Real Provider requests
-remained zero.
+still selected overlong Chinese definition fragments, so provider-ready 5/25
+does not represent five correct Chinese term alignments. Real Provider
+requests remained zero.
 
 ## Population funnel and survivor bias
 
@@ -198,25 +230,28 @@ The operational evidence-qualified and Provider-ready sets are not semantic
 subsets of correctly paired items: preparation does not have access to
 benchmark correctness and can ready an overlong candidate. Treating the five
 ready electricity items as the Chinese-quality denominator would therefore
-introduce strong conditional selection bias.
+introduce strong conditional selection bias. The full funnel also describes
+only the inline synthetic fixture, not an independent Chinese corpus.
 
 Task 12B raised downstream English coverage from a small matched subset to all
-25 concepts, exposing the existing Chinese behavior across the full
-population. It did not improve Chinese top1 or top3 accuracy. The current
-Chinese logic already retrieved the correct chunks, but its candidate boundary
-contract prevented that retrieval strength from becoming correct terms.
+25 fixture concepts, exposing the existing inline bilingual behavior across
+that full population. It did not improve Chinese top1 or top3 accuracy. These
+results do not establish whether an independent Chinese source would be
+retrieved or whether its standard term would be identified and aligned.
 
-## Recommended Task 12C.2 priority
+## Recommended next task
 
-The single dominant root cause is the boundary contract in the explicit
-bilingual pattern extractor: the Chinese capture following an English alias
-does not stop before `是`, `指`, `表示`, `称为`, `定义为`, `描述`, `说明`, or
-similar definition predicates.
+The single dominant root cause **within the synthetic inline bilingual path**
+is `INLINE_BILINGUAL_CHINESE_CANDIDATE_BOUNDARY_DEFECT`: the Chinese capture
+following an English alias does not stop before `是`, `指`, `表示`, `称为`,
+`定义为`, `描述`, `说明`, or similar definition predicates.
 
-Task 12C.2 should address that general boundary only, with unseen bilingual
-fixtures and false-positive controls. Ranking, pairing, retrieval, thresholds,
-Prompt, and Provider behavior should remain unchanged until exact Chinese
-candidate generation is remeasured.
+This result is insufficient to select a production repair for the core
+English-to-Chinese path. The recommended next task is an
+**English-to-Chinese cross-corpus alignment architecture audit** covering
+independent Chinese-source retrieval, Chinese standard-term identification,
+semantic alignment, provenance, and readiness boundaries. Only after that
+audit should production repair scope be chosen.
 
 This is a diagnosis and recommendation, not a production repair.
 
@@ -251,17 +286,20 @@ The incident database remained unchanged before and after:
 - WAL: absent
 - SHM: absent
 
-Sanitized artifacts:
+Sanitized artifacts (all scoped to `inline_bilingual_fixture_path`; the JSON
+artifacts explicitly mark `production_core_path_represented=false` and
+`cross_corpus_alignment_validated=false`; the CSV retains its original rows):
 
 - `12C1-chinese-candidate-matrix.json`:
-  `b4826f01ef1e8d4abc87e6b6c1563a9f3101b651c8d8fd1f68deb248a38a8f50`
+  `261e5c576a682e2de5125eb2be5cf640b34b4ccb1a07011a6c5a1096e7b4a982`
 - `12C1-chinese-candidate-matrix.csv`:
   `ad4f784318521bbaf23aa03f07ebbe69c004a2575a4be58d7f45369825332dd9`
 - `12C1-bilingual-pairing-audit.json`:
-  `7bcd93de29365565c8fe872cac5236f7c2c1de06bd9fe4bc8042cbf14010784d`
+  `498dce51ab76654d653c20b6547bd16ca0f80c5d53f07b4d03f59f0c28ce3b5a`
 
 The artifacts contain bounded candidate summaries and governed identifiers,
 not complete source text, credentials, private material, machine-absolute
 paths, or incident database contents.
 
-Task 12C.1 made no production change and did not begin Task 12C.2.
+Task 12C.1 made no production change. This correction did not begin a
+cross-corpus alignment implementation or Task 12C-R.

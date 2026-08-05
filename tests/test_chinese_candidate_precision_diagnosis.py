@@ -69,6 +69,38 @@ def test_frozen_runner_preserves_all_25_rows_and_denominators():
     assert artifact["real_provider_requests"] == 0
 
 
+def test_diagnosis_metadata_limits_conclusions_to_inline_bilingual_fixture_path():
+    artifact = diagnosis.run_diagnosis()
+    payloads = diagnosis.artifact_payloads(artifact)
+
+    assert artifact["status"] == (
+        "INLINE_BILINGUAL_CHINESE_CANDIDATE_DIAGNOSIS_COMPLETED"
+    )
+    assert artifact["diagnostic_scope"] == "inline_bilingual_fixture_path"
+    assert artifact["production_core_path_represented"] is False
+    assert artifact["cross_corpus_alignment_validated"] is False
+    assert artifact["dominant_root_cause"] == (
+        "INLINE_BILINGUAL_CHINESE_CANDIDATE_BOUNDARY_DEFECT"
+    )
+    assert artifact["recommended_next_task"] == (
+        "English-to-Chinese cross-corpus alignment architecture audit"
+    )
+    assert artifact["production_quality_modified"] is False
+
+    for name in (
+        "12C1-chinese-candidate-matrix.json",
+        "12C1-bilingual-pairing-audit.json",
+    ):
+        payload = payloads[name]
+        assert payload["diagnostic_scope"] == "inline_bilingual_fixture_path"
+        assert payload["production_core_path_represented"] is False
+        assert payload["cross_corpus_alignment_validated"] is False
+        assert payload["dominant_root_cause"] == (
+            "INLINE_BILINGUAL_CHINESE_CANDIDATE_BOUNDARY_DEFECT"
+        )
+        assert payload["production_quality_modified"] is False
+
+
 def test_runner_does_not_modify_frozen_inputs_or_production_contracts():
     before = dataset.dataset_hashes()
     artifact = diagnosis.run_diagnosis()
