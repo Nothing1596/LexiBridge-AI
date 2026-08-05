@@ -517,6 +517,20 @@ def retrieve_bilingual_evidence(
             session, chunk_model, source_model, input_data,
             embedding_backend=cross_language_embedding_backend,
         )
+        if chinese_candidates and not generated_candidates:
+            identified = chinese_term_candidates.identify_standard_chinese_terms(
+                input_data["english_term"],
+                chinese_candidates,
+                discipline=input_data["discipline"],
+                limit=input_data["candidate_limit"],
+            )
+            generated_candidates = [
+                chinese_term_candidates.serialize_chinese_term_candidate(candidate)
+                for candidate in identified.candidates
+            ]
+            candidate_risk_labels = _merge_labels(
+                candidate_risk_labels, identified.risk_labels
+            )
     risk_labels = _merge_labels(
         classify_bilingual_evidence_risks(english_candidates, chinese_candidates, input_data),
         candidate_risk_labels,

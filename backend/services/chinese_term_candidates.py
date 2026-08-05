@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,7 @@ from services import parse_quality_risk
 
 MAX_CANDIDATE_LIMIT = 50
 DEFAULT_CANDIDATE_LIMIT = 10
+MAX_MONOLINGUAL_CANDIDATES_PER_CHUNK = 8
 SNIPPET_CHARS = 300
 WEAK_SCORE_THRESHOLD = 0.45
 CHINESE_PATTERN = r"[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9·\-]{0,31}"
@@ -27,6 +29,15 @@ APPROVED_CARD_STATUSES = {"approved", "teacher_verified"}
 LEGACY_APPROVED_STATUSES = {"approved", "auto_approved", "teacher_verified"}
 LOW_TRUST_LEVELS = {"low_quality", "student_uploaded", "unknown"}
 BLOCKED_QUALITY_STATUSES = evidence_retrieval.BLOCKED_QUALITY_STATUSES
+DEFINITION_PREDICATES = (
+    "定义为", "适用于", "表示", "描述", "说明", "反映", "衡量", "用于",
+    "等于", "来自", "给出", "属于", "包含", "记录", "刻画", "比较",
+    "是", "指", "由",
+)
+GENERIC_CHINESE_TERMS = {
+    "物体", "作用", "过程", "状态", "变化", "现象", "能力", "性质",
+    "情况", "方式", "结果", "内容", "对象", "它", "它们", "这", "这种",
+}
 
 
 class ChineseTermCandidateError(ValueError):
@@ -85,9 +96,16 @@ def _normalize_term(value: Any) -> str:
 
 
 def _normalize_chinese_candidate(value: Any) -> str:
-    text = _text(value)
+    text = unicodedata.normalize("NFC", _text(value))
     text = re.sub(r"^[：:，,。；;\s]+|[：:，,。；;\s]+$", "", text)
+    text = re.sub(r"\s+", " ", text)
     return text[:80]
+
+
+def normalize_monolingual_chinese_term(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", _normalize_chinese_candidate(value))
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"[。；;，,:：]+$", "", text)
 
 
 def _has_chinese(value: Any) -> bool:
@@ -218,6 +236,8 @@ def _score_base_for_source(candidate: dict[str, Any]) -> float:
         return 0.58
     if source_type == "bilingual_chunk":
         return 0.55
+    if source_type == "monolingual_chinese_chunk":
+        return 0.55
     return 0.45
 
 
@@ -240,6 +260,16 @@ def score_chinese_term_candidate(candidate: dict[str, Any], context: dict[str, A
     }.get(trust_level, 0.0)
     role = 0.04 if source_role in {"bilingual_reference", "chinese_reference_material"} else 0.0
     pattern = 0.04 if "bilingual_pattern_extracted" in risk_labels else 0.0
+    structure = {
+        "heading": 0.20,
+        "list_item": 0.15,
+        "so_called_subject": 0.18,
+        "called_term": 0.16,
+        "definition_subject": 0.14,
+    }.get(_text(candidate.get("extraction_method")), 0.0)
+    retrieval_rank = max(1, _as_int(candidate.get("retrieval_rank"), 99))
+    retrieval = round(0.08 / retrieval_rank, 4)
+    length_penalty = -0.04 if len(_text(candidate.get("normalized_text"))) > 12 else 0.0
     repeat = min(0.12, 0.08 * max(0, int(candidate.get("source_count") or 1) - 1))
     review_penalty = -0.08 if "candidate_from_needs_review_source" in risk_labels else 0.0
     partial_penalty = -0.08 if (
@@ -260,6 +290,9 @@ def score_chinese_term_candidate(candidate: dict[str, Any], context: dict[str, A
         "trust_level": round(trust, 4),
         "source_role": round(role, 4),
         "bilingual_pattern": round(pattern, 4),
+        "structure_confidence": round(structure, 4),
+        "retrieval_rank": retrieval,
+        "candidate_length_penalty": length_penalty,
         "duplicate_sources": round(repeat, 4),
         "needs_review_penalty": round(review_penalty, 4),
         "partial_text_penalty": round(partial_penalty, 4),
@@ -283,6 +316,193 @@ def _finalize_candidate(candidate: dict[str, Any], context: dict[str, Any]) -> d
     item["risk_labels"] = labels
     item["candidate_uid"] = _candidate_uid(item)
     return item
+
+
+def _valid_monolingual_term(value: str) -> bool:
+    text = _normalize_chinese_candidate(value)
+    normalized = normalize_monolingual_chinese_term(text)
+    if not normalized or len(normalized) > 24 or not _has_chinese(normalized):
+        return False
+    if normalized in GENERIC_CHINESE_TERMS:
+        return False
+    if normalized.startswith(("该", "此", "其", "这种", "这些")):
+        return False
+    if "这一说法" in normalized or any(marker in normalized for marker in ("和", "及")):
+        return False
+    if any(predicate in normalized for predicate in DEFINITION_PREDICATES):
+        return False
+    if re.fullmatch(r"[\d\W_]+", normalized) or re.fullmatch(
+        r"(?:kg|m|s|a|k|mol|cd|n|j|w|v|c|hz|pa)", normalized, re.IGNORECASE
+    ):
+        return False
+    if re.search(r"[=<>]", normalized):
+        return False
+    return True
+
+
+def extract_monolingual_chinese_term_spans(
+    text: str,
+    *,
+    block_type: str = "",
+    heading: str = "",
+) -> list[dict[str, Any]]:
+    """Extract bounded term spans from monolingual Chinese structural signals."""
+    source_text = str(text or "")
+    matches: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, int]] = set()
+
+    def add(raw: str, start: int, end: int, method: str) -> None:
+        display = _normalize_chinese_candidate(raw)
+        display = re.sub(r"^(?:而|则|其中|其中的)\s*", "", display)
+        if not _valid_monolingual_term(display):
+            return
+        normalized = normalize_monolingual_chinese_term(display)
+        key = (normalized, max(0, start), max(start, end))
+        if key in seen:
+            return
+        seen.add(key)
+        matches.append({
+            "text": display,
+            "normalized_text": normalized,
+            "start": max(0, start),
+            "end": max(start, end),
+            "method": method,
+        })
+
+    heading_text = _text(heading)
+    if block_type in {"heading", "title"}:
+        candidate = heading_text or source_text.splitlines()[0] if source_text else heading_text
+        if candidate:
+            start = source_text.find(candidate)
+            add(candidate, max(0, start), max(0, start) + len(candidate), "heading")
+
+    for match in re.finditer(
+        r"(?:^|[\n。；;！？])\s*[•·\-—*、\d（）().]+\s*"
+        r"(?P<term>[^：:\n。；;！？]{1,24})\s*[：:]",
+        source_text,
+    ):
+        add(match.group("term"), match.start("term"), match.end("term"), "list_item")
+
+    for match in re.finditer(
+        r"所谓\s*(?P<term>[^，,。；;！？]{1,24})\s*[，,]\s*是",
+        source_text,
+    ):
+        add(match.group("term"), match.start("term"), match.end("term"), "so_called_subject")
+
+    for match in re.finditer(
+        r"将[^。；;！？]{1,60}?称为\s*(?P<term>[^，,。；;！？]{1,24})",
+        source_text,
+    ):
+        add(match.group("term"), match.start("term"), match.end("term"), "called_term")
+
+    for match in re.finditer(
+        r"(?:^|[，,。；;！？\n])\s*(?P<term>[^\s，,。；;！？]{1,24})"
+        r"与[^，,。；;！？]{1,60}?有关",
+        source_text,
+    ):
+        add(match.group("term"), match.start("term"), match.end("term"), "definition_subject")
+
+    predicate_pattern = "|".join(re.escape(value) for value in DEFINITION_PREDICATES)
+    for clause in re.finditer(r"[^，,。；;！？\n]+", source_text):
+        raw_clause = clause.group(0)
+        subject_match = re.match(
+            rf"\s*(?:而|则|其中|其中的)?\s*"
+            rf"(?P<term>[^\s：:，,。；;！？]{{1,24}}?)"
+            rf"(?:通常|一般|主要|同时|始终|常|则|可)?(?:{predicate_pattern})",
+            raw_clause,
+        )
+        if not subject_match:
+            continue
+        start = clause.start() + subject_match.start("term")
+        end = clause.start() + subject_match.end("term")
+        add(subject_match.group("term"), start, end, "definition_subject")
+
+    matches.sort(key=lambda item: (item["start"], item["end"], item["normalized_text"]))
+    return matches[:MAX_MONOLINGUAL_CANDIDATES_PER_CHUNK]
+
+
+def identify_standard_chinese_terms(
+    english_term: str,
+    retrieved_evidence: list[dict[str, Any]],
+    *,
+    discipline: str = "",
+    limit: int = DEFAULT_CANDIDATE_LIMIT,
+) -> ChineseTermCandidateResult:
+    """Identify ranked Chinese term candidates only from retrieved evidence."""
+    bounded_limit = _limit(limit)
+    raw_candidates: list[dict[str, Any]] = []
+    ordered_evidence = sorted(
+        list(retrieved_evidence or []),
+        key=lambda item: (
+            max(1, _as_int(item.get("rank"), 999)),
+            _text(item.get("source_uid")),
+            _text(item.get("chunk_uid")),
+        ),
+    )
+    for evidence in ordered_evidence[:MAX_CANDIDATE_LIMIT]:
+        if _text(evidence.get("language")) != "zh":
+            continue
+        text = _text(evidence.get("snippet") or evidence.get("evidence_snippet"))
+        spans = extract_monolingual_chinese_term_spans(
+            text,
+            block_type=_text(evidence.get("block_type")),
+            heading=_text(evidence.get("heading") or evidence.get("title")),
+        )
+        for span in spans:
+            candidate = _candidate(
+                english_term=english_term,
+                chinese_term=span["text"],
+                source_type="monolingual_chinese_chunk",
+                source_uid=evidence.get("source_uid", ""),
+                chunk_uid=evidence.get("chunk_uid", ""),
+                evidence_snippet=text,
+                source_locator=evidence.get("source_locator", ""),
+                trust_level=evidence.get("trust_level", "reference_material"),
+                quality_status=evidence.get("quality_status", ""),
+                quality_flags=evidence.get("quality_flags", []),
+                risk_labels=["monolingual_chinese_term_extracted"],
+                retrieval_reason="term structure extracted from retrieved Chinese evidence",
+                parse_uid=evidence.get("parse_uid", ""),
+                parse_block_uid=evidence.get("parse_block_uid", ""),
+                match_pattern=span["method"],
+                score_breakdown={"retrieval_score": evidence.get("score", 0.0)},
+            )
+            candidate.update({
+                "normalized_text": span["normalized_text"],
+                "original_span": span["text"],
+                "span_start": span["start"],
+                "span_end": span["end"],
+                "extraction_method": span["method"],
+                "source_language": "zh",
+                "retrieval_rank": max(1, _as_int(evidence.get("rank"), 999)),
+                "retrieval_score": float(evidence.get("score") or 0.0),
+                "discipline": _text(discipline),
+                "provenance": dict(evidence.get("provenance") or {
+                    "source_uid": _text(evidence.get("source_uid")),
+                    "chunk_uid": _text(evidence.get("chunk_uid")),
+                }),
+            })
+            candidate["candidate_uid"] = _candidate_uid(candidate)
+            raw_candidates.append(candidate)
+    ranked = merge_and_rank_chinese_candidates(
+        raw_candidates,
+        bounded_limit,
+        context={"english_term": english_term},
+    )
+    for rank, candidate in enumerate(ranked, 1):
+        candidate["rank"] = rank
+    risks = ["candidate_not_alignment_verified"]
+    if not ranked:
+        risks.append("no_chinese_candidate_found")
+    if len(ranked) > 1:
+        risks.append("ambiguous_chinese_candidates")
+    return ChineseTermCandidateResult(
+        english_term=_text(english_term),
+        course="",
+        chapter="",
+        candidates=ranked,
+        risk_labels=_merge_labels(risks),
+    )
 
 
 def _matches_course_chapter(obj: Any, course: str, chapter: str, strict: bool = True) -> bool:
@@ -565,6 +785,7 @@ def merge_and_rank_chinese_candidates(
         "bilingual_chunk": 3,
         "manual": 3,
         "legacy_term": 2,
+        "monolingual_chinese_chunk": 3,
     }
     for raw in candidates:
         chinese_term = _normalize_chinese_candidate(raw.get("chinese_term"))
@@ -592,7 +813,13 @@ def merge_and_rank_chinese_candidates(
             for field in ("source_type", "card_uid", "term_id", "course", "chapter", "trust_level", "quality_status", "quality_flags", "match_pattern", "retrieval_reason"):
                 existing[field] = item.get(field, existing.get(field))
     ranked = [_finalize_candidate(candidate, context) for candidate in merged_by_term.values()]
-    ranked.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+    ranked.sort(key=lambda item: (
+        -float(item.get("score") or 0.0),
+        max(1, _as_int(item.get("retrieval_rank"), 999)),
+        _text(item.get("source_uid")),
+        _text(item.get("chunk_uid")),
+        _text(item.get("normalized_text") or item.get("chinese_term")),
+    ))
     return ranked[: _limit(limit)]
 
 

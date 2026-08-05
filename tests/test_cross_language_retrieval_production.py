@@ -67,7 +67,7 @@ def test_production_workflow_uses_semantic_backend_and_chinese_governance(app_mo
         _, correct = _add_source_and_chunk(
             app_module,
             language="zh",
-            text="该空间性质可由单位正试探电荷所受的力来刻画。",
+            text="电场表示单位正试探电荷所受力所刻画的空间性质。",
             course=course,
         )
         _add_source_and_chunk(
@@ -106,6 +106,8 @@ def test_production_workflow_uses_semantic_backend_and_chinese_governance(app_mo
         assert "electric field" not in candidate["query_hash"]
         assert candidate["provenance"]["chunk_uid"] == correct.chunk_uid
         assert result.chinese_term == ""
+        assert result.chinese_term_candidates[0]["chinese_term"] == "电场"
+        assert result.selected_chinese_candidate is None
         assert "missing_chinese_term" in result.risk_labels
 
 

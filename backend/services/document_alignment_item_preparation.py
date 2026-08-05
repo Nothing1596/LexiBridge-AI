@@ -388,31 +388,63 @@ def prepare_document_alignment_item(
             limit=dependencies.candidate_limit,
             filters={"include_low_quality": False, "include_needs_review": False},
         )
-        selected = select_primary_chinese_candidate(candidate_result.candidates)
+        candidate_values = list(candidate_result.candidates)
+        candidate_risk_labels = list(candidate_result.risk_labels)
+        selected = select_primary_chinese_candidate(candidate_values)
+        evidence = None
+        if selected is None:
+            english_context = " ".join(
+                _safe_text(getattr(chunk, "content", ""))
+                for chunk in chunks
+            )[:800]
+            evidence = dependencies.evidence_retriever(
+                session,
+                dependencies.models.chunk,
+                dependencies.models.source,
+                item.candidate_term,
+                chinese_term="",
+                course=run.course,
+                chapter=run.chapter,
+                limit=dependencies.evidence_limit,
+                filters={"include_low_quality": False, "include_needs_review": False},
+                concept_scope=item.normalized_term,
+                auto_generate_chinese_candidates=False,
+                candidate_limit=dependencies.candidate_limit,
+                english_candidate_uid=str(item.item_uid),
+                normalized_english_term=str(item.normalized_term or ""),
+                english_context=english_context,
+                discipline=str(getattr(source, "discipline", "") or ""),
+            )
+            candidate_values = list(evidence.chinese_term_candidates)
+            candidate_risk_labels = list(
+                _labels(candidate_risk_labels, evidence.risk_labels)
+            )
+            selected = select_primary_chinese_candidate(candidate_values)
         if selected is None:
             session.rollback()
             return _result(
                 command,
                 PREPARATION_OUTCOME_CHINESE_CANDIDATE_UNAVAILABLE,
-                candidate_count=len(candidate_result.candidates),
-                risk_labels=_labels(item.risk_labels, candidate_result.risk_labels),
+                candidate_count=len(candidate_values),
+                risk_labels=_labels(item.risk_labels, candidate_risk_labels),
                 error_code="DOCUMENT_ALIGNMENT_CHINESE_CANDIDATE_UNAVAILABLE",
                 error_message="No governed Chinese candidate is available.",
             )
 
-        evidence = dependencies.evidence_retriever(
-            session,
-            dependencies.models.chunk,
-            dependencies.models.source,
-            item.candidate_term,
-            chinese_term=selected["chinese_term"],
-            course=run.course,
-            chapter=run.chapter,
-            limit=dependencies.evidence_limit,
-            filters={"include_low_quality": False, "include_needs_review": False},
-            concept_scope=item.normalized_term,
-            auto_generate_chinese_candidates=False,
-        )
+        if evidence is None:
+            evidence = dependencies.evidence_retriever(
+                session,
+                dependencies.models.chunk,
+                dependencies.models.source,
+                item.candidate_term,
+                chinese_term=selected["chinese_term"],
+                course=run.course,
+                chapter=run.chapter,
+                limit=dependencies.evidence_limit,
+                filters={"include_low_quality": False, "include_needs_review": False},
+                concept_scope=item.normalized_term,
+                auto_generate_chinese_candidates=False,
+            )
         source_refs = set(_loads_list(item.source_chunk_refs))
         english_candidates = [
             candidate
@@ -423,7 +455,7 @@ def prepare_document_alignment_item(
         english_refs = tuple(sorted({_evidence_ref(candidate) for candidate in english_candidates if _evidence_ref(candidate)}))
         chinese_refs = tuple(sorted({_evidence_ref(candidate) for candidate in chinese_candidates if _evidence_ref(candidate)}))
         candidate_ref = _candidate_ref(selected)
-        risk_labels = _labels(item.risk_labels, candidate_result.risk_labels, evidence.risk_labels)
+        risk_labels = _labels(item.risk_labels, candidate_risk_labels, evidence.risk_labels)
         if not english_refs or not chinese_refs:
             session.rollback()
             return _result(
@@ -434,7 +466,7 @@ def prepare_document_alignment_item(
                 chinese_candidate_values=(selected["chinese_term"],),
                 chinese_candidate_provenance_refs=(candidate_ref,),
                 risk_labels=risk_labels,
-                candidate_count=len(candidate_result.candidates),
+                candidate_count=len(candidate_values),
                 error_code="DOCUMENT_ALIGNMENT_EVIDENCE_INSUFFICIENT",
                 error_message="Governed bilingual evidence is insufficient.",
             )
@@ -477,7 +509,7 @@ def prepare_document_alignment_item(
             chinese_candidate_values=prepared.chinese_candidate_values,
             chinese_candidate_provenance_refs=prepared.chinese_candidate_provenance_refs,
             risk_labels=risk_labels,
-            candidate_count=len(candidate_result.candidates),
+            candidate_count=len(candidate_values),
         )
     except Exception:
         session.rollback()
