@@ -4,17 +4,24 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
+from services.local_bilingual_reranker import (
+    MODEL_ID as RERANKER_MODEL_ID,
+    MODEL_REVISION as RERANKER_MODEL_REVISION,
+)
 
 QUALIFIED = "QUALIFIED"
 REVIEW_REQUIRED = "REVIEW_REQUIRED"
 REJECTED = "REJECTED"
 
 POLICY_ID = "governed-bilingual-evidence-qualification"
-POLICY_VERSION = "1.0.0"
+LEGACY_POLICY_VERSION = "1.0.0"
+DEFAULT_POLICY_VERSION = "1.1.0"
+POLICY_VERSION = DEFAULT_POLICY_VERSION
 CREATED_BY = f"{POLICY_ID}@{POLICY_VERSION}"
+LEGACY_CREATED_BY = f"{POLICY_ID}@{LEGACY_POLICY_VERSION}"
 
 # The existing production evidence floor remains unchanged. The margin and
 # aggregate gates are new, conservative policy values fixed with non-benchmark
@@ -24,6 +31,9 @@ MIN_PAIR_SEMANTIC_SCORE = 0.35
 MIN_PAIR_MARGIN = 0.05
 MIN_QUALIFICATION_SCORE = 0.65
 MIN_CONTEXT_CHARS = 12
+MIN_PAIR_CONSISTENCY_SCORE = 4.0
+MIN_RERANKER_COMPONENT_SCORE = 0.0
+MAX_CONSISTENCY_CONTEXT_CHARS = 600
 
 EVIDENCE_QUALIFICATION_INPUT_INCOMPLETE = "EVIDENCE_QUALIFICATION_INPUT_INCOMPLETE"
 EVIDENCE_PROVENANCE_INCOMPLETE = "EVIDENCE_PROVENANCE_INCOMPLETE"
@@ -35,6 +45,25 @@ EVIDENCE_PAIR_MARGIN_INSUFFICIENT = "EVIDENCE_PAIR_MARGIN_INSUFFICIENT"
 EVIDENCE_CONTEXT_INSUFFICIENT = "EVIDENCE_CONTEXT_INSUFFICIENT"
 EVIDENCE_QUALIFICATION_POLICY_UNAVAILABLE = "EVIDENCE_QUALIFICATION_POLICY_UNAVAILABLE"
 EVIDENCE_QUALIFICATION_EXECUTION_FAILED = "EVIDENCE_QUALIFICATION_EXECUTION_FAILED"
+EVIDENCE_UPSTREAM_STATE_NOT_READY = "EVIDENCE_UPSTREAM_STATE_NOT_READY"
+EVIDENCE_PAIR_UNCERTAIN = "EVIDENCE_PAIR_UNCERTAIN"
+EVIDENCE_SCORE_COMPONENT_CONFLICT = "EVIDENCE_SCORE_COMPONENT_CONFLICT"
+EVIDENCE_TERM_SCOPE_RISK = "EVIDENCE_TERM_SCOPE_RISK"
+
+NON_QUALIFIED_REASON_CODES = frozenset({
+    EVIDENCE_UPSTREAM_STATE_NOT_READY,
+    EVIDENCE_PAIR_UNCERTAIN,
+    EVIDENCE_PAIR_MARGIN_INSUFFICIENT,
+    EVIDENCE_SCORE_COMPONENT_CONFLICT,
+    EVIDENCE_TERM_SCOPE_RISK,
+    EVIDENCE_CONTEXT_INSUFFICIENT,
+    EVIDENCE_PROVENANCE_INCOMPLETE,
+    EVIDENCE_SOURCE_NOT_ELIGIBLE,
+    EVIDENCE_LANGUAGE_SCOPE_INVALID,
+    EVIDENCE_PAIR_NOT_TOP1,
+    EVIDENCE_PAIR_SCORE_INSUFFICIENT,
+    EVIDENCE_QUALIFICATION_EXECUTION_FAILED,
+})
 
 _ELIGIBLE_SOURCE_STATUSES = frozenset({"active", "ready", "governed"})
 _ELIGIBLE_QUALITY_STATUSES = frozenset({"", "ready", "accepted", "governed", "high_quality"})
@@ -106,6 +135,12 @@ class BilingualEvidenceQualificationInput:
     require_independent_sources: bool = True
     english_source_role: str = ""
     chinese_source_role: str = ""
+    english_binding_status: str = "unknown"
+    retrieval_status: str = "unknown"
+    candidate_pool_status: str = "unknown"
+    pair_execution_status: str = "unknown"
+    upstream_reason_codes: tuple[str, ...] = ()
+    pair_consistency_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -130,10 +165,10 @@ class BilingualEvidenceQualificationResult:
     created_by: str
 
 
-def policy_manifest() -> dict[str, Any]:
+def legacy_policy_manifest() -> dict[str, Any]:
     return {
         "policy_id": POLICY_ID,
-        "policy_version": POLICY_VERSION,
+        "policy_version": LEGACY_POLICY_VERSION,
         "thresholds": {
             "minimum_evidence_score": MIN_EVIDENCE_SCORE,
             "minimum_pair_semantic_score": MIN_PAIR_SEMANTIC_SCORE,
@@ -170,9 +205,53 @@ def policy_manifest() -> dict[str, Any]:
     }
 
 
-def _stable_result_id(value: BilingualEvidenceQualificationInput, decision: str, reasons: list[str]) -> str:
+def policy_manifest() -> dict[str, Any]:
+    manifest = dict(legacy_policy_manifest())
+    manifest.update({
+        "policy_version": DEFAULT_POLICY_VERSION,
+        "thresholds": {
+            **legacy_policy_manifest()["thresholds"],
+            "minimum_pair_consistency_score": MIN_PAIR_CONSISTENCY_SCORE,
+            "minimum_reranker_component_score": MIN_RERANKER_COMPONENT_SCORE,
+            "maximum_consistency_context_chars": MAX_CONSISTENCY_CONTEXT_CHARS,
+        },
+        "threshold_calibration_source": (
+            "benchmark-external synthetic semantic-equivalence fixtures"
+        ),
+        "hard_eligibility_gates": [
+            EVIDENCE_UPSTREAM_STATE_NOT_READY,
+            EVIDENCE_PROVENANCE_INCOMPLETE,
+            EVIDENCE_SOURCE_NOT_ELIGIBLE,
+            EVIDENCE_LANGUAGE_SCOPE_INVALID,
+            EVIDENCE_PAIR_NOT_TOP1,
+            EVIDENCE_QUALIFICATION_EXECUTION_FAILED,
+        ],
+        "semantic_consistency_gates": [
+            EVIDENCE_PAIR_UNCERTAIN,
+            EVIDENCE_PAIR_MARGIN_INSUFFICIENT,
+            EVIDENCE_SCORE_COMPONENT_CONFLICT,
+            EVIDENCE_TERM_SCOPE_RISK,
+        ],
+        "decision_mapping": {
+            "QUALIFIED": "all eligibility and semantic-consistency gates pass",
+            "REVIEW_REQUIRED": "pair remains plausible but uncertainty, component conflict, margin, or term-scope risk exists",
+            "REJECTED": "hard eligibility, provenance, governance, representation, or execution gate fails",
+        },
+        "legacy_policy": f"{POLICY_ID}@{LEGACY_POLICY_VERSION}",
+        "default_activation": f"{POLICY_ID}@{DEFAULT_POLICY_VERSION}",
+    })
+    return manifest
+
+
+def _stable_result_id(
+    value: BilingualEvidenceQualificationInput,
+    decision: str,
+    reasons: list[str],
+    *,
+    created_by: str = CREATED_BY,
+) -> str:
     payload = {
-        "policy": CREATED_BY,
+        "policy": created_by,
         "english_candidate_uid": _text(value.english_candidate_uid),
         "chinese_candidate_uid": _text(value.chinese_candidate_uid),
         "english_source_uid": _text(value.english_source_uid),
@@ -188,7 +267,7 @@ def _stable_result_id(value: BilingualEvidenceQualificationInput, decision: str,
     return "evidence-qualification:" + hashlib.sha256(encoded).hexdigest()
 
 
-def qualify_bilingual_evidence(
+def qualify_bilingual_evidence_v1(
     value: BilingualEvidenceQualificationInput,
 ) -> BilingualEvidenceQualificationResult:
     reasons: list[str] = []
@@ -303,9 +382,9 @@ def qualify_bilingual_evidence(
         qualification_score=score,
         qualification_score_is_probability=False,
         score_components=components,
-        thresholds=dict(policy_manifest()["thresholds"]),
+        thresholds=dict(legacy_policy_manifest()["thresholds"]),
         policy_id=POLICY_ID,
-        policy_version=POLICY_VERSION,
+        policy_version=LEGACY_POLICY_VERSION,
         reason_codes=tuple(reasons),
         risk_labels=risks,
         english_provenance={
@@ -333,6 +412,90 @@ def qualify_bilingual_evidence(
             "english": _text(value.english_representation_hash),
             "chinese": _text(value.chinese_representation_hash),
         },
+        result_id=_stable_result_id(
+            value, decision, reasons, created_by=LEGACY_CREATED_BY
+        ),
+        created_by=LEGACY_CREATED_BY,
+    )
+
+
+def qualify_bilingual_evidence(
+    value: BilingualEvidenceQualificationInput,
+) -> BilingualEvidenceQualificationResult:
+    """Apply the default v1.1 safety policy without changing v1.0 behavior."""
+    base = qualify_bilingual_evidence_v1(value)
+    reasons = list(base.reason_codes)
+
+    upstream_ready = (
+        _norm(value.english_binding_status) in {"matched", "bound", "ready"}
+        and _norm(value.retrieval_status) in {"ready", "succeeded", "complete"}
+        and _norm(value.candidate_pool_status) in {"ready", "complete"}
+        and not tuple(value.upstream_reason_codes or ())
+    )
+    execution_ready = _norm(value.pair_execution_status) in {
+        "ready",
+        "succeeded",
+        "complete",
+    }
+    if not upstream_ready:
+        reasons.append(EVIDENCE_UPSTREAM_STATE_NOT_READY)
+    if not execution_ready:
+        reasons.append(EVIDENCE_QUALIFICATION_EXECUTION_FAILED)
+
+    consistency_score = value.pair_consistency_score
+    if consistency_score is None:
+        reasons.append(EVIDENCE_PAIR_UNCERTAIN)
+    elif float(consistency_score) < MIN_PAIR_CONSISTENCY_SCORE:
+        reasons.append(EVIDENCE_TERM_SCOPE_RISK)
+
+    if (
+        value.reranker_score is None
+        or (
+            float(value.bi_encoder_score or 0.0) >= MIN_PAIR_SEMANTIC_SCORE
+            and float(value.reranker_score) < MIN_RERANKER_COMPONENT_SCORE
+        )
+    ):
+        reasons.append(EVIDENCE_SCORE_COMPONENT_CONFLICT)
+
+    hard_safety_reasons = {
+        EVIDENCE_UPSTREAM_STATE_NOT_READY,
+        EVIDENCE_QUALIFICATION_EXECUTION_FAILED,
+    }
+    review_reasons = {
+        EVIDENCE_PAIR_UNCERTAIN,
+        EVIDENCE_PAIR_MARGIN_INSUFFICIENT,
+        EVIDENCE_SCORE_COMPONENT_CONFLICT,
+        EVIDENCE_TERM_SCOPE_RISK,
+    }
+    reasons = sorted(set(reasons))
+    if base.decision == REJECTED or set(reasons) & hard_safety_reasons:
+        decision = REJECTED
+    elif set(reasons) & review_reasons:
+        decision = REVIEW_REQUIRED
+    else:
+        decision = QUALIFIED
+
+    components = {
+        **base.score_components,
+        "pair_consistency_score": (
+            round(float(consistency_score), 8)
+            if consistency_score is not None
+            else 0.0
+        ),
+        "upstream_state_ready": 1.0 if upstream_ready else 0.0,
+        "pair_execution_ready": 1.0 if execution_ready else 0.0,
+        "score_component_agreement": (
+            0.0 if EVIDENCE_SCORE_COMPONENT_CONFLICT in reasons else 1.0
+        ),
+    }
+    return replace(
+        base,
+        decision=decision,
+        score_components=components,
+        thresholds=dict(policy_manifest()["thresholds"]),
+        policy_version=DEFAULT_POLICY_VERSION,
+        reason_codes=tuple(reasons),
+        risk_labels=tuple(reasons),
         result_id=_stable_result_id(value, decision, reasons),
         created_by=CREATED_BY,
     )
@@ -344,12 +507,41 @@ def serialize_qualification_result(
     return asdict(result) if result is not None else None
 
 
+def _bounded_context(value: Any) -> str:
+    return _text(value)[:MAX_CONSISTENCY_CONTEXT_CHARS]
+
+
+def _pair_consistency_inputs(
+    *,
+    english_term: str,
+    english_context: str,
+    chinese_term: str,
+    chinese_context: str,
+    discipline: str,
+) -> tuple[str, str]:
+    scope = _text(discipline) or "unspecified"
+    return (
+        "\n".join((
+            f"term: {_text(english_term)}",
+            f"discipline: {scope}",
+            f"context: {_bounded_context(english_context)}",
+        )),
+        "\n".join((
+            f"术语: {_text(chinese_term)}",
+            f"学科: {scope}",
+            f"语境: {_bounded_context(chinese_context)}",
+        )),
+    )
+
+
 def qualify_workflow_top1(
     input_data: dict[str, Any],
     english_evidence: list[dict[str, Any]],
     chinese_evidence: list[dict[str, Any]],
     chinese_candidates: list[dict[str, Any]],
     pair_candidates: list[dict[str, Any]],
+    *,
+    consistency_backend: Any | None = None,
 ) -> BilingualEvidenceQualificationResult | None:
     if not pair_candidates:
         return None
@@ -382,6 +574,34 @@ def qualify_workflow_top1(
     )
     next_score = float(ordered[1].get("final_score") or 0.0) if len(ordered) > 1 else 0.0
     components = dict(top.get("score_components") or {})
+    consistency_score = None
+    pair_execution_status = "failed"
+    if (
+        consistency_backend is not None
+        and _text(getattr(consistency_backend, "model_id", ""))
+        == RERANKER_MODEL_ID
+        and _text(getattr(consistency_backend, "model_revision", ""))
+        == RERANKER_MODEL_REVISION
+    ):
+        try:
+            readiness = consistency_backend.readiness()
+            if readiness.ready:
+                pair_inputs = _pair_consistency_inputs(
+                    english_term=_text(input_data.get("english_term")),
+                    english_context=_text(input_data.get("english_context")),
+                    chinese_term=_text(candidate.get("chinese_term")),
+                    chinese_context=_text(
+                        candidate.get("evidence_snippet")
+                        or candidate.get("snippet")
+                    ),
+                    discipline=_text(input_data.get("discipline")),
+                )
+                scored = consistency_backend.score_pairs([pair_inputs])
+                if len(scored) == 1:
+                    consistency_score = float(scored[0])
+                    pair_execution_status = "succeeded"
+        except Exception:
+            pair_execution_status = "failed"
     return qualify_bilingual_evidence(BilingualEvidenceQualificationInput(
         english_candidate_uid=_text(top.get("english_candidate_uid") or input_data.get("english_candidate_uid")),
         english_term=_text(input_data.get("english_term")),
@@ -427,4 +647,27 @@ def qualify_workflow_top1(
         ),
         english_source_role=_text(english.get("source_role")),
         chinese_source_role=_text(chinese.get("source_role")),
+        english_binding_status=(
+            _text(input_data.get("english_binding_status"))
+            or (
+                "matched"
+                if _text(input_data.get("english_candidate_uid")) and bool(english)
+                else "not_ready"
+            )
+        ),
+        retrieval_status=(
+            _text(input_data.get("retrieval_status"))
+            or ("ready" if bool(chinese) else "not_ready")
+        ),
+        candidate_pool_status=(
+            _text(input_data.get("candidate_pool_status"))
+            or ("ready" if bool(candidate) else "not_ready")
+        ),
+        pair_execution_status=pair_execution_status,
+        upstream_reason_codes=tuple(
+            _text(reason)
+            for reason in input_data.get("upstream_reason_codes", ())
+            if _text(reason)
+        ),
+        pair_consistency_score=consistency_score,
     ))
