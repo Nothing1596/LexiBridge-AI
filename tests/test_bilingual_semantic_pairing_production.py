@@ -25,6 +25,18 @@ class PairingProductionFakeBackend:
         ]
 
 
+class ProductionRerankerFake:
+    backend_id = "local_bge_reranker_v2_m3_cpu_v1"
+    model_id = "BAAI/bge-reranker-v2-m3"
+    model_revision = "79c481748842b7efa0a12db59915db91731f0b93"
+
+    def readiness(self):
+        return type("Readiness", (), {"ready": True})()
+
+    def score_pairs(self, pairs):
+        return [3.0 if "term:\n电势\n" in right else -1.0 for _, right in pairs]
+
+
 def _add(app_module, course, language, text):
     source_uid = f"source-{uuid.uuid4().hex}"
     source = app_module.KnowledgeSource(
@@ -94,12 +106,15 @@ def test_production_workflow_exposes_bounded_semantic_pairs(app_module):
             english_context="energy per unit charge",
             discipline="physics",
             cross_language_embedding_backend=PairingProductionFakeBackend(),
+            bilingual_reranker_backend=ProductionRerankerFake(),
         )
         assert result.bilingual_pair_candidates
         top = result.bilingual_pair_candidates[0]
         assert top["chinese_candidate_text"] == "电势"
         assert top["chunk_uid"] == correct.chunk_uid
         assert top["semantic_score"] > 0
-        assert top["score_components"]["semantic_weight"] == 0.85
+        assert top["score_components"]["semantic_weight"] == 0.05
+        assert top["cross_encoder_score"] == 3.0
+        assert top["pairing_method"] == "bge_reranker_v2_m3_cross_encoder_v1"
         assert "probability" not in top
         assert result.selected_chinese_candidate is None

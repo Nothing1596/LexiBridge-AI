@@ -5,6 +5,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
+from services import bilingual_pairing_reranker
 from services.local_multilingual_embedding import (
     BACKEND_UNAVAILABLE,
     MODEL_ID,
@@ -46,6 +47,7 @@ class BilingualPairResult:
     chinese_normalized_text: str
     final_score: float
     semantic_score: float
+    cross_encoder_score: float | None
     score_components: dict[str, float]
     rank: int
     backend_id: str
@@ -58,6 +60,9 @@ class BilingualPairResult:
     retrieval_rank: int
     extraction_rank: int
     pairing_method: str
+    reranker_backend_id: str
+    reranker_model_id: str
+    reranker_model_revision: str
     provenance: dict[str, str]
     reason_code: str
 
@@ -120,6 +125,8 @@ def rank_bilingual_pairs(
     english: EnglishPairingInput,
     chinese_candidates: list[dict[str, Any]],
     backend: Any,
+    *,
+    reranker_backend: Any | None = None,
 ) -> list[BilingualPairResult]:
     pool = _bounded_pool(chinese_candidates)
     if not pool:
@@ -190,6 +197,7 @@ def rank_bilingual_pairs(
         )
         scored.append({
             "candidate": candidate,
+            "english_text": english_text,
             "chinese_text": chinese_text,
             "semantic": semantic,
             "extraction": extraction,
@@ -197,15 +205,21 @@ def rank_bilingual_pairs(
             "structure": structure,
             "final": final,
         })
-    scored.sort(key=lambda item: (
-        -item["final"],
-        -item["semantic"],
-        max(1, int(item["candidate"].get("rank") or 999)),
-        max(1, int(item["candidate"].get("retrieval_rank") or 999)),
-        _text(item["candidate"].get("source_uid")),
-        _text(item["candidate"].get("chunk_uid")),
-        _text(item["candidate"].get("normalized_text") or item["candidate"].get("chinese_term")),
-    ))
+    if reranker_backend is not None:
+        scored = bilingual_pairing_reranker.rerank_pair_scores(
+            scored,
+            reranker_backend,
+        )
+    else:
+        scored.sort(key=lambda item: (
+            -item["final"],
+            -item["semantic"],
+            max(1, int(item["candidate"].get("rank") or 999)),
+            max(1, int(item["candidate"].get("retrieval_rank") or 999)),
+            _text(item["candidate"].get("source_uid")),
+            _text(item["candidate"].get("chunk_uid")),
+            _text(item["candidate"].get("normalized_text") or item["candidate"].get("chinese_term")),
+        ))
 
     results = []
     for rank, item in enumerate(scored, 1):
@@ -219,15 +233,44 @@ def rank_bilingual_pairs(
             ),
             final_score=item["final"],
             semantic_score=item["semantic"],
+            cross_encoder_score=item.get("cross_encoder_score"),
             score_components={
                 "semantic_score": item["semantic"],
-                "semantic_weight": SEMANTIC_WEIGHT,
+                "bi_encoder_score": item["semantic"],
+                "semantic_weight": (
+                    bilingual_pairing_reranker.BI_ENCODER_WEIGHT
+                    if reranker_backend is not None
+                    else SEMANTIC_WEIGHT
+                ),
+                "bi_encoder_weight": (
+                    bilingual_pairing_reranker.BI_ENCODER_WEIGHT
+                    if reranker_backend is not None
+                    else SEMANTIC_WEIGHT
+                ),
+                "cross_encoder_score": item.get("cross_encoder_score", 0.0),
+                "cross_encoder_weight": (
+                    bilingual_pairing_reranker.CROSS_ENCODER_WEIGHT
+                    if reranker_backend is not None
+                    else 0.0
+                ),
                 "extraction_prior": item["extraction"],
-                "extraction_weight": EXTRACTION_WEIGHT,
+                "extraction_weight": (
+                    bilingual_pairing_reranker.EXTRACTION_WEIGHT
+                    if reranker_backend is not None
+                    else EXTRACTION_WEIGHT
+                ),
                 "retrieval_prior": item["retrieval"],
-                "retrieval_weight": RETRIEVAL_WEIGHT,
+                "retrieval_weight": (
+                    bilingual_pairing_reranker.RETRIEVAL_WEIGHT
+                    if reranker_backend is not None
+                    else RETRIEVAL_WEIGHT
+                ),
                 "structural_prior": item["structure"],
-                "structural_weight": STRUCTURE_WEIGHT,
+                "structural_weight": (
+                    bilingual_pairing_reranker.STRUCTURE_WEIGHT
+                    if reranker_backend is not None
+                    else STRUCTURE_WEIGHT
+                ),
             },
             rank=rank,
             backend_id=_text(getattr(backend, "backend_id", "")),
@@ -239,9 +282,26 @@ def rank_bilingual_pairs(
             chunk_uid=_text(candidate.get("chunk_uid")),
             retrieval_rank=max(1, int(candidate.get("retrieval_rank") or 999)),
             extraction_rank=max(1, int(candidate.get("rank") or 999)),
-            pairing_method="multilingual_e5_semantic_pairing_v1",
+            pairing_method=(
+                "bge_reranker_v2_m3_cross_encoder_v1"
+                if reranker_backend is not None
+                else "multilingual_e5_semantic_pairing_v1"
+            ),
+            reranker_backend_id=_text(
+                getattr(reranker_backend, "backend_id", "")
+            ),
+            reranker_model_id=_text(
+                getattr(reranker_backend, "model_id", "")
+            ),
+            reranker_model_revision=_text(
+                getattr(reranker_backend, "model_revision", "")
+            ),
             provenance=dict(candidate.get("provenance") or {}),
-            reason_code="BILINGUAL_SEMANTIC_PAIR_RANKED",
+            reason_code=(
+                "BILINGUAL_SEMANTIC_PAIR_RERANKED"
+                if reranker_backend is not None
+                else "BILINGUAL_SEMANTIC_PAIR_RANKED"
+            ),
         ))
     return results
 

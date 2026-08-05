@@ -186,6 +186,7 @@ from services import evidence_retrieval as evidence_retrieval_service
 from services import bilingual_evidence_workflow as bilingual_evidence_service
 from services import cross_language_retrieval as cross_language_retrieval_service
 from services import bilingual_semantic_pairing as bilingual_semantic_pairing_service
+from services import local_bilingual_reranker as bilingual_reranker_service
 from services import concept_card_drafts as concept_card_draft_service
 from services import chinese_term_candidates as chinese_term_candidate_service
 from services import alignment_verification as alignment_verification_service
@@ -14302,6 +14303,25 @@ def retrieve_bilingual_evidence_api():
         return api_error_with_audit_context(
             reason_code,
             "Bilingual semantic pairing failed closed.",
+            503,
+            audit_context,
+            {"audit_error_code": reason_code},
+        )
+    except bilingual_reranker_service.LocalBilingualRerankerError as exc:
+        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
+        db.session.rollback()
+        reason_code = str(exc) or "BILINGUAL_RERANKER_EXECUTION_FAILED"
+        record_bilingual_evidence_audit(
+            "bilingual_evidence_retrieval_failed",
+            input_data=query_data,
+            error_code=reason_code,
+            error_message=reason_code,
+            latency_ms=latency_ms,
+            audit_context=audit_context,
+        )
+        return api_error_with_audit_context(
+            reason_code,
+            "Bilingual reranker failed closed.",
             503,
             audit_context,
             {"audit_error_code": reason_code},
