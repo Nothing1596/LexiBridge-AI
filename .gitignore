@@ -51,6 +51,14 @@ dist/
 
 # Generated local data and exports
 data/vector_indexes/
+model_cache/
+models/
+.cache/huggingface/
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.gguf
 backups/
 exports/
 restore_test/
