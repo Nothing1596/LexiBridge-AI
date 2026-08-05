@@ -184,6 +184,7 @@ from services import knowledge_governance as knowledge_governance_service
 from services import knowledge_ingestion as knowledge_ingestion_service
 from services import evidence_retrieval as evidence_retrieval_service
 from services import bilingual_evidence_workflow as bilingual_evidence_service
+from services import cross_language_retrieval as cross_language_retrieval_service
 from services import concept_card_drafts as concept_card_draft_service
 from services import chinese_term_candidates as chinese_term_candidate_service
 from services import alignment_verification as alignment_verification_service
@@ -14244,6 +14245,10 @@ def retrieve_bilingual_evidence_api():
             term_model=Term,
             terminology_card_model=TerminologyCard,
             audit_context=audit_context,
+            english_candidate_uid=query_data["english_candidate_uid"],
+            normalized_english_term=query_data["normalized_english_term"],
+            english_context=query_data["english_context"],
+            discipline=query_data["discipline"],
         )
     except bilingual_evidence_service.BilingualEvidenceWorkflowError as exc:
         latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
@@ -14261,6 +14266,25 @@ def retrieve_bilingual_evidence_api():
             400,
             audit_context,
             {"audit_error_code": "validation_error"},
+        )
+    except cross_language_retrieval_service.CrossLanguageRetrievalError as exc:
+        latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)
+        db.session.rollback()
+        reason_code = str(exc) or "LOCAL_MULTILINGUAL_EMBEDDING_BACKEND_UNAVAILABLE"
+        record_bilingual_evidence_audit(
+            "bilingual_evidence_retrieval_failed",
+            input_data=query_data,
+            error_code=reason_code,
+            error_message=reason_code,
+            latency_ms=latency_ms,
+            audit_context=audit_context,
+        )
+        return api_error_with_audit_context(
+            reason_code,
+            "Cross-language retrieval backend is unavailable.",
+            503,
+            audit_context,
+            {"audit_error_code": reason_code},
         )
     except Exception as exc:
         latency_ms = int((datetime.now() - started_at).total_seconds() * 1000)

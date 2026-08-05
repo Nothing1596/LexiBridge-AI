@@ -1,6 +1,6 @@
-"""Qualified local multilingual embedding boundary, not wired to retrieval.
+"""Qualified local multilingual embedding boundary used by explicit retrieval.
 
-The adapter is deliberately offline-only. Model preparation is a separate,
+The adapter is deliberately offline-only. Model preparation remains a separate,
 explicit operation; application code cannot trigger a download or fall back to
 another embedding implementation.
 """
