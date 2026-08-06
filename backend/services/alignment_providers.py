@@ -32,6 +32,7 @@ PARSER_ERROR_CODE_MAP = {
     "provider_output_not_json": "provider_non_json_output",
     "missing_alignment_output_fields": "provider_schema_invalid",
     "invalid_alignment_output_schema": "provider_schema_invalid",
+    "invalid_alignment_output_provenance": "provider_schema_invalid",
     "invalid_alignment_confidence": "provider_confidence_out_of_range",
 }
 
@@ -83,6 +84,36 @@ def _evidence_list(input_data: dict[str, Any], field: str) -> list[dict[str, Any
 def _candidate_list(input_data: dict[str, Any]) -> list[dict[str, Any]]:
     values = input_data.get("chinese_term_candidates") or []
     return values if isinstance(values, list) else []
+
+
+def _evidence_provenance(input_data: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for language, field in (
+        ("english", "english_evidence"),
+        ("chinese", "chinese_evidence"),
+    ):
+        result[language] = [
+            {
+                "source_uid": _text(item.get("source_uid")),
+                "chunk_uid": _text(item.get("chunk_uid")),
+            }
+            for item in _evidence_list(input_data, field)
+            if _text(item.get("source_uid")) and _text(item.get("chunk_uid"))
+        ]
+    return result
+
+
+def _allowed_evidence_provenance(
+    input_data: dict[str, Any],
+) -> dict[str, set[tuple[str, str]]]:
+    values = _evidence_provenance(input_data)
+    return {
+        language: {
+            (_text(item.get("source_uid")), _text(item.get("chunk_uid")))
+            for item in items
+        }
+        for language, items in values.items()
+    }
 
 
 def _has_review_evidence(evidence: list[dict[str, Any]]) -> bool:
@@ -257,7 +288,10 @@ class FakeLLMAlignmentProvider(BaseAlignmentProvider):
 
     def verify_alignment(self, input_data: dict[str, Any]) -> dict[str, Any]:
         provider_options = input_data.get("provider_options") if isinstance(input_data.get("provider_options"), dict) else {}
-        prompt_version = _text(provider_options.get("prompt_version")) or alignment_prompting.PROMPT_VERSION
+        prompt_version = (
+            _text(provider_options.get("prompt_version"))
+            or alignment_prompting.PROMPT_VERSION
+        )
         fake_response_type = _text(provider_options.get("fake_response_type")) or "valid"
         try:
             prompt = alignment_prompting.build_alignment_prompt(input_data, prompt_version=prompt_version)
@@ -292,8 +326,16 @@ class FakeLLMAlignmentProvider(BaseAlignmentProvider):
             "prompt_version": prompt_version,
             "prompt_summary": prompt_summary,
             "raw_output_summary": raw_output_summary,
-            "parser_version": alignment_output_parser.PARSER_VERSION,
-            "output_schema_version": alignment_output_parser.OUTPUT_SCHEMA_VERSION,
+            "parser_version": (
+                alignment_output_parser.STRUCTURED_PARSER_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.PARSER_VERSION
+            ),
+            "output_schema_version": (
+                alignment_output_parser.STRUCTURED_OUTPUT_SCHEMA_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.OUTPUT_SCHEMA_VERSION
+            ),
             "provider_response_status": "parsed",
             "verification_status": "needs_review",
             "is_production_result": False,
@@ -341,8 +383,16 @@ class FakeLLMAlignmentProvider(BaseAlignmentProvider):
                 "stores_full_prompt": False,
             },
             "raw_output_summary": raw_output_summary or self._raw_output_summary(raw_output),
-            "parser_version": alignment_output_parser.PARSER_VERSION,
-            "output_schema_version": alignment_output_parser.OUTPUT_SCHEMA_VERSION,
+            "parser_version": (
+                alignment_output_parser.STRUCTURED_PARSER_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.PARSER_VERSION
+            ),
+            "output_schema_version": (
+                alignment_output_parser.STRUCTURED_OUTPUT_SCHEMA_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.OUTPUT_SCHEMA_VERSION
+            ),
             "provider_response_status": "parse_failed",
             "is_production_result": False,
             "can_auto_approve": False,
@@ -390,6 +440,7 @@ class FakeLLMAlignmentProvider(BaseAlignmentProvider):
                 "no_external_model_called",
                 "requires_human_review",
             ],
+            "evidence_citations": _evidence_provenance(input_data),
             "auto_approve": True,
         }
 
@@ -457,7 +508,12 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
 
     def verify_alignment(self, input_data: dict[str, Any]) -> dict[str, Any]:
         provider_options = input_data.get("provider_options") if isinstance(input_data.get("provider_options"), dict) else {}
-        prompt_version = _text(provider_options.get("prompt_version")) or alignment_prompting.PROMPT_VERSION
+        prompt_version = (
+            alignment_prompting.STRUCTURED_PROMPT_VERSION
+            if self.provider_name == DEEPSEEK_EXTERNAL_PROVIDER_NAME
+            else _text(provider_options.get("prompt_version"))
+            or alignment_prompting.PROMPT_VERSION
+        )
         config = self._config_with_safe_options(provider_options)
         try:
             prompt = alignment_prompting.build_alignment_prompt(input_data, prompt_version=prompt_version)
@@ -480,6 +536,17 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             self.provider_name,
             config=config,
         )
+        if (
+            self.provider_name == DEEPSEEK_EXTERNAL_PROVIDER_NAME
+            and not estimated_cost.get("pricing_available")
+        ):
+            return self._failed_output(
+                "provider_pricing_unavailable",
+                "Provider pricing is unavailable for the fixed model identity.",
+                prompt_version=prompt_version,
+                prompt_summary=prompt_summary,
+                estimated_cost=estimated_cost,
+            )
         if estimated_cost.get("exceeds_limit"):
             return self._failed_output(
                 "provider_cost_limit_exceeded",
@@ -507,6 +574,7 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             {
                 "replay_response_type": _text(provider_options.get("replay_response_type")) or "valid",
                 "fake_response_type": _text(provider_options.get("fake_response_type")) or "valid",
+                "evidence_citations": _evidence_provenance(input_data),
             },
         )
         if transport_result.status != "success":
@@ -522,7 +590,12 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             )
 
         raw_output = transport_result.raw_output or ""
-        raw_output_summary = self._raw_output_summary(raw_output)
+        raw_output_summary = self._raw_output_summary(
+            raw_output,
+            finish_reason=transport_result.metadata.get("finish_reason", ""),
+            response_model=transport_result.metadata.get("resolved_model", ""),
+            validation_stage="content_received",
+        )
         max_output_chars = int(config.get("max_output_chars") or llm_provider_config.DEFAULT_MAX_OUTPUT_CHARS)
         if len(raw_output) > max_output_chars:
             return self._failed_output(
@@ -537,8 +610,25 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
                 latency_ms=transport_result.latency_ms,
             )
         try:
-            parsed = alignment_output_parser.parse_alignment_provider_output(raw_output)
+            if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION:
+                parsed = alignment_output_parser.parse_structured_alignment_provider_output(
+                    raw_output,
+                    allowed_provenance=_allowed_evidence_provenance(input_data),
+                )
+            else:
+                parsed = alignment_output_parser.parse_alignment_provider_output(
+                    raw_output
+                )
         except alignment_output_parser.AlignmentOutputParserError as exc:
+            raw_output_summary = self._raw_output_summary(
+                raw_output,
+                finish_reason=transport_result.metadata.get("finish_reason", ""),
+                response_model=transport_result.metadata.get("resolved_model", ""),
+                validation_stage="schema_validation",
+                parser_reason=PARSER_ERROR_CODE_MAP.get(
+                    exc.error_code, "provider_bad_response"
+                ),
+            )
             return self._failed_output(
                 PARSER_ERROR_CODE_MAP.get(exc.error_code, "provider_bad_response"),
                 str(exc),
@@ -550,6 +640,13 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
                 retry_count=transport_result.retry_count,
                 latency_ms=transport_result.latency_ms,
             )
+        raw_output_summary = self._raw_output_summary(
+            raw_output,
+            finish_reason=transport_result.metadata.get("finish_reason", ""),
+            response_model=transport_result.metadata.get("resolved_model", ""),
+            validation_stage="validated",
+            parser_reason="",
+        )
 
         provider_response_status = "replayed" if config.get("replay_mode") else "parsed"
         risk_labels = _merge_labels(parsed.get("risk_labels", []))
@@ -562,8 +659,16 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             "prompt_version": prompt_version,
             "prompt_summary": prompt_summary,
             "raw_output_summary": raw_output_summary,
-            "parser_version": alignment_output_parser.PARSER_VERSION,
-            "output_schema_version": alignment_output_parser.OUTPUT_SCHEMA_VERSION,
+            "parser_version": (
+                alignment_output_parser.STRUCTURED_PARSER_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.PARSER_VERSION
+            ),
+            "output_schema_version": (
+                alignment_output_parser.STRUCTURED_OUTPUT_SCHEMA_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.OUTPUT_SCHEMA_VERSION
+            ),
             "provider_response_status": provider_response_status,
             "estimated_cost": estimated_cost,
             "retry_count": transport_result.retry_count,
@@ -599,15 +704,27 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             "stores_full_prompt": False,
         }
 
-    def _raw_output_summary(self, raw_output: str) -> dict[str, Any]:
-        text = _text(raw_output)
-        preview = f"{text[:240]}..." if len(text) > 240 else "[omitted_short_provider_output]"
-        return {
-            "raw_output_chars": len(text),
-            "raw_output_preview": preview,
-            "truncated": len(text) > 240,
-            "stores_full_raw_output": False,
-        }
+    def _raw_output_summary(
+        self,
+        raw_output: str,
+        *,
+        finish_reason: str = "",
+        response_model: str = "",
+        validation_stage: str = "",
+        parser_reason: str = "",
+    ) -> dict[str, Any]:
+        diagnostics = alignment_output_parser.build_sanitized_output_diagnostics(
+            raw_output,
+            finish_reason=finish_reason,
+            response_model=response_model,
+            validation_stage=validation_stage,
+            parser_reason=parser_reason,
+        )
+        diagnostics.update({
+            "raw_output_chars": len(raw_output or ""),
+            "truncated": False,
+        })
+        return diagnostics
 
     def _failed_output(
         self,
@@ -630,8 +747,16 @@ class GuardedLLMAlignmentProvider(BaseAlignmentProvider):
             "prompt_version": prompt_version,
             "prompt_summary": prompt_summary,
             "raw_output_summary": raw_output_summary or self._raw_output_summary(raw_output),
-            "parser_version": alignment_output_parser.PARSER_VERSION,
-            "output_schema_version": alignment_output_parser.OUTPUT_SCHEMA_VERSION,
+            "parser_version": (
+                alignment_output_parser.STRUCTURED_PARSER_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.PARSER_VERSION
+            ),
+            "output_schema_version": (
+                alignment_output_parser.STRUCTURED_OUTPUT_SCHEMA_VERSION
+                if prompt_version == alignment_prompting.STRUCTURED_PROMPT_VERSION
+                else alignment_output_parser.OUTPUT_SCHEMA_VERSION
+            ),
             "provider_response_status": error_code,
             "estimated_cost": estimated_cost or {},
             "retry_count": retry_count,

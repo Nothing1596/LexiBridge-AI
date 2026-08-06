@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from services import alignment_providers
+from services import alignment_prompting, alignment_providers
 from services import document_alignment_item_preparation as preparation
 from services import llm_provider_config
 from services.formal_document_alignment_provider_selection import (
@@ -115,7 +115,7 @@ def test_same_verified_context_reaches_item_preparation(app_module, tmp_path):
         run = app_module.DocumentAlignmentWorkflowRun.query.filter_by(run_uid=run_uid).one()
         run.provider_preference = PROVIDER
         run.model_preference = MODEL
-        run.prompt_version = "alignment-v1"
+        run.prompt_version = alignment_prompting.STRUCTURED_PROMPT_VERSION
         app_module.db.session.commit()
         item = app_module.DocumentAlignmentWorkflowItem.query.one()
         decision = _decision(tmp_path)

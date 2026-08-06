@@ -4,6 +4,7 @@ import uuid
 import pytest
 
 from services import alignment_providers
+from services import alignment_prompting
 from services import alignment_verification
 from services import audit_records
 from services import concept_alignment_cards
@@ -229,7 +230,7 @@ def test_replay_provider_parses_fixture_and_records_prompt_metadata(app_module):
         assert output["can_auto_approve"] is False
         assert output["is_production_result"] is False
         assert serialized["provider_type"] == "replay_llm"
-        assert serialized["prompt_version"] == "alignment-v1"
+        assert serialized["prompt_version"] == alignment_prompting.PROMPT_VERSION
         assert serialized["parser_version"] == "alignment-parser-v1"
         assert serialized["output_schema_version"] == "alignment-output-v1"
         assert serialized["estimated_cost"]["cost_is_estimate"] is True

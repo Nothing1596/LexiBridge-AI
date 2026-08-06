@@ -480,6 +480,34 @@ def build_safe_alignment_verification_persistence(
                 raw_summary.get("raw_output_chars"), integer=True
             ),
             "truncated": bool(raw_summary.get("truncated", False)),
+            "content_present": bool(raw_summary.get("content_present", False)),
+            "content_length_bucket": _safe_provider_text(
+                raw_summary.get("content_length_bucket"), max_length=40
+            ),
+            "first_non_whitespace_character_class": _safe_provider_text(
+                raw_summary.get("first_non_whitespace_character_class"), max_length=40
+            ),
+            "looks_like_json_object": bool(
+                raw_summary.get("looks_like_json_object", False)
+            ),
+            "outer_code_fence_present": bool(
+                raw_summary.get("outer_code_fence_present", False)
+            ),
+            "finish_reason": _safe_provider_text(
+                raw_summary.get("finish_reason"), max_length=80
+            ),
+            "response_model": _safe_provider_text(
+                raw_summary.get("response_model"), max_length=120
+            ),
+            "response_hash": _safe_provider_text(
+                raw_summary.get("response_hash"), max_length=80
+            ),
+            "schema_validation_stage": _safe_provider_text(
+                raw_summary.get("schema_validation_stage"), max_length=80
+            ),
+            "stable_parser_reason": _safe_provider_text(
+                raw_summary.get("stable_parser_reason"), max_length=120
+            ),
             "stores_full_raw_output": False,
         },
         "parser_version": _safe_provider_text(output_data.get("parser_version"), max_length=80),
