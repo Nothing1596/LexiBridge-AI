@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from services.formula_detection import contains_formula_text, detect_pdf_formula_regions
+from services.layout_analysis import (
+    SKIPPED_TEXT_LAYOUT_TYPES,
+    layout_blocks_to_text,
+    parse_pdf_layout,
+)
 from services.ocr import get_ocr_provider, join_tesseract_blocks_text
 
 
@@ -207,6 +212,55 @@ def _parse_pdf_native(path: str) -> tuple[str, list[dict[str, Any]], dict[str, A
         "image_only_suspected": page_count > 0 and image_only_pages == page_count,
         "partial_text": 0 < image_only_pages < page_count,
         "image_only_pages": image_only_page_numbers,
+    }
+
+
+def _parse_pdf_with_layout(path: str) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    """Parse a PDF through the layout analysis pipeline.
+
+    Same return contract as ``_parse_pdf_native``. Raises on layout failure so
+    the caller can fall back to the legacy per-page extraction; layout analysis
+    must never be the reason a parse fails.
+    """
+    result = parse_pdf_layout(path)
+    if not result.ok:
+        raise RuntimeError(result.error or f"Layout analysis failed with status {result.status}.")
+
+    raw_text = _clean_text(layout_blocks_to_text(result.blocks))
+    blocks = []
+    text_pages = set()
+    for block in result.blocks:
+        if block.layout_type in SKIPPED_TEXT_LAYOUT_TYPES or not block.text.strip():
+            continue
+        text_pages.add(block.page_number)
+        bbox = block.bbox
+        locator = f"page:{block.page_number};bbox:{round(bbox.x0, 2)},{round(bbox.y0, 2)},{round(bbox.x1, 2)},{round(bbox.y1, 2)}"
+        blocks.append({
+            "block_uid": str(uuid.uuid4()),
+            "page_number": block.page_number,
+            "slide_number": None,
+            "block_index": len(blocks) + 1,
+            "block_type": block.layout_type,
+            "text": _clean_text(block.text),
+            "confidence": block.confidence,
+            "parser_type": f"layout_{result.provider}",
+            "source_locator": locator[:160],
+            "quality_flags": normalize_quality_flags([
+                "layout",
+                f"layout_provider_{result.provider}",
+                f"layout_type_{block.layout_type}",
+            ]),
+        })
+
+    page_count = result.page_count
+    image_only_page_numbers = [page for page in range(1, page_count + 1) if page not in text_pages]
+    return raw_text, blocks, {
+        "page_count": page_count,
+        "image_only_suspected": page_count > 0 and len(image_only_page_numbers) == page_count,
+        "partial_text": 0 < len(image_only_page_numbers) < page_count,
+        "image_only_pages": image_only_page_numbers,
+        "layout_provider": result.provider,
+        "layout_warnings": list(result.warnings or ()),
     }
 
 
@@ -560,6 +614,7 @@ def parse_document_with_quality(
     ocr_language_hint = language_hint or "bilingual"
     ocr_completed = False
     exception = None
+    layout_quality_flags: list[str] = []
 
     try:
         if file_type == "unknown":
@@ -569,7 +624,20 @@ def parse_document_with_quality(
             blocks = _text_blocks_from_text(raw_text)
             parser_name = "native_text"
         elif file_type == "pdf":
-            raw_text, blocks, meta = _parse_pdf_native(file_path)
+            layout_provider = ""
+            if os.environ.get("LAYOUT_PROVIDER", "").strip():
+                try:
+                    raw_text, blocks, meta = _parse_pdf_with_layout(file_path)
+                except Exception:
+                    warnings.append("layout_fallback_native")
+                    raw_text, blocks, meta = _parse_pdf_native(file_path)
+                else:
+                    layout_provider = str(meta.get("layout_provider") or "")
+            else:
+                raw_text, blocks, meta = _parse_pdf_native(file_path)
+            if layout_provider:
+                warnings.extend(meta.get("layout_warnings") or [])
+                layout_quality_flags = ["layout_applied", f"layout_provider_{layout_provider}"]
             page_count = meta.get("page_count")
             image_only_suspected = bool(meta.get("image_only_suspected"))
             partial_text = bool(meta.get("partial_text"))
@@ -595,7 +663,8 @@ def parse_document_with_quality(
                 errors.extend(ocr_data.get("errors", []) or [])
             elif ocr_required and not ocr_available:
                 warnings.append("OCR is required but no OCR provider is available.")
-            parser_name = "pymupdf_native_tesseract_ocr" if ocr_completed else "pymupdf_native"
+            parser_base = f"pymupdf_layout_{layout_provider}" if layout_provider else "pymupdf_native"
+            parser_name = f"{parser_base}_tesseract_ocr" if ocr_completed else parser_base
         elif file_type == "docx":
             raw_text, blocks, meta = _parse_docx_native(file_path)
             page_count = meta.get("page_count")
@@ -641,7 +710,7 @@ def parse_document_with_quality(
         "blocks": blocks,
         "warnings": warnings,
         "errors": errors,
-        "quality_flags": [],
+        "quality_flags": layout_quality_flags,
         "ocr_required": ocr_required,
         "ocr_available": ocr_available,
         "formula_detected": contains_formula_text(raw_text) or bool(formula_regions),
