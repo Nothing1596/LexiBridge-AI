@@ -77,6 +77,13 @@ def _result(status, chinese_term="", provider="", model="", error="", attempted=
         "error": error,
         "attempted": list(attempted or []),
         "glossary_hit": glossary_hit,
+        "generated": True,
+        "no_evidence": True,
+        "provenance_type": "GENERATED_HINT",
+        "eligible_as_chinese_evidence": False,
+        "eligible_as_canonical_term": False,
+        "eligible_for_qualification": False,
+        "eligible_for_provider_readiness": False,
     }
 
 
@@ -89,6 +96,13 @@ def _finalize_result(result, provider_name):
     result.setdefault("error", "")
     result.setdefault("attempted", [])
     result.setdefault("glossary_hit", False)
+    result.setdefault("generated", True)
+    result.setdefault("no_evidence", True)
+    result.setdefault("provenance_type", "GENERATED_HINT")
+    result.setdefault("eligible_as_chinese_evidence", False)
+    result.setdefault("eligible_as_canonical_term", False)
+    result.setdefault("eligible_for_qualification", False)
+    result.setdefault("eligible_for_provider_readiness", False)
     return result
 
 
