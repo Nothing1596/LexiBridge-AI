@@ -24,6 +24,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import validates
 from werkzeug.security import check_password_hash, generate_password_hash
 from services.ai_providers import get_ai_provider
+from services.translation import translate_term as translate_term_candidate
 from services.ocr import get_ocr_provider
 from services.formula_detection import contains_formula_text, detect_pdf_formula_regions, looks_like_formula_image
 from services.formula_ocr import get_formula_ocr_provider
@@ -5614,6 +5615,10 @@ def generate_alignment_result(
     english_evidence = english_chunks
 
     translation_candidate = fallback_translation_candidate(english_term)
+    translation_attempt = translate_term_candidate(english_term, context_sentence=courseware_sentence or "")
+    if translation_attempt.get("status") == "ok" and translation_attempt.get("chinese_term"):
+        translation_candidate = translation_attempt["chinese_term"]
+    translation_provider = translation_attempt.get("provider", "")
     chinese_query = " ".join([translation_candidate, english_term, courseware_sentence or ""]).strip()
     chinese_chunks = retrieve_evidence_results(
         chinese_query,
@@ -5660,6 +5665,7 @@ def generate_alignment_result(
                 "course": course,
                 "chapter": chapter,
                 "ai_translation_candidate": final_term,
+                "translation_provider": translation_provider,
                 "final_chinese_term": final_term,
                 "chinese_term": final_term,
                 "explanation": str(ai_result.get("concept_explanation") or ai_result.get("explanation") or "").strip(),
@@ -5712,6 +5718,7 @@ def generate_alignment_result(
         "course": course,
         "chapter": chapter,
         "ai_translation_candidate": translation_candidate,
+        "translation_provider": translation_provider,
         "final_chinese_term": final_term,
         "chinese_term": final_term,
         "explanation": first_evidence_text(chinese_evidence) or first_evidence_text(english_evidence) or "本地 fallback 未找到足够教材证据。",
