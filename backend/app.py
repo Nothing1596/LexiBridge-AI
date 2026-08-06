@@ -12663,6 +12663,8 @@ register_concept_card_review_routes(
         KnowledgeSource=KnowledgeSource,
         KnowledgeChunk=KnowledgeChunk,
         DocumentParseRecord=DocumentParseRecord,
+        DocumentAlignmentWorkflowItem=DocumentAlignmentWorkflowItem,
+        DocumentAlignmentWorkflowRun=DocumentAlignmentWorkflowRun,
     ),
 )
 
@@ -12685,6 +12687,14 @@ def get_concept_card_api(card_uid):
             error_code="concept_card_not_found",
         )
         return concept_card_error_response(exc, audit_context)
+    if user.role == "student" and card.status != "approved":
+        return api_error_with_audit_context(
+            "FORBIDDEN",
+            "Students cannot access unpublished Concept Card drafts.",
+            403,
+            audit_context,
+            {"audit_error_code": "student_unpublished_concept_card_forbidden"},
+        )
     return api_success_with_audit_context(
         {
             "card": concept_card_publication_service.enrich_card_payload(
@@ -12703,7 +12713,7 @@ def get_concept_card_api(card_uid):
 @app.route("/api/concept-cards/<card_uid>", methods=["PATCH"])
 def update_concept_card_api(card_uid):
     audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"student", "teacher", "admin"})
+    user, error_response = require_current_user({"teacher", "admin"})
     if error_response:
         return attach_request_id_to_response(error_response, audit_context)
     audit_context = get_route_audit_context(user)

@@ -19,6 +19,7 @@ from services import alignment_verification as alignment_verification_service
 from services import concept_alignment_cards as concept_card_service
 from services import concept_card_review as concept_card_review_service
 from services import course_review_policy as course_review_policy_service
+from services import teacher_alignment_review as teacher_alignment_review_service
 
 
 ROUTE_MARKER = "concept_card_review_routes"
@@ -39,6 +40,18 @@ TARGET_ROUTES = {
         "endpoint": "concept_card_assign_reviewer_api",
         "method": "POST",
     },
+    "/api/concept-cards/<card_uid>/review-case": {
+        "endpoint": "teacher_alignment_review_case_api",
+        "method": "GET",
+    },
+    "/api/concept-cards/<card_uid>/generate-draft": {
+        "endpoint": "teacher_alignment_generate_draft_api",
+        "method": "POST",
+    },
+    "/api/concept-cards/<card_uid>/draft": {
+        "endpoint": "teacher_alignment_draft_api",
+        "method": "GET",
+    },
 }
 
 
@@ -55,6 +68,8 @@ class ConceptCardReviewModels:
     KnowledgeSource: Any | None = None
     KnowledgeChunk: Any | None = None
     DocumentParseRecord: Any | None = None
+    DocumentAlignmentWorkflowItem: Any | None = None
+    DocumentAlignmentWorkflowRun: Any | None = None
 
 
 def register_concept_card_review_routes(
@@ -102,6 +117,14 @@ def register_concept_card_review_routes(
                 audit_context,
                 details,
             )
+        if isinstance(exc, teacher_alignment_review_service.TeacherAlignmentReviewError):
+            return core.api_error_with_audit_context(
+                "TEACHER_ALIGNMENT_REVIEW_INVALID",
+                str(exc),
+                400,
+                audit_context,
+                {"audit_error_code": "teacher_alignment_review_invalid"},
+            )
         return core.api_error_with_audit_context(
             "VALIDATION_ERROR",
             str(exc),
@@ -143,6 +166,30 @@ def register_concept_card_review_routes(
             "verification_summary": alignment_verification_service.serialize_alignment_verification_run(verification_run) if verification_run else None,
         }
 
+    def permitted_card(card_uid, user, audit_context, purpose):
+        try:
+            card = concept_card_service.get_concept_card(
+                db.session, models.ConceptAlignmentCard, card_uid
+            )
+        except concept_card_service.ConceptCardError as exc:
+            return None, concept_card_review_error_response(exc, audit_context)
+        if user.role != "admin":
+            can_review, _, reason = course_review_policy_service.can_reviewer_review_card(
+                db.session,
+                models.CourseReviewPermission,
+                card,
+                user,
+            )
+            if not can_review:
+                return None, core.api_error_with_audit_context(
+                    "FORBIDDEN",
+                    f"Reviewer is not permitted to {purpose} for this course.",
+                    403,
+                    audit_context,
+                    {"audit_error_code": reason or "course_review_permission_denied"},
+                )
+        return card, None
+
     def concept_card_review_queue_api():
         audit_context = core.get_route_audit_context()
         user, error_response = core.require_current_user({"teacher", "admin"})
@@ -161,6 +208,7 @@ def register_concept_card_review_routes(
             db.session,
             models.ConceptAlignmentCard,
             filters,
+            review_model=models.ConceptCardReviewRecord,
         )
         items = []
         for card in result.items:
@@ -229,13 +277,135 @@ def register_concept_card_review_routes(
         raw_data = request.get_json(silent=True) or {}
         data = dict(raw_data) if isinstance(raw_data, dict) else {}
         action = str(data.get("action") or "").strip()
+        data["idempotency_key"] = str(
+            request.headers.get("Idempotency-Key")
+            or data.get("idempotency_key")
+            or ""
+        ).strip()
         try:
-            card, review_record = concept_card_review_service.dispatch_review_action(
+            if action in {
+                "accept_recommendation",
+                "select_alternative_candidate",
+                "defer_review",
+            } or (action == "reject" and data["idempotency_key"]):
+                card, review_record, reused = (
+                    teacher_alignment_review_service.apply_human_decision(
+                        db.session,
+                        models.ConceptAlignmentCard,
+                        models.ConceptCardReviewRecord,
+                        card_uid,
+                        action,
+                        user,
+                        data,
+                        audit_model=core.audit_record_model,
+                        audit_context=audit_context,
+                        policy_model=models.CourseReviewPolicy,
+                        permission_model=models.CourseReviewPermission,
+                        source_model=models.KnowledgeSource,
+                        chunk_model=models.KnowledgeChunk,
+                        require_concurrency_token=True,
+                        now_fn=core.current_time_text,
+                        commit=True,
+                    )
+                )
+            else:
+                card, review_record = concept_card_review_service.dispatch_review_action(
+                    db.session,
+                    models.ConceptAlignmentCard,
+                    models.ConceptCardReviewRecord,
+                    card_uid,
+                    action,
+                    user,
+                    data,
+                    audit_model=core.audit_record_model,
+                    audit_context=audit_context,
+                    policy_model=models.CourseReviewPolicy,
+                    permission_model=models.CourseReviewPermission,
+                    source_model=models.KnowledgeSource,
+                    chunk_model=models.KnowledgeChunk,
+                    require_concurrency_token=True,
+                    now_fn=core.current_time_text,
+                    commit=True,
+                )
+                reused = False
+        except (
+            concept_card_service.ConceptCardError,
+            concept_card_review_service.ConceptCardReviewError,
+            teacher_alignment_review_service.TeacherAlignmentReviewError,
+            ValueError,
+        ) as exc:
+            db.session.rollback()
+            return concept_card_review_error_response(exc, audit_context)
+        review_case = teacher_alignment_review_service.serialize_review_case(
+            db.session,
+            card,
+            review_model=models.ConceptCardReviewRecord,
+            workflow_item_model=models.DocumentAlignmentWorkflowItem,
+            workflow_run_model=models.DocumentAlignmentWorkflowRun,
+        )
+        return core.api_success_with_audit_context(
+            {
+                "card": concept_card_review_service.serialize_review_queue_item(
+                    card,
+                    session=db.session,
+                    source_model=models.KnowledgeSource,
+                    chunk_model=models.KnowledgeChunk,
+                    parse_model=models.DocumentParseRecord,
+                ),
+                "review": concept_card_review_service.serialize_review_record(review_record),
+                "case": review_case,
+                "reused": reused,
+            },
+            "Concept card review recorded.",
+            audit_context,
+        )
+
+    def teacher_alignment_review_case_api(card_uid):
+        audit_context = core.get_route_audit_context()
+        user, error_response = core.require_current_user({"teacher", "admin"})
+        if error_response:
+            return core.attach_request_id_to_response(error_response, audit_context)
+        audit_context = core.get_route_audit_context(user)
+        card, error_response = permitted_card(
+            card_uid, user, audit_context, "view this alignment case"
+        )
+        if error_response:
+            return error_response
+        return core.api_success_with_audit_context(
+            {
+                "case": teacher_alignment_review_service.serialize_review_case(
+                    db.session,
+                    card,
+                    review_model=models.ConceptCardReviewRecord,
+                    workflow_item_model=models.DocumentAlignmentWorkflowItem,
+                    workflow_run_model=models.DocumentAlignmentWorkflowRun,
+                )
+            },
+            audit_context=audit_context,
+        )
+
+    def teacher_alignment_generate_draft_api(card_uid):
+        audit_context = core.get_route_audit_context()
+        user, error_response = core.require_current_user({"teacher", "admin"})
+        if error_response:
+            return core.attach_request_id_to_response(error_response, audit_context)
+        audit_context = core.get_route_audit_context(user)
+        _, error_response = permitted_card(
+            card_uid, user, audit_context, "generate a governed draft"
+        )
+        if error_response:
+            return error_response
+        raw_data = request.get_json(silent=True) or {}
+        data = dict(raw_data) if isinstance(raw_data, dict) else {}
+        data["idempotency_key"] = str(
+            request.headers.get("Idempotency-Key") or ""
+        ).strip()
+        try:
+            result = teacher_alignment_review_service.generate_fake_draft(
                 db.session,
                 models.ConceptAlignmentCard,
                 models.ConceptCardReviewRecord,
                 card_uid,
-                action,
                 user,
                 data,
                 audit_model=core.audit_record_model,
@@ -248,21 +418,66 @@ def register_concept_card_review_routes(
                 now_fn=core.current_time_text,
                 commit=True,
             )
-        except (concept_card_service.ConceptCardError, concept_card_review_service.ConceptCardReviewError, ValueError) as exc:
+        except (
+            concept_card_service.ConceptCardError,
+            concept_card_review_service.ConceptCardReviewError,
+            teacher_alignment_review_service.TeacherAlignmentReviewError,
+            ValueError,
+        ) as exc:
             db.session.rollback()
             return concept_card_review_error_response(exc, audit_context)
         return core.api_success_with_audit_context(
-            {
-                "card": concept_card_review_service.serialize_review_queue_item(
-                    card,
-                    session=db.session,
-                    source_model=models.KnowledgeSource,
-                    chunk_model=models.KnowledgeChunk,
-                    parse_model=models.DocumentParseRecord,
-                ),
-                "review": concept_card_review_service.serialize_review_record(review_record),
-            },
-            "Concept card review recorded.",
+            result, "Governed fake Provider draft generated.", audit_context
+        )
+
+    def teacher_alignment_draft_api(card_uid):
+        audit_context = core.get_route_audit_context()
+        user, error_response = core.require_current_user({"teacher", "admin"})
+        if error_response:
+            return core.attach_request_id_to_response(error_response, audit_context)
+        audit_context = core.get_route_audit_context(user)
+        card, error_response = permitted_card(
+            card_uid, user, audit_context, "view or edit this draft"
+        )
+        if error_response:
+            return error_response
+        if request.method == "GET":
+            try:
+                teacher_alignment_review_service.require_generated_draft(
+                    db.session, models.ConceptCardReviewRecord, card_uid
+                )
+            except teacher_alignment_review_service.TeacherAlignmentReviewError as exc:
+                return concept_card_review_error_response(exc, audit_context)
+            return core.api_success_with_audit_context(
+                {"draft": teacher_alignment_review_service.serialize_draft(card)},
+                audit_context=audit_context,
+            )
+        raw_data = request.get_json(silent=True) or {}
+        data = dict(raw_data) if isinstance(raw_data, dict) else {}
+        try:
+            card = teacher_alignment_review_service.update_draft(
+                db.session,
+                models.ConceptAlignmentCard,
+                models.ConceptCardReviewRecord,
+                card_uid,
+                data,
+                audit_model=core.audit_record_model,
+                actor=user,
+                audit_context=audit_context,
+                source="teacher_review_api",
+                now_fn=core.current_time_text,
+                commit=True,
+            )
+        except (
+            concept_card_service.ConceptCardError,
+            teacher_alignment_review_service.TeacherAlignmentReviewError,
+            ValueError,
+        ) as exc:
+            db.session.rollback()
+            return concept_card_review_error_response(exc, audit_context)
+        return core.api_success_with_audit_context(
+            {"draft": teacher_alignment_review_service.serialize_draft(card)},
+            "Teacher draft saved.",
             audit_context,
         )
 
@@ -322,6 +537,21 @@ def register_concept_card_review_routes(
         "/api/concept-cards/<card_uid>/assign-reviewer",
         view_func=concept_card_assign_reviewer_api,
         methods=["POST"],
+    )
+    app.add_url_rule(
+        "/api/concept-cards/<card_uid>/review-case",
+        view_func=teacher_alignment_review_case_api,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/concept-cards/<card_uid>/generate-draft",
+        view_func=teacher_alignment_generate_draft_api,
+        methods=["POST"],
+    )
+    app.add_url_rule(
+        "/api/concept-cards/<card_uid>/draft",
+        view_func=teacher_alignment_draft_api,
+        methods=["GET", "PUT"],
     )
     registered.add(ROUTE_MARKER)
 

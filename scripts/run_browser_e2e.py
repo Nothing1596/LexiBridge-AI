@@ -407,12 +407,48 @@ def run_teacher_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     page.locator("form").filter(has=page.locator('[data-testid="review-filter-course"]')).locator("button").first.click()
     expect_visible(page, '[data-testid="review-card-row"]', "review queue filtered", flow)
 
-    page.locator('[data-testid="review-card-row"]').first.click()
+    page.locator('[data-testid="review-card-row"]', has_text="Fourier transform").first.click()
     expect_visible(page, '[data-testid="review-card-detail"]', "review detail visible", flow)
     expect_visible(page, '[data-testid="english-evidence-list"] .quote', "review english evidence visible", flow)
     expect_visible(page, '[data-testid="chinese-evidence-list"] .quote', "review chinese evidence visible", flow)
     assert "bilingual_alignment_not_verified" in page.locator("body").inner_text()
     add_step(flow, "risk labels visible")
+    expect_visible(
+        page,
+        '[data-testid="teacher-alignment-review-case"]',
+        "unified teacher alignment case visible",
+        flow,
+    )
+    accept_form = page.locator("form").filter(
+        has=page.locator('[data-testid="review-action-accept-recommendation"]')
+    ).first
+    accept_form.locator('textarea[name="review_comment"]').fill(
+        "Browser E2E accepts the governed evidence-backed recommendation."
+    )
+    accept_form.locator(
+        '[data-testid="review-action-accept-recommendation"]'
+    ).click()
+    expect_visible(page, '[data-testid="review-success"]', "human approval saved", flow)
+    page.wait_for_function(
+        """() => document.querySelector('[data-testid="teacher-alignment-review-case"]')?.innerText.includes('HUMAN_APPROVED')""",
+        timeout=10000,
+    )
+    add_step(flow, "machine recommendation accepted without overwriting machine state")
+
+    page.locator('[data-testid="review-generate-draft"]').click()
+    expect_visible(page, '[data-testid="teacher-draft-editor"]', "fake draft editor visible", flow)
+    draft_form = page.locator('[data-testid="teacher-draft-editor"]')
+    draft_form.locator('textarea[name="english_explanation"]').fill(
+        "Teacher-edited browser E2E explanation."
+    )
+    draft_form.locator("button").click()
+    page.wait_for_function(
+        """() => document.querySelector('[data-testid="teacher-draft-editor"] textarea[name="english_explanation"]')?.value.includes('Teacher-edited')""",
+        timeout=10000,
+    )
+    assert "NOT_PUBLISHED" in draft_form.inner_text()
+    add_step(flow, "fake draft generated, edited, saved, and left unpublished")
+
     history = expect_visible(page, '[data-testid="review-history"]', "review history visible", flow)
     history_before = history.locator("tbody tr").count() if history.locator("tbody").count() else 0
 

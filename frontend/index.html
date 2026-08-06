@@ -568,6 +568,8 @@
         reviewQueue: [],
         reviewHistory: [],
         reviewCard: null,
+        reviewCase: null,
+        reviewDraft: null,
         reviewPagination: null,
         studentConceptCards: [],
         studentConceptCard: null,
@@ -1788,6 +1790,61 @@
       `;
     }
 
+    function renderTeacherAlignmentVerticalSlice(card) {
+      const reviewCase = state.cache.reviewCase;
+      if (!reviewCase) return `<div class="notice" data-testid="teacher-review-loading">${bilingual("正在加载统一审核案例…", "Loading unified review case…")}</div>`;
+      const candidates = (reviewCase.chinese && reviewCase.chinese.candidate_pool) || [];
+      const human = reviewCase.human_review || {};
+      const machine = reviewCase.machine_decision || {};
+      const draft = state.cache.reviewDraft;
+      const expectedVersion = (reviewCase.identity && reviewCase.identity.version) || card.version || 1;
+      return `
+        <section class="stack" data-testid="teacher-alignment-review-case">
+          <div class="card">
+            <div class="between">
+              <h3>${bilingual("统一教师审核案例", "Teacher Alignment Review Case")}</h3>
+              <span class="badge blue">${escapeHtml(reviewCase.business_status || "REVIEW_REQUIRED")}</span>
+            </div>
+            <p>${bilingual("机器决定", "Machine decision")}: <strong>${escapeHtml(machine.decision || machine.status || "REVIEW_REQUIRED")}</strong></p>
+            <p>${bilingual("人工决定", "Human decision")}: <strong>${escapeHtml(human.decision || "UNREVIEWED")}</strong></p>
+            <p>${riskChips(machine.risk_labels || card.risk_labels, "warn")}</p>
+            <p class="muted">${arrayValue(machine.reason_codes).map(escapeHtml).join(" · ") || bilingual("无机器原因码", "No machine reason codes")}</p>
+          </div>
+          <div class="card">
+            <h3>${bilingual("有证据的中文候选池", "Evidence-backed Chinese Candidate Pool")}</h3>
+            <div class="stack">${candidates.length ? candidates.map(candidate => `
+              <label class="review-item">
+                <input type="radio" name="teacher_candidate_uid" value="${escapeHtml(candidate.candidate_uid)}" />
+                <strong>${escapeHtml(candidate.text)}</strong>
+                <span class="muted">extraction #${candidate.extraction_rank} · retrieval #${candidate.retrieval_rank} · ${escapeHtml(candidate.source_uid)} / ${escapeHtml(candidate.chunk_uid)}</span>
+              </label>
+            `).join("") : `<div class="notice error" data-testid="teacher-review-empty">${bilingual("没有可审核的证据候选。", "No evidence-backed candidates are available.")}</div>`}</div>
+          </div>
+          <form class="card form-grid" onsubmit="Lexi.submitTeacherAlignmentDecision(event)">
+            <input type="hidden" name="expected_version" value="${expectedVersion}" />
+            <div class="full"><label>${bilingual("审核理由", "Rationale")}</label><textarea name="review_comment" required></textarea></div>
+            <button name="decision" value="accept_recommendation" data-testid="review-action-accept-recommendation">${bilingual("接受推荐", "Accept Recommendation")}</button>
+            <button name="decision" value="select_alternative_candidate" class="secondary" data-testid="review-action-select-alternative">${bilingual("选择备选", "Select Alternative")}</button>
+            <button name="decision" value="reject" class="danger" data-testid="review-action-reject-alignment">${bilingual("拒绝对应", "Reject Alignment")}</button>
+            <button name="decision" value="defer_review" class="secondary" data-testid="review-action-defer">${bilingual("暂缓", "Defer")}</button>
+          </form>
+          <div class="card">
+            <button onclick="Lexi.generateTeacherDraft()" data-testid="review-generate-draft">${bilingual("生成受治理的 Fake 草稿", "Generate Governed Fake Draft")}</button>
+            ${draft ? `
+              <form class="form-grid" onsubmit="Lexi.saveTeacherDraft(event)" data-testid="teacher-draft-editor">
+                <input type="hidden" name="expected_version" value="${draft.version}" />
+                <div class="full"><label>${bilingual("英文说明", "English explanation")}</label><textarea name="english_explanation">${escapeHtml(draft.english_explanation || "")}</textarea></div>
+                <div class="full"><label>${bilingual("中文说明", "Chinese explanation")}</label><textarea name="chinese_explanation">${escapeHtml(draft.chinese_explanation || "")}</textarea></div>
+                <div class="full"><label>${bilingual("对齐理由", "Alignment rationale")}</label><textarea name="alignment_reason">${escapeHtml(draft.alignment_reason || "")}</textarea></div>
+                <button>${bilingual("保存草稿", "Save Draft")}</button>
+                <span class="badge warn">${escapeHtml(draft.publication_status || "NOT_PUBLISHED")}</span>
+              </form>
+            ` : `<p class="muted">${bilingual("尚未生成草稿；草稿不会自动发布。", "No draft generated; drafts are never auto-published.")}</p>`}
+          </div>
+        </section>
+      `;
+    }
+
     function renderReviewQueueItem(card) {
       const summary = card.evidence_summary || {};
       const active = state.selectedReviewCardUid === card.card_uid ? "active" : "";
@@ -1971,6 +2028,7 @@
                 <div class="card" data-testid="chinese-evidence-list"><h3>${bilingual("中文证据", "Chinese Evidence")}</h3>${renderEvidenceItems(card.chinese_evidence, bilingual("缺少中文证据。", "Missing Chinese evidence."))}</div>
               </div>
               <div class="card">${renderVerificationSummary(card)}</div>
+              ${renderTeacherAlignmentVerticalSlice(card)}
               <div class="card"><h3>${bilingual("审核动作", "Review Actions")}</h3>${renderReviewActionForms(card)}</div>
               <div class="card"><h3>${bilingual("Review History", "Review History")}</h3>${renderReviewHistory(history)}</div>
             ` : `<div class="card"><p class="muted">${bilingual("请选择一张 Concept Card 查看详情。", "Select a Concept Card to view details.")}</p></div>`}
@@ -2502,14 +2560,21 @@
 
     async function loadReviewCard(cardUid) {
       if (!cardUid) return;
-      const [cardPayload, reviewsPayload] = await Promise.all([
+      const [cardPayload, reviewsPayload, reviewCasePayload] = await Promise.all([
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}`),
-        api(`/api/concept-cards/${encodeURIComponent(cardUid)}/reviews?per_page=50`)
+        api(`/api/concept-cards/${encodeURIComponent(cardUid)}/reviews?per_page=50`),
+        api(`/api/concept-cards/${encodeURIComponent(cardUid)}/review-case`)
       ]);
       const card = (cardPayload.data && cardPayload.data.card) || cardPayload.card || {};
       const queueItem = (state.cache.reviewQueue || []).find(item => item.card_uid === cardUid) || {};
       state.cache.reviewCard = { ...queueItem, ...card };
       state.cache.reviewHistory = (reviewsPayload.data && reviewsPayload.data.items) || [];
+      state.cache.reviewCase = (reviewCasePayload.data && reviewCasePayload.data.case) || null;
+      state.cache.reviewDraft = null;
+      if (state.cache.reviewCase && state.cache.reviewCase.draft && state.cache.reviewCase.draft.draft_status === "DRAFT") {
+        const draftPayload = await api(`/api/concept-cards/${encodeURIComponent(cardUid)}/draft`);
+        state.cache.reviewDraft = draftPayload.data && draftPayload.data.draft;
+      }
       const verification = (queueItem && queueItem.verification_summary) || null;
       if (verification) state.cache.reviewCard.verification_summary = verification;
     }
@@ -2948,6 +3013,81 @@
 	          setMessage(`审核操作已提交。/ Review action submitted. request_id=${response.request_id || "-"}`, "success");
 	        } catch (error) {
 	          setMessage(formatApiError(error, "Review action failed."), "notice error");
+	        }
+	      },
+	      async submitTeacherAlignmentDecision(event) {
+	        event.preventDefault();
+	        const card = state.cache.reviewCard;
+	        if (!card || !card.card_uid) return;
+	        const submitter = event.submitter;
+	        const action = String((submitter && submitter.value) || "").trim();
+	        const form = new FormData(event.target);
+	        const selected = document.querySelector('input[name="teacher_candidate_uid"]:checked');
+	        const payload = {
+	          action,
+	          expected_version: Number(form.get("expected_version") || 0),
+	          review_comment: String(form.get("review_comment") || "").trim(),
+	          reason_code: action === "reject" ? "chinese_term_wrong" : "teacher_verified"
+	        };
+	        if (action === "select_alternative_candidate") {
+	          payload.selected_candidate_uid = selected ? selected.value : "";
+	        }
+	        try {
+	          const response = await api(`/api/concept-cards/${encodeURIComponent(card.card_uid)}/review`, {
+	            method: "POST",
+	            headers: { "Idempotency-Key": crypto.randomUUID() },
+	            body: JSON.stringify(payload)
+	          });
+	          state.cache.reviewCase = response.data && response.data.case;
+	          await loadReviewCard(card.card_uid);
+	          setMessage(`教师审核已保存。/ Teacher review saved. request_id=${response.request_id || "-"}`, "success");
+	          render();
+	        } catch (error) {
+	          const message = error.status === 409
+	            ? bilingual("案例已被其他审核者更新，请刷新后重试。", "This case is stale; refresh and try again.")
+	            : formatApiError(error, "Teacher review failed.");
+	          setMessage(message, "notice error");
+	        }
+	      },
+	      async generateTeacherDraft() {
+	        const card = state.cache.reviewCard;
+	        const reviewCase = state.cache.reviewCase;
+	        if (!card || !reviewCase) return;
+	        try {
+	          const response = await api(`/api/concept-cards/${encodeURIComponent(card.card_uid)}/generate-draft`, {
+	            method: "POST",
+	            headers: { "Idempotency-Key": crypto.randomUUID() },
+	            body: JSON.stringify({ expected_version: reviewCase.identity.version })
+	          });
+	          state.cache.reviewDraft = response.data && response.data.draft;
+	          await loadReviewCard(card.card_uid);
+	          setMessage(`Fake Provider 草稿已生成且未发布。/ Fake Provider draft generated and remains unpublished. request_id=${response.request_id || "-"}`, "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "Draft generation failed."), "notice error");
+	        }
+	      },
+	      async saveTeacherDraft(event) {
+	        event.preventDefault();
+	        const card = state.cache.reviewCard;
+	        if (!card) return;
+	        const form = new FormData(event.target);
+	        try {
+	          const response = await api(`/api/concept-cards/${encodeURIComponent(card.card_uid)}/draft`, {
+	            method: "PUT",
+	            body: JSON.stringify({
+	              expected_version: Number(form.get("expected_version") || 0),
+	              english_explanation: String(form.get("english_explanation") || ""),
+	              chinese_explanation: String(form.get("chinese_explanation") || ""),
+	              alignment_reason: String(form.get("alignment_reason") || "")
+	            })
+	          });
+	          state.cache.reviewDraft = response.data && response.data.draft;
+	          await loadReviewCard(card.card_uid);
+	          setMessage(`教师草稿已保存。/ Teacher draft saved. request_id=${response.request_id || "-"}`, "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "Draft save failed."), "notice error");
 	        }
 	      },
 	      async assignConceptReviewer(event) {

@@ -16,6 +16,10 @@ from services import parse_quality_risk
 
 
 REVIEW_ACTIONS = {
+    "accept_recommendation",
+    "select_alternative_candidate",
+    "defer_review",
+    "generate_draft",
     "approve",
     "reject",
     "request_revision",
@@ -30,6 +34,10 @@ REVIEW_ACTIONS = {
 }
 
 REVIEW_DECISIONS = {
+    "accepted",
+    "alternative_selected",
+    "deferred",
+    "draft_generated",
     "approved",
     "rejected",
     "needs_revision",
@@ -77,8 +85,24 @@ BLOCKING_APPROVAL_RISK_LABELS = {
     "course_mismatch",
     "chapter_mismatch",
 }
+FATAL_HUMAN_APPROVAL_RISK_LABELS = {
+    "evidence_provenance_incomplete",
+    "provenance_incomplete",
+    "source_governance_failed",
+    "UPSTREAM_ENGLISH_EXTRACTION_MISSING",
+    "UPSTREAM_ENGLISH_BINDING_AMBIGUOUS",
+    "UPSTREAM_CROSS_LANGUAGE_RETRIEVAL_MISS",
+    "UPSTREAM_CHINESE_TERM_IDENTIFICATION_MISSING",
+    "no_english_evidence",
+    "no_chinese_evidence",
+    "no_chinese_candidate_found",
+}
 
 ACTION_TO_EVENT = {
+    "accept_recommendation": "teacher_alignment_recommendation_accepted",
+    "select_alternative_candidate": "teacher_alignment_alternative_selected",
+    "defer_review": "teacher_alignment_review_deferred",
+    "generate_draft": "teacher_alignment_draft_generated",
     "approve": "concept_card_approved",
     "reject": "concept_card_rejected",
     "request_revision": "concept_card_revision_requested",
@@ -230,6 +254,10 @@ def _validate_reason(action: str, data: dict[str, Any]) -> str:
 
 def _decision_for(action: str) -> str:
     return {
+        "accept_recommendation": "accepted",
+        "select_alternative_candidate": "alternative_selected",
+        "defer_review": "deferred",
+        "generate_draft": "draft_generated",
         "approve": "approved",
         "reject": "rejected",
         "request_revision": "needs_revision",
@@ -277,7 +305,33 @@ def validate_review_action(card: Any, action: str, data: dict[str, Any], reviewe
     comment = _text(data.get("review_comment"))
     if action in {"reject", "request_revision", "mark_needs_more_evidence"} and not (comment or normalize_list(data.get("required_changes"))):
         raise ConceptCardReviewError("review_comment or required_changes is required for this review action.")
+    if action in {"accept_recommendation", "select_alternative_candidate"}:
+        labels = set(normalize_list(getattr(card, "risk_labels", "[]")))
+        if labels & FATAL_HUMAN_APPROVAL_RISK_LABELS:
+            raise ConceptCardReviewError(
+                "human review cannot bypass fatal evidence or provenance state."
+            )
+        if not (
+            _has_evidence(getattr(card, "english_evidence", ""))
+            and _has_evidence(getattr(card, "chinese_evidence", ""))
+        ):
+            raise ConceptCardReviewError(
+                "human approval requires complete bilingual evidence."
+            )
+        if not comment:
+            raise ConceptCardReviewError("review_comment is required.")
+        if action == "select_alternative_candidate" and not _text(
+            data.get("selected_candidate_uid")
+        ):
+            raise ConceptCardReviewError("selected_candidate_uid is required.")
     if action == "approve":
+        fatal = set(normalize_list(getattr(card, "risk_labels", "[]"))) & (
+            FATAL_HUMAN_APPROVAL_RISK_LABELS
+        )
+        if fatal:
+            raise ConceptCardReviewError(
+                "human review cannot bypass fatal evidence or provenance state."
+            )
         if getattr(card, "status", "") == "deprecated":
             raise ConceptCardReviewError("deprecated ConceptAlignmentCard cannot be approved.")
         if not _text(getattr(card, "english_term", "")):
@@ -537,7 +591,15 @@ def _persist_review_action(
         except concept_card_publication.ConceptCardPublicationError as exc:
             raise ConceptCardSourceUnavailableError(str(exc), getattr(exc, "details", {})) from exc
 
-    if action == "approve":
+    if action in {"accept_recommendation", "select_alternative_candidate"}:
+        card.status = "needs_review"
+        card.reviewed_by = reviewer.get("reviewer_id")
+        card.reviewed_at = now
+    elif action == "defer_review":
+        card.status = "needs_review"
+    elif action == "generate_draft":
+        card.status = "draft"
+    elif action == "approve":
         if data.get("_requires_second_review") and reviewer.get("reviewer_role") != "admin":
             card.status = "needs_review"
             data["decision"] = "ready_for_admin_review"
@@ -566,14 +628,18 @@ def _persist_review_action(
         card.status = "deprecated"
     elif action in {"add_review_note", "assign_reviewer", "unassign_reviewer"}:
         pass
-    if action in {"approve", "reject", "request_revision", "mark_needs_more_evidence", "mark_candidate_incorrect", "mark_translation_ambiguous", "reopen", "deprecate"}:
+    if action in {"accept_recommendation", "select_alternative_candidate", "defer_review", "generate_draft", "approve", "reject", "request_revision", "mark_needs_more_evidence", "mark_candidate_incorrect", "mark_translation_ambiguous", "reopen", "deprecate"}:
         card.version = int(getattr(card, "version", 1) or 1) + 1
     if now:
         card.updated_at = now
     session.flush()
 
     after = audit_records.concept_card_snapshot(card)
-    review_data = {**data, "request_id": (audit_context or {}).get("request_id", "")}
+    review_data = {
+        **data,
+        "request_id": _text(data.get("request_id"))
+        or (audit_context or {}).get("request_id", ""),
+    }
     review_record = create_review_record(
         session,
         review_model,
@@ -749,13 +815,19 @@ def assign_card_reviewer(
     return card, record, assignment
 
 
-def get_review_queue(session: Any, card_model: Any, filters: dict[str, Any] | None = None) -> ReviewQueueResult:
+def get_review_queue(
+    session: Any,
+    card_model: Any,
+    filters: dict[str, Any] | None = None,
+    *,
+    review_model: Any | None = None,
+) -> ReviewQueueResult:
     filters = filters or {}
     page = max(1, int(filters.get("page") or 1))
     per_page = max(1, min(int(filters.get("per_page") or filters.get("page_size") or 20), 100))
     include_deprecated = _text(filters.get("include_deprecated")).lower() in {"1", "true", "yes", "on"}
     query = card_model.query
-    status = _text(filters.get("status"))
+    status = _text(filters.get("machine_status") or filters.get("status"))
     if status:
         statuses = [item.strip() for item in status.split(",") if item.strip()]
         query = query.filter(card_model.status.in_(statuses))
@@ -775,6 +847,35 @@ def get_review_queue(session: Any, card_model: Any, filters: dict[str, Any] | No
     risk_label = _text(filters.get("risk_label"))
     if risk_label:
         query = query.filter(card_model.risk_labels.ilike(f"%{risk_label}%"))
+    updated_after = _text(filters.get("updated_after"))
+    updated_before = _text(filters.get("updated_before"))
+    if updated_after:
+        query = query.filter(card_model.updated_at >= updated_after)
+    if updated_before:
+        query = query.filter(card_model.updated_at <= updated_before)
+    human_status = _text(filters.get("human_review_status")).lower()
+    if human_status and review_model is not None:
+        reviewed_cards = session.query(review_model.card_uid)
+        if human_status in {"unreviewed", "pending"}:
+            query = query.filter(~card_model.card_uid.in_(reviewed_cards))
+        else:
+            action_by_status = {
+                "accepted": ("accept_recommendation",),
+                "alternative_selected": ("select_alternative_candidate",),
+                "rejected": ("reject",),
+                "deferred": ("defer_review",),
+                "human_approved": (
+                    "accept_recommendation",
+                    "select_alternative_candidate",
+                ),
+            }
+            actions = action_by_status.get(human_status, ())
+            if actions:
+                query = query.filter(
+                    card_model.card_uid.in_(
+                        reviewed_cards.filter(review_model.action.in_(actions))
+                    )
+                )
     reviewer = _text(filters.get("reviewer"))
     if reviewer:
         if reviewer.isdigit():
