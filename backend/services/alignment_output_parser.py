@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -10,8 +11,22 @@ from services import parse_quality_risk
 
 PARSER_VERSION = "alignment-parser-v1"
 OUTPUT_SCHEMA_VERSION = "alignment-output-v1"
+STRUCTURED_PARSER_VERSION = "alignment-parser-json-v2"
+STRUCTURED_OUTPUT_SCHEMA_VERSION = "alignment-output-json-v2"
 MAX_EXPLANATION_CHARS = 1000
 MAX_LIMITATION_CHARS = 240
+REQUIRED_OUTPUT_FIELDS = frozenset({
+    "alignment_decision",
+    "alignment_confidence",
+    "recommendation",
+    "risk_labels",
+    "evidence_assessment",
+    "term_assessment",
+    "course_context_assessment",
+    "explanation",
+    "limitations",
+})
+STRUCTURED_OUTPUT_FIELDS = REQUIRED_OUTPUT_FIELDS | {"evidence_citations"}
 
 ALLOWED_DECISIONS = {
     "aligned",
@@ -97,18 +112,7 @@ def _normalize_string_list(values: Any, max_item_chars: int = MAX_LIMITATION_CHA
 
 
 def validate_alignment_output_schema(parsed: dict[str, Any]) -> bool:
-    required = {
-        "alignment_decision",
-        "alignment_confidence",
-        "recommendation",
-        "risk_labels",
-        "evidence_assessment",
-        "term_assessment",
-        "course_context_assessment",
-        "explanation",
-        "limitations",
-    }
-    missing = sorted(required - set(parsed.keys()))
+    missing = sorted(REQUIRED_OUTPUT_FIELDS - set(parsed.keys()))
     if missing:
         raise AlignmentOutputParserError("missing_alignment_output_fields", f"Missing provider output fields: {', '.join(missing)}")
 
@@ -183,6 +187,161 @@ def parse_alignment_provider_output(raw_output: Any) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise AlignmentOutputParserError("invalid_alignment_output_schema", "Provider output must be a JSON object.")
     return normalize_alignment_output(parsed)
+
+
+def validate_alignment_output_provenance(
+    parsed: dict[str, Any],
+    allowed_provenance: dict[str, set[tuple[str, str]]],
+) -> dict[str, list[dict[str, str]]]:
+    citations = _require_dict(parsed.get("evidence_citations"), "evidence_citations")
+    normalized: dict[str, list[dict[str, str]]] = {}
+    for language in ("english", "chinese"):
+        values = citations.get(language)
+        if not isinstance(values, list) or not values:
+            raise AlignmentOutputParserError(
+                "missing_alignment_output_fields",
+                f"evidence_citations.{language} must be a non-empty list.",
+            )
+        allowed = allowed_provenance.get(language, set())
+        normalized[language] = []
+        for value in values:
+            item = _require_dict(value, f"evidence_citations.{language}")
+            unknown = sorted(set(item) - {"source_uid", "chunk_uid"})
+            if unknown:
+                raise AlignmentOutputParserError(
+                    "invalid_alignment_output_schema",
+                    f"evidence_citations.{language} contains unknown fields.",
+                )
+            source_uid = _text(item.get("source_uid"))
+            chunk_uid = _text(item.get("chunk_uid"))
+            if not source_uid or not chunk_uid or (source_uid, chunk_uid) not in allowed:
+                raise AlignmentOutputParserError(
+                    "invalid_alignment_output_provenance",
+                    f"evidence_citations.{language} contains unknown provenance.",
+                )
+            normalized[language].append({
+                "source_uid": source_uid,
+                "chunk_uid": chunk_uid,
+            })
+    return normalized
+
+
+def parse_structured_alignment_provider_output(
+    raw_output: Any,
+    *,
+    allowed_provenance: dict[str, set[tuple[str, str]]],
+) -> dict[str, Any]:
+    if not isinstance(raw_output, (dict, str)):
+        raise AlignmentOutputParserError(
+            "provider_output_not_json",
+            "Provider output must be a JSON object or JSON string.",
+        )
+    try:
+        parsed = raw_output if isinstance(raw_output, dict) else json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        raise AlignmentOutputParserError(
+            "provider_output_not_json", "Provider output is not valid JSON."
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise AlignmentOutputParserError(
+            "invalid_alignment_output_schema",
+            "Provider output must be a JSON object.",
+        )
+    unknown_root = sorted(set(parsed) - STRUCTURED_OUTPUT_FIELDS)
+    if unknown_root:
+        raise AlignmentOutputParserError(
+            "invalid_alignment_output_schema",
+            "Provider output contains unknown top-level fields.",
+        )
+    for field, allowed_fields in (
+        (
+            "evidence_assessment",
+            {
+                "english_evidence_supported",
+                "chinese_evidence_supported",
+                "cross_language_support",
+                "evidence_limitations",
+            },
+        ),
+        (
+            "term_assessment",
+            {
+                "english_term_ok",
+                "chinese_term_ok",
+                "candidate_ambiguity",
+                "notes",
+            },
+        ),
+        (
+            "course_context_assessment",
+            {"course_match", "chapter_match", "notes"},
+        ),
+    ):
+        value = _require_dict(parsed.get(field), field)
+        if set(value) - allowed_fields:
+            raise AlignmentOutputParserError(
+                "invalid_alignment_output_schema",
+                f"{field} contains unknown fields.",
+            )
+    citations = validate_alignment_output_provenance(parsed, allowed_provenance)
+    normalized = normalize_alignment_output(parsed)
+    normalized["evidence_citations"] = citations
+    return normalized
+
+
+def build_sanitized_output_diagnostics(
+    raw_output: Any,
+    *,
+    finish_reason: str = "",
+    response_model: str = "",
+    validation_stage: str = "",
+    parser_reason: str = "",
+) -> dict[str, Any]:
+    """Describe provider output shape without retaining recoverable content."""
+    text = raw_output if isinstance(raw_output, str) else ""
+    stripped = text.strip()
+    length = len(text)
+    if length == 0:
+        length_bucket = "empty"
+    elif length <= 255:
+        length_bucket = "1-255"
+    elif length <= 1023:
+        length_bucket = "256-1023"
+    elif length <= 4095:
+        length_bucket = "1024-4095"
+    else:
+        length_bucket = "4096+"
+
+    if not stripped:
+        first_class = "none"
+    elif stripped.startswith("```"):
+        first_class = "markdown_fence"
+    elif stripped[0] == "{":
+        first_class = "object_open"
+    elif stripped[0] == "[":
+        first_class = "array_open"
+    elif stripped[0].isalpha():
+        first_class = "alphabetic"
+    else:
+        first_class = "other"
+
+    return {
+        "content_present": bool(stripped),
+        "content_length_bucket": length_bucket,
+        "first_non_whitespace_character_class": first_class,
+        "looks_like_json_object": bool(
+            stripped.startswith("{") and stripped.endswith("}")
+        ),
+        "outer_code_fence_present": bool(
+            stripped.startswith("```") and stripped.endswith("```")
+        ),
+        "finish_reason": str(finish_reason or ""),
+        "response_model": str(response_model or ""),
+        "response_hash": hashlib.sha256(text.encode("utf-8")).hexdigest() if text else "",
+        "schema_validation_stage": str(validation_stage or ""),
+        "stable_parser_reason": str(parser_reason or ""),
+        "stores_full_raw_output": False,
+    }
 
 
 def build_failed_alignment_output(error_code: str, error_message: str) -> dict[str, Any]:

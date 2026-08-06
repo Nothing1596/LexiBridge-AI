@@ -209,7 +209,7 @@ def test_fake_llm_provider_fixture_paths(fake_response_type, expected_status, ex
     assert output["can_auto_approve"] is False
     assert output["is_production_result"] is False
     assert expected_risk in output["risk_labels"]
-    assert output["prompt_version"] == "alignment-v1"
+    assert output["prompt_version"] == alignment_prompting.PROMPT_VERSION
     assert output["parser_version"] == "alignment-parser-v1"
     assert output["output_schema_version"] == "alignment-output-v1"
     assert output["provider_response_status"] in {"parsed", "parse_failed"}
@@ -228,7 +228,7 @@ def test_verify_alignment_fake_provider_creates_run_with_prompt_metadata(app_mod
 
         assert output["provider_type"] == "fake_llm"
         assert serialized["provider_type"] == "fake_llm"
-        assert serialized["prompt_version"] == "alignment-v1"
+        assert serialized["prompt_version"] == alignment_prompting.PROMPT_VERSION
         assert serialized["parser_version"] == "alignment-parser-v1"
         assert serialized["output_schema_version"] == "alignment-output-v1"
         assert serialized["provider_response_status"] == "parsed"
@@ -304,7 +304,7 @@ def test_alignment_verify_api_fake_provider_success_failure_and_audit(client, ap
     success_data = success.get_json()["data"]
     assert success_data["provider_name"] == "fake-llm-v1"
     assert success_data["provider_type"] == "fake_llm"
-    assert success_data["prompt_version"] == "alignment-v1"
+    assert success_data["prompt_version"] == alignment_prompting.PROMPT_VERSION
     assert success_data["output_schema_version"] == "alignment-output-v1"
     assert success_data["alignment_decision"] == "likely_aligned"
     assert success_data["can_auto_approve"] is False
@@ -331,7 +331,10 @@ def test_alignment_verify_api_fake_provider_success_failure_and_audit(client, ap
         completed_payload = audit_records.serialize_audit_record(completed)["output_payload"]
         failed_payload = audit_records.serialize_audit_record(failed_audit)["output_payload"]
         assert completed_payload["provider_type"] == "fake_llm"
-        assert completed_payload["prompt_version"] == "alignment-v1"
+        assert (
+            completed_payload["prompt_version"]
+            == alignment_prompting.PROMPT_VERSION
+        )
         assert completed_payload["output_schema_version"] == "alignment-output-v1"
         assert completed_payload["alignment_decision"] == "likely_aligned"
         assert failed_payload["provider_response_status"] == "parse_failed"

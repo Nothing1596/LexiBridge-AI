@@ -10,7 +10,9 @@ import json
 from typing import Any
 
 
-PROMPT_VERSION = "alignment-v1"
+LEGACY_PROMPT_VERSION = "alignment-v1"
+STRUCTURED_PROMPT_VERSION = "alignment-json-v2"
+PROMPT_VERSION = LEGACY_PROMPT_VERSION
 MAX_PROMPT_EVIDENCE_ITEMS = 5
 MAX_PROMPT_SNIPPET_CHARS = 300
 SENSITIVE_KEY_PARTS = {
@@ -107,20 +109,27 @@ def summarize_evidence_for_prompt(
 
 
 def list_prompt_versions() -> list[str]:
-    return [PROMPT_VERSION]
+    return [LEGACY_PROMPT_VERSION, STRUCTURED_PROMPT_VERSION]
 
 
 def get_prompt_template(prompt_version: str = PROMPT_VERSION) -> str:
     version = _text(prompt_version) or PROMPT_VERSION
-    if version != PROMPT_VERSION:
+    if version not in list_prompt_versions():
         raise AlignmentPromptError(f"Unknown alignment prompt version: {version}")
-    return (
+    semantic_contract = (
         "You are verifying whether an English technical term and a Chinese candidate term may refer to the same "
         "course concept. Use only the provided evidence summaries. Do not invent evidence, translations, page "
         "numbers, sources, or confidence. If evidence is missing or weak, return insufficient_evidence or "
         "needs_review. Distinguish retrieval_score, candidate_score, and alignment_confidence: retrieval_score ranks "
         "evidence retrieval results, candidate_score ranks Chinese term candidates, and alignment_confidence is your "
-        "bounded verification score. Do not auto approve. Output JSON only, with no markdown or prose outside JSON."
+        "bounded verification score. Do not auto approve."
+    )
+    if version == LEGACY_PROMPT_VERSION:
+        return f"{semantic_contract} Output JSON only, with no markdown or prose outside JSON."
+    return (
+        f"{semantic_contract} Return exactly one single JSON object matching the required schema. "
+        "Output JSON only. The response must contain JSON only: do not add explanations before or after the JSON, "
+        "and do not use a Markdown code fence."
     )
 
 
@@ -152,6 +161,21 @@ def build_alignment_prompt(input_data: dict[str, Any], prompt_version: str = PRO
         "explanation": "short evidence-bounded explanation",
         "limitations": [],
     }
+    if prompt_version == STRUCTURED_PROMPT_VERSION:
+        schema["evidence_citations"] = {
+            "english": [
+                {
+                    "source_uid": "an English source_uid from Input summary",
+                    "chunk_uid": "its English chunk_uid from Input summary",
+                }
+            ],
+            "chinese": [
+                {
+                    "source_uid": "a Chinese source_uid from Input summary",
+                    "chunk_uid": "its Chinese chunk_uid from Input summary",
+                }
+            ],
+        }
     return "\n\n".join([
         f"Prompt version: {prompt_version}",
         template,

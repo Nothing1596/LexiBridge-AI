@@ -61,7 +61,7 @@ def test_single_ready_item_uses_fixed_budget_and_production_parser(tmp_path):
     assert len(transport.calls) == 1
     call = transport.calls[0]
     assert call["max_retries"] == 0
-    assert call["prompt_version"] == "alignment-v1"
+    assert call["prompt_version"] == smoke.PROMPT_VERSION
     assert call["selected_ready_count"] == 1
 
 

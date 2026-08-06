@@ -46,7 +46,7 @@ REQUIRED_EVALUATION_ID = real_policy.REQUIRED_EVALUATION_ID
 CONFIRMATION = "I_AUTHORIZE_ONE_REAL_PROVIDER_REQUEST"
 
 PROMPT_REGISTRY_ID = "formal_alignment"
-PROMPT_VERSION = alignment_prompting.PROMPT_VERSION
+PROMPT_VERSION = alignment_prompting.STRUCTURED_PROMPT_VERSION
 REQUEST_BUDGET = 1
 BILLABLE_ATTEMPT_BUDGET = 1
 RETRY_BUDGET = 0
@@ -276,7 +276,12 @@ class FakeObservedTransport(llm_transport.BaseLLMTransport):
         raw = (
             "controlled unstructured output"
             if self.mode == "non_json"
-            else llm_transport.build_fixture_response("valid")
+            else llm_transport.build_fixture_response(
+                "valid",
+                evidence_citations=(request_options or {}).get(
+                    "evidence_citations"
+                ),
+            )
         )
         self.response_hash = _hash_text(raw)
         self.last_safe_metadata = {

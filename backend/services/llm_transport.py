@@ -94,7 +94,13 @@ class FakeLLMTransport(BaseLLMTransport):
         del prompt, config
         options = request_options or {}
         response_type = str(options.get("fake_response_type") or "valid").strip()
-        return LLMTransportResult(status="success", raw_output=build_fixture_response(response_type), retry_count=0)
+        return LLMTransportResult(
+            status="success",
+            raw_output=build_fixture_response(
+                response_type, evidence_citations=options.get("evidence_citations")
+            ),
+            retry_count=0,
+        )
 
 
 class ReplayLLMTransport(BaseLLMTransport):
@@ -102,7 +108,13 @@ class ReplayLLMTransport(BaseLLMTransport):
         del prompt, config
         options = request_options or {}
         response_type = str(options.get("replay_response_type") or "valid").strip()
-        return LLMTransportResult(status="success", raw_output=build_fixture_response(response_type), retry_count=0)
+        return LLMTransportResult(
+            status="success",
+            raw_output=build_fixture_response(
+                response_type, evidence_citations=options.get("evidence_citations")
+            ),
+            retry_count=0,
+        )
 
 
 class UrllibLLMHTTPExecutor:
@@ -158,9 +170,19 @@ class DeepSeekHTTPTransport(BaseLLMTransport):
         started = self._clock()
         provider = str(config.get("provider_name") or llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME)
         model = str(config.get("model_name") or "").strip()
+        json_object_mode = provider == llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME
         metadata = {
             "provider": provider,
             "model": model,
+            "requested_model": model,
+            "resolved_model": "",
+            "model_policy_version": str(config.get("model_policy_version") or ""),
+            "pricing_model_identity": str(config.get("pricing_model_identity") or ""),
+            "response_format": (
+                "json_object"
+                if json_object_mode
+                else ""
+            ),
             "http_status": None,
             "request_count": 0,
             "retry_count": 0,
@@ -229,13 +251,37 @@ class DeepSeekHTTPTransport(BaseLLMTransport):
         first = choices[0]
         if not isinstance(first, dict) or not isinstance(first.get("message"), dict):
             return self._error("malformed_provider_response", "DeepSeek provider response choice was malformed.", started, request_count=1, http_status=status_code, metadata=metadata)
+        metadata["usage"] = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
+        metadata["response_model"] = envelope.get("model") if isinstance(envelope.get("model"), str) else ""
+        metadata["resolved_model"] = metadata["response_model"]
+        metadata["finish_reason"] = first.get("finish_reason") if isinstance(first.get("finish_reason"), str) else ""
         content = first["message"].get("content")
         if not isinstance(content, str) or not content.strip():
             return self._error("missing_response_content", "DeepSeek provider response content was missing.", started, request_count=1, http_status=status_code, metadata=metadata)
+        identity = llm_provider_config.validate_response_model_identity(
+            model,
+            metadata["response_model"],
+        )
+        metadata.update(identity)
+        if not identity["compatible"]:
+            return self._error(
+                "response_model_not_allowed",
+                "DeepSeek provider response model is not allowed by the fixed model policy.",
+                started,
+                request_count=1,
+                http_status=status_code,
+                metadata=metadata,
+            )
+        if metadata["finish_reason"] == "length":
+            return self._error(
+                "response_truncated",
+                "DeepSeek provider response reached the output token limit.",
+                started,
+                request_count=1,
+                http_status=status_code,
+                metadata=metadata,
+            )
 
-        metadata["usage"] = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
-        metadata["response_model"] = envelope.get("model") if isinstance(envelope.get("model"), str) else ""
-        metadata["finish_reason"] = first.get("finish_reason") if isinstance(first.get("finish_reason"), str) else ""
         return LLMTransportResult(
             status="success",
             raw_output=content,
@@ -254,6 +300,18 @@ class DeepSeekHTTPTransport(BaseLLMTransport):
             "messages": [{"role": "user", "content": str(prompt or "")}],
             "stream": False,
         }
+        if str(config.get("provider_name") or "") == llm_provider_config.DEEPSEEK_EXTERNAL_PROVIDER_NAME:
+            payload["response_format"] = {"type": "json_object"}
+            payload["max_tokens"] = max(
+                llm_provider_config.MIN_ALIGNMENT_SCHEMA_OUTPUT_TOKENS,
+                min(
+                    int(
+                        config.get("max_output_tokens")
+                        or llm_provider_config.DEFAULT_MAX_OUTPUT_TOKENS
+                    ),
+                    4096,
+                ),
+            )
         return LLMHTTPRequest(
             method="POST",
             url=f"{base_url}/chat/completions",
@@ -339,7 +397,11 @@ def _elapsed_ms(started: float, clock: Callable[[], float]) -> int:
     return max(0, int((clock() - started) * 1000))
 
 
-def build_fixture_response(response_type: str = "valid") -> str:
+def build_fixture_response(
+    response_type: str = "valid",
+    *,
+    evidence_citations: dict[str, Any] | None = None,
+) -> str:
     if response_type == "non_json":
         return "non-json replay response"
     if response_type == "output_too_long":
@@ -378,7 +440,10 @@ def build_fixture_response(response_type: str = "valid") -> str:
             "no_external_model_called",
             "requires_human_review",
         ],
-        "auto_approve": True,
+        "evidence_citations": evidence_citations or {
+            "english": [{"source_uid": "fixture-en-source", "chunk_uid": "fixture-en-chunk"}],
+            "chinese": [{"source_uid": "fixture-zh-source", "chunk_uid": "fixture-zh-chunk"}],
+        },
     }
     if response_type == "missing_fields":
         response.pop("recommendation", None)

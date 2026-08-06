@@ -21,6 +21,15 @@ DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_RETRIES = 0
 DEFAULT_MAX_PROMPT_CHARS = 8000
 DEFAULT_MAX_OUTPUT_CHARS = 4000
+DEFAULT_MAX_OUTPUT_TOKENS = 1000
+MIN_ALIGNMENT_SCHEMA_OUTPUT_TOKENS = 512
+DEEPSEEK_MODEL_POLICY_VERSION = "deepseek-formal-model-compatibility@1.0.0"
+DEEPSEEK_PRICING_POLICY_VERSION = "deepseek-chat-pricing@2025-02-08"
+DEEPSEEK_PRICING_EFFECTIVE_DATE = "2025-02-08"
+DEEPSEEK_PRICING_CURRENCY = "USD"
+DEEPSEEK_ALLOWED_RESOLVED_MODELS = {
+    "deepseek-chat": frozenset({"deepseek-chat", "deepseek-v4-flash"}),
+}
 LLM_PROVIDER_ERROR_CODES = {
     "provider_disabled",
     "provider_not_configured",
@@ -45,6 +54,9 @@ LLM_PROVIDER_ERROR_CODES = {
     "provider_network_error",
     "provider_cost_limit_exceeded",
     "provider_output_too_long",
+    "provider_pricing_unavailable",
+    "response_model_not_allowed",
+    "response_truncated",
 }
 PERMANENTLY_DISABLED_PROVIDER_NAMES = frozenset({DISABLED_EXTERNAL_PROVIDER_NAME})
 
@@ -68,6 +80,7 @@ DEFAULT_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "max_retries": 0,
         "max_prompt_chars": DEFAULT_MAX_PROMPT_CHARS,
         "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
+        "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
         "cost_per_1k_input_tokens": 0.0,
         "cost_per_1k_output_tokens": 0.0,
         "max_estimated_cost": 0.0,
@@ -86,6 +99,7 @@ DEFAULT_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "max_retries": DEFAULT_MAX_RETRIES,
         "max_prompt_chars": DEFAULT_MAX_PROMPT_CHARS,
         "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
+        "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
         "cost_per_1k_input_tokens": None,
         "cost_per_1k_output_tokens": None,
         "max_estimated_cost": None,
@@ -102,8 +116,17 @@ DEFAULT_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "max_retries": DEFAULT_MAX_RETRIES,
         "max_prompt_chars": DEFAULT_MAX_PROMPT_CHARS,
         "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
-        "cost_per_1k_input_tokens": None,
-        "cost_per_1k_output_tokens": None,
+        "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
+        "supports_json_object_response_format": True,
+        "model_policy_version": DEEPSEEK_MODEL_POLICY_VERSION,
+        "pricing_model_identity": "deepseek-chat",
+        "pricing_policy_version": DEEPSEEK_PRICING_POLICY_VERSION,
+        "pricing_effective_date": DEEPSEEK_PRICING_EFFECTIVE_DATE,
+        "pricing_currency": DEEPSEEK_PRICING_CURRENCY,
+        "cost_per_1k_input_cache_hit_tokens": 0.00007,
+        "cost_per_1k_input_cache_miss_tokens": 0.00027,
+        "cost_per_1k_input_tokens": 0.00027,
+        "cost_per_1k_output_tokens": 0.00110,
         "max_estimated_cost": None,
         "enabled": True,
         "replay_mode": False,
@@ -120,6 +143,7 @@ DEFAULT_PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "max_retries": DEFAULT_MAX_RETRIES,
         "max_prompt_chars": DEFAULT_MAX_PROMPT_CHARS,
         "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
+        "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
         "cost_per_1k_input_tokens": 0.001,
         "cost_per_1k_output_tokens": 0.001,
         "max_estimated_cost": None,
@@ -213,6 +237,7 @@ def get_llm_provider_config(
             "max_retries",
             "max_prompt_chars",
             "max_output_chars",
+            "max_output_tokens",
             "max_estimated_cost",
             "enabled",
             "replay_mode",
@@ -226,6 +251,10 @@ def get_llm_provider_config(
     config["max_retries"] = normalize_provider_retry_policy(config.get("max_retries")).get("max_retries", 0)
     config["max_prompt_chars"] = max(500, int(config.get("max_prompt_chars") or DEFAULT_MAX_PROMPT_CHARS))
     config["max_output_chars"] = max(500, int(config.get("max_output_chars") or DEFAULT_MAX_OUTPUT_CHARS))
+    config["max_output_tokens"] = max(
+        MIN_ALIGNMENT_SCHEMA_OUTPUT_TOKENS,
+        min(int(config.get("max_output_tokens") or DEFAULT_MAX_OUTPUT_TOKENS), 4096),
+    )
     config["configured"] = True
     if config.get("provider_type") == "external_llm":
         config["enabled"] = bool(config.get("enabled"))
@@ -275,9 +304,20 @@ def estimate_alignment_call_cost(
     output_chars = int(summary.get("expected_output_chars") or cfg.get("max_output_chars") or DEFAULT_MAX_OUTPUT_CHARS)
     input_tokens = max(1, int(prompt_chars / 4)) if prompt_chars else 0
     output_tokens = max(1, int(output_chars / 4)) if output_chars else 0
-    input_cost = _coerce_float(cfg.get("cost_per_1k_input_tokens"), 0.0) or 0.0
-    output_cost = _coerce_float(cfg.get("cost_per_1k_output_tokens"), 0.0) or 0.0
-    estimated_cost = round((input_tokens / 1000.0 * input_cost) + (output_tokens / 1000.0 * output_cost), 8)
+    input_cost = _coerce_float(cfg.get("cost_per_1k_input_cache_miss_tokens"))
+    if input_cost is None:
+        input_cost = _coerce_float(cfg.get("cost_per_1k_input_tokens"))
+    output_cost = _coerce_float(cfg.get("cost_per_1k_output_tokens"))
+    pricing_available = input_cost is not None and output_cost is not None
+    estimated_cost = (
+        round(
+            (input_tokens / 1000.0 * input_cost)
+            + (output_tokens / 1000.0 * output_cost),
+            8,
+        )
+        if pricing_available
+        else None
+    )
     max_cost = _coerce_float(cfg.get("max_estimated_cost"))
     return {
         "provider_name": provider_name,
@@ -286,5 +326,36 @@ def estimate_alignment_call_cost(
         "estimated_cost": estimated_cost,
         "max_estimated_cost": max_cost,
         "cost_is_estimate": True,
-        "exceeds_limit": max_cost is not None and estimated_cost > max_cost,
+        "pricing_available": pricing_available,
+        "pricing_model_identity": str(cfg.get("pricing_model_identity") or cfg.get("model_name") or ""),
+        "pricing_policy_version": str(cfg.get("pricing_policy_version") or ""),
+        "pricing_effective_date": str(cfg.get("pricing_effective_date") or ""),
+        "currency": str(cfg.get("pricing_currency") or ""),
+        "input_cache_hit_per_1k_tokens": _coerce_float(
+            cfg.get("cost_per_1k_input_cache_hit_tokens")
+        ),
+        "input_cache_miss_per_1k_tokens": input_cost,
+        "output_per_1k_tokens": output_cost,
+        "exceeds_limit": (
+            max_cost is not None and estimated_cost > max_cost
+            if estimated_cost is not None
+            else None
+        ),
+    }
+
+
+def validate_response_model_identity(
+    requested_model: str,
+    resolved_model: str,
+) -> dict[str, Any]:
+    requested = str(requested_model or "").strip()
+    resolved = str(resolved_model or "").strip()
+    allowed = DEEPSEEK_ALLOWED_RESOLVED_MODELS.get(requested, frozenset())
+    compatible = bool(requested and resolved and resolved in allowed)
+    return {
+        "requested_model": requested,
+        "resolved_model": resolved,
+        "compatible": compatible,
+        "model_policy_version": DEEPSEEK_MODEL_POLICY_VERSION,
+        "pricing_model_identity": "deepseek-chat" if requested == "deepseek-chat" else "",
     }

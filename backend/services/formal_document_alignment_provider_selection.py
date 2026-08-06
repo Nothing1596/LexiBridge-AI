@@ -89,9 +89,9 @@ def resolve_formal_document_alignment_provider_selection(
         return FormalDocumentAlignmentProviderSelection(
             provider_name=provider.provider_name,
             model_identity=model_identity,
-            prompt_version=alignment_prompting.PROMPT_VERSION,
-            parser_version=alignment_output_parser.PARSER_VERSION,
-            output_schema_version=alignment_output_parser.OUTPUT_SCHEMA_VERSION,
+            prompt_version=alignment_prompting.STRUCTURED_PROMPT_VERSION,
+            parser_version=alignment_output_parser.STRUCTURED_PARSER_VERSION,
+            output_schema_version=alignment_output_parser.STRUCTURED_OUTPUT_SCHEMA_VERSION,
         )
     if (
         provider.provider_name != FORMAL_DEFAULT_PROVIDER_NAME
