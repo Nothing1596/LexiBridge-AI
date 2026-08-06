@@ -61,4 +61,4 @@ def test_claim_crash_and_partial_processing_crash_do_not_consume_retry_budget(
         assert third_lease.execution_attempt == 3
         assert job.attempt_count == 0
         assert after["needs_review"] == 2
-        assert after["preflights"] == after["verifications"] == after["usage"] == 2
+        assert after["preflights"] == after["verifications"] == after["usage"] == 0

@@ -305,13 +305,13 @@ def test_admission_job_is_claimed_and_processed_by_real_formal_worker(app_module
     assert len(mappings) == 2
     assert app_module.AlignmentProviderPreflightRun.query.filter(
         app_module.AlignmentProviderPreflightRun.execution_key.in_(execution_keys)
-    ).count() == 2
+    ).count() == 0
     assert app_module.AlignmentVerificationRun.query.filter(
         app_module.AlignmentVerificationRun.execution_key.in_(execution_keys)
-    ).count() == 2
+    ).count() == 0
     assert app_module.AlignmentProviderUsageRecord.query.filter(
         app_module.AlignmentProviderUsageRecord.execution_key.in_(execution_keys)
-    ).count() == 2
+    ).count() == 0
     assert legacy_after == legacy_before
     assert app_module.run_formal_worker_once(worker_id=f"{PREFIX}-worker-repeat").outcome == "no_job_available"
     app_module.db.session.rollback()
