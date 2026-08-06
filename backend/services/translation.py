@@ -22,6 +22,10 @@ OLLAMA_MODEL_ENV = "OLLAMA_MODEL"
 TRANSLATION_TIMEOUT_ENV = "TRANSLATION_TIMEOUT_SECONDS"
 PROVIDER_NONE = "none"
 PROVIDER_OLLAMA = "ollama"
+PROVIDER_AUTO = "auto"
+TRANSLATION_PROVIDER_CHAIN_ENV = "TRANSLATION_PROVIDER_CHAIN"
+DEFAULT_PROVIDER_CHAIN = "ollama"
+ROUTABLE_PROVIDERS = {PROVIDER_OLLAMA}
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "translategemma:12b"
 DEFAULT_TIMEOUT_SECONDS = 30
@@ -181,20 +185,17 @@ def get_translation_provider(name=None):
     return NoneTranslationProvider()
 
 
-def translate_term(english_term, context_sentence="", provider=None):
-    """Translate one English term, degrading gracefully.
+def parse_provider_chain(value):
+    """Parse an ordered provider chain, dropping blanks and unknown names."""
+    chain = []
+    for item in str(value or "").split(","):
+        provider = normalize_provider_name(item)
+        if provider in ROUTABLE_PROVIDERS and provider not in chain:
+            chain.append(provider)
+    return chain
 
-    Never raises: an unconfigured, unknown, or unreachable provider yields
-    ``translation_unavailable`` so callers can fall back to their local
-    deterministic candidate.
-    """
-    requested = normalize_provider_name(
-        provider if provider is not None else os.environ.get(TRANSLATION_PROVIDER_ENV, PROVIDER_NONE)
-    )
-    if requested not in {PROVIDER_NONE, PROVIDER_OLLAMA}:
-        result = NoneTranslationProvider().translate_term(english_term, context_sentence)
-        result["error"] = f"Unknown translation provider: {requested}."
-        return result
+
+def _translate_term_single(english_term, context_sentence, requested):
     try:
         return get_translation_provider(requested).translate_term(english_term, context_sentence)
     except Exception as exc:  # defensive: translation must never break parsing/alignment
@@ -205,3 +206,52 @@ def translate_term(english_term, context_sentence="", provider=None):
             "model": "",
             "error": f"Translation provider raised unexpectedly: {exc}",
         }
+
+
+def _translate_term_auto(english_term, context_sentence):
+    chain = parse_provider_chain(os.environ.get(TRANSLATION_PROVIDER_CHAIN_ENV, DEFAULT_PROVIDER_CHAIN))
+    if not chain:
+        result = NoneTranslationProvider().translate_term(english_term, context_sentence)
+        result["error"] = "Translation provider chain is empty."
+        result["attempted"] = []
+        return result
+
+    attempted = []
+    errors = []
+    for name in chain:
+        attempted.append(name)
+        result = _translate_term_single(english_term, context_sentence, name)
+        if result.get("status") == "ok" and result.get("chinese_term"):
+            result["attempted"] = attempted
+            return result
+        errors.append(f"{name}: {result.get('error') or result.get('status')}")
+
+    return {
+        "status": "translation_unavailable",
+        "chinese_term": "",
+        "provider": PROVIDER_AUTO,
+        "model": "",
+        "error": "; ".join(errors) or "No translation provider in the chain succeeded.",
+        "attempted": attempted,
+    }
+
+
+def translate_term(english_term, context_sentence="", provider=None):
+    """Translate one English term, degrading gracefully.
+
+    Never raises: an unconfigured, unknown, or unreachable provider yields
+    ``translation_unavailable`` so callers can fall back to their local
+    deterministic candidate. With ``provider="auto"`` the providers listed in
+    ``TRANSLATION_PROVIDER_CHAIN`` are tried in order and the first successful
+    translation wins; the result records every attempted provider.
+    """
+    requested = normalize_provider_name(
+        provider if provider is not None else os.environ.get(TRANSLATION_PROVIDER_ENV, PROVIDER_NONE)
+    )
+    if requested == PROVIDER_AUTO:
+        return _translate_term_auto(english_term, context_sentence)
+    if requested not in {PROVIDER_NONE, PROVIDER_OLLAMA}:
+        result = NoneTranslationProvider().translate_term(english_term, context_sentence)
+        result["error"] = f"Unknown translation provider: {requested}."
+        return result
+    return _translate_term_single(english_term, context_sentence, requested)

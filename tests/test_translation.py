@@ -11,6 +11,7 @@ from services.translation import (
     OllamaTranslationProvider,
     clean_translated_term,
     get_translation_provider,
+    parse_provider_chain,
     translate_term,
 )
 
@@ -142,3 +143,67 @@ def test_provider_factory_names(monkeypatch):
     assert get_translation_provider().provider_name == "none"
     assert get_translation_provider("ollama").provider_name == "ollama"
     assert isinstance(get_translation_provider("OLLAMA"), OllamaTranslationProvider)
+
+
+def test_parse_provider_chain_drops_unknown_and_duplicates():
+    assert parse_provider_chain("bogus, ollama,,ollama") == ["ollama"]
+    assert parse_provider_chain("") == []
+
+
+def test_auto_chain_all_unavailable_reports_attempts(monkeypatch):
+    monkeypatch.setenv("TRANSLATION_PROVIDER", "auto")
+    monkeypatch.delenv("TRANSLATION_PROVIDER_CHAIN", raising=False)
+
+    def _refused(request, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", _refused)
+
+    result = translate_term("Fourier Transform")
+
+    assert result["status"] == "translation_unavailable"
+    assert result["attempted"] == ["ollama"]
+    assert "ollama" in result["error"]
+
+
+def test_auto_chain_first_success_wins(monkeypatch):
+    monkeypatch.setenv("TRANSLATION_PROVIDER", "auto")
+    monkeypatch.setenv("TRANSLATION_PROVIDER_CHAIN", "ollama")
+    _mock_ollama(
+        monkeypatch,
+        tags_payload={"models": [{"name": "translategemma:12b"}]},
+        chat_payload={"message": {"content": "卷积"}},
+    )
+
+    result = translate_term("Convolution")
+
+    assert result["status"] == "ok"
+    assert result["chinese_term"] == "卷积"
+    assert result["provider"] == "ollama"
+    assert result["attempted"] == ["ollama"]
+
+
+def test_auto_chain_skips_unknown_names(monkeypatch):
+    monkeypatch.setenv("TRANSLATION_PROVIDER", "auto")
+    monkeypatch.setenv("TRANSLATION_PROVIDER_CHAIN", "bogus,ollama")
+    _mock_ollama(
+        monkeypatch,
+        tags_payload={"models": [{"name": "translategemma:12b"}]},
+        chat_payload={"message": {"content": "卷积"}},
+    )
+
+    result = translate_term("Convolution")
+
+    assert result["status"] == "ok"
+    assert result["attempted"] == ["ollama"]
+
+
+def test_auto_empty_chain_is_unavailable(monkeypatch):
+    monkeypatch.setenv("TRANSLATION_PROVIDER", "auto")
+    monkeypatch.setenv("TRANSLATION_PROVIDER_CHAIN", "")
+
+    result = translate_term("Fourier Transform")
+
+    assert result["status"] == "translation_unavailable"
+    assert result["attempted"] == []
+    assert "empty" in result["error"]
