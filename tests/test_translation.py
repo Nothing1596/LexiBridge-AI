@@ -6,8 +6,8 @@ import urllib.error
 
 import pytest
 
-from services import translation
-from services.translation import (
+from services import translate_provider as translation
+from services.translate_provider import (
     OllamaTranslationProvider,
     clean_translated_term,
     get_translation_provider,

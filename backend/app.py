@@ -24,7 +24,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import validates
 from werkzeug.security import check_password_hash, generate_password_hash
 from services.ai_providers import get_ai_provider
-from services.translation import translate_term as translate_term_candidate
+from services.translate_provider import translate_term as translate_term_candidate
 from services.ocr import get_ocr_provider
 from services.formula_detection import contains_formula_text, detect_pdf_formula_regions, looks_like_formula_image
 from services.formula_ocr import get_formula_ocr_provider
