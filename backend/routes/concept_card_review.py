@@ -1,7 +1,7 @@
-"""Concept Card teacher review route registration.
+"""Concept Card Reviewer Console route registration.
 
 This module is a staged extraction from ``backend/app.py``. It keeps the
-teacher/admin review route handlers thin and delegates review status changes,
+Reviewer/Admin route handlers thin and delegates review status changes,
 policy gates, risk overrides, ReviewRecord creation, and AuditRecord creation
 to the existing service layer. It does not import ``backend.app`` or create
 application/database objects.
@@ -23,6 +23,10 @@ from services import teacher_alignment_review as teacher_alignment_review_servic
 
 
 ROUTE_MARKER = "concept_card_review_routes"
+# ``teacher`` is retained only as transitional compatibility for existing
+# course-review permissions. New product navigation exposes this workflow to
+# the bilingual Reviewer role, not to the English-side Instructor experience.
+REVIEW_ROUTE_ROLES = {"reviewer", "teacher", "admin"}
 TARGET_ROUTES = {
     "/api/concept-cards/review-queue": {
         "endpoint": "concept_card_review_queue_api",
@@ -78,7 +82,7 @@ def register_concept_card_review_routes(
     core: RouteCoreDependencies,
     models: ConceptCardReviewModels,
 ) -> None:
-    """Register teacher/admin Concept Card review routes on an existing Flask app."""
+    """Register Reviewer Console routes on an existing Flask app."""
 
     registered = app.extensions.setdefault("lexibridge_route_modules", set())
     if ROUTE_MARKER in registered:
@@ -192,7 +196,7 @@ def register_concept_card_review_routes(
 
     def concept_card_review_queue_api():
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
@@ -231,7 +235,7 @@ def register_concept_card_review_routes(
 
     def concept_card_reviews_api(card_uid):
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
@@ -270,7 +274,7 @@ def register_concept_card_review_routes(
 
     def concept_card_review_action_api(card_uid):
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
@@ -362,7 +366,7 @@ def register_concept_card_review_routes(
 
     def teacher_alignment_review_case_api(card_uid):
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
@@ -386,7 +390,7 @@ def register_concept_card_review_routes(
 
     def teacher_alignment_generate_draft_api(card_uid):
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
@@ -432,7 +436,7 @@ def register_concept_card_review_routes(
 
     def teacher_alignment_draft_api(card_uid):
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)
@@ -483,7 +487,7 @@ def register_concept_card_review_routes(
 
     def concept_card_assign_reviewer_api(card_uid):
         audit_context = core.get_route_audit_context()
-        user, error_response = core.require_current_user({"teacher", "admin"})
+        user, error_response = core.require_current_user(REVIEW_ROUTE_ROLES)
         if error_response:
             return core.attach_request_id_to_response(error_response, audit_context)
         audit_context = core.get_route_audit_context(user)

@@ -617,13 +617,15 @@
         ["subscription", bilingual("会员与用量", "Subscription & Usage")]
       ],
       teacher: [
-        ["teacher", bilingual("教师工作台", "Teacher Dashboard")],
-        ["courseUpload", bilingual("课程资料上传", "Courseware Upload")],
-        ["courseKb", bilingual("课程知识库", "Course Knowledge Base")],
-        ["alignmentRuns", bilingual("对齐运行", "Alignment Runs")],
-        ["conceptReview", bilingual("概念卡审核", "Concept Review")],
-        ["qc", bilingual("质量控制", "Quality Control")],
-        ["feedback", bilingual("学生反馈", "Student Feedback")]
+        ["teacher", "Teacher Dashboard"],
+        ["courseUpload", "Courseware Upload"],
+        ["courseKb", "Course Knowledge Base"],
+        ["alignmentRuns", "Alignment Runs"],
+        ["qc", "Quality Control"],
+        ["feedback", "Aggregate Student Feedback"]
+      ],
+      reviewer: [
+        ["conceptReview", bilingual("双语异常审核工作台", "Reviewer Console")]
       ],
       admin: [
         ["admin", bilingual("管理员后台", "Admin Dashboard")],
@@ -699,6 +701,7 @@
 
     function defaultPageForRole(role) {
       if (role === "teacher") return "teacher";
+      if (role === "reviewer") return "conceptReview";
       if (role === "admin") return "admin";
       return "dashboard";
     }
@@ -767,7 +770,7 @@
       const items = [...sharedPages];
       const role = state.user.role;
       if (rolePages[role]) items.push(...rolePages[role]);
-      if (role === "admin") items.push(...rolePages.teacher);
+      if (role === "admin") items.push(...rolePages.teacher, ...rolePages.reviewer);
       return items;
     }
 
@@ -991,28 +994,24 @@
 
 	    function renderTeacherWorkspace() {
 	      const pending = countCardsBy(["pending_quality_control"]);
-	      const needsEvidence = countCardsBy(["needs_more_evidence", "no_zh_evidence", "no_en_evidence"]);
 	      const runningJobs = state.cache.jobs.filter(job => ["queued", "running", "retrying"].includes(job.status)).length;
-	      return pageShell(bilingual("教师工作台", "Teacher Dashboard"), bilingual("教师创建课程、上传课程资料、查看后台任务和 AlignmentRun，只处理异常质量控制。", "Teachers create courses, upload course materials, inspect background jobs and AlignmentRuns, and handle exceptional QC only."), `
+	      return pageShell("Teacher Dashboard", "Manage English course context and view aggregate course operations. Bilingual exception review is handled separately by the Reviewer Console.", `
 	        <div class="workspace-header">
-	          <div class="notice">${bilingual("推荐流程：创建课程 -> 上传教师课件 -> 系统自动构建英文/中文专业知识库 -> 等待任务完成 -> 触发术语对齐 -> 处理 QC。", "Recommended flow: create a course -> upload teacher courseware -> let the system build English/Chinese domain KBs automatically -> wait for jobs -> run alignment -> handle QC.")}</div>
+	          <div class="notice">Create a course, upload English courseware, organize chapters, and inspect aggregate processing status. Student concept queries do not wait for Instructor approval.</div>
 	          <div class="card">${currentCourseSelector()}</div>
 	        </div>
 	        <div class="grid four">
-	          <div class="card metric"><strong>${state.cache.myCourses.length || state.cache.courses.length}</strong><span class="muted">${bilingual("课程", "Courses")}</span></div>
-	          <div class="card metric"><strong>${state.cache.documents.length}</strong><span class="muted">${bilingual("文档", "Documents")}</span></div>
-	          <div class="card metric"><strong>${pending}</strong><span class="muted">${bilingual("待审核", "Needs Review")}</span></div>
-	          <div class="card metric"><strong>${needsEvidence}</strong><span class="muted">${bilingual("证据不足", "Needs Evidence")}</span></div>
+	          <div class="card metric"><strong>${state.cache.myCourses.length || state.cache.courses.length}</strong><span class="muted">Courses</span></div>
+	          <div class="card metric"><strong>${state.cache.documents.length}</strong><span class="muted">English Materials</span></div>
+	          <div class="card metric"><strong>${pending}</strong><span class="muted">Processing Exceptions</span></div>
+	          <div class="card metric"><strong>${runningJobs}</strong><span class="muted">Active Jobs</span></div>
 	        </div>
 	        <div class="grid">
-	          <div class="card"><h3>${bilingual("课程管理", "Course Management")}</h3><p class="muted">${bilingual("创建或选择课程，查看成员、文档和术语数量。", "Create or select courses and review member, document, and card counts.")}</p><button onclick="Lexi.goto('courses')">${bilingual("管理课程", "Manage Courses")}</button></div>
-	          <div class="card"><h3>${bilingual("教师课件上传", "Teacher Courseware Upload")}</h3><p class="muted">${bilingual("教师只需要上传课件；专业知识库由系统通过受控网络来源自动构建。", "Teachers only upload courseware; domain KBs are built automatically from governed web sources.")}</p><button onclick="Lexi.goto('courseUpload')">${bilingual("上传课件", "Upload Courseware")}</button></div>
-	          <div class="card"><h3>${bilingual("文档与任务", "Documents & Jobs")}</h3><p class="muted">${bilingual(`当前运行或排队任务 ${runningJobs} 个。`, `${runningJobs} jobs are queued or running.`)}</p><button onclick="Lexi.goto('jobs')">${bilingual("查看任务", "View Jobs")}</button></div>
-	          <div class="card"><h3>${bilingual("Alignment Runs", "Alignment Runs")}</h3><p class="muted">${bilingual("查看每次对齐运行的生成数量、QC 数量和失败数量。", "Review generated cards, QC count, and failures for each run.")}</p><button onclick="Lexi.goto('alignmentRuns')">${bilingual("查看对齐运行", "View Alignment Runs")}</button></div>
-	          <div class="card"><h3>${bilingual("概念卡审核", "Concept Card Review")}</h3><p class="muted">${bilingual("按课程权限查看 Concept Card，检查证据、风险和审核历史。", "Review permitted Concept Cards with evidence, risks, and review history.")}</p><button onclick="Lexi.goto('conceptReview')">${bilingual("进入审核队列", "Open Review Queue")}</button></div>
-	          <div class="card"><h3>${bilingual("质量控制", "Quality Control")}</h3><p class="muted">${bilingual("筛选证据不足、错配、OCR 低置信和公式证据缺失。", "Filter missing evidence, mismatch, low OCR confidence, and missing formula evidence.")}</p><button onclick="Lexi.goto('qc')">${bilingual("处理 QC", "Handle QC")}</button></div>
-	          <div class="card"><h3>${bilingual("学生反馈", "Student Feedback")}</h3><p class="muted">${bilingual("反馈会推动术语卡重新进入质量控制。", "Feedback can move cards back into quality control.")}</p><button onclick="Lexi.goto('feedback')">${bilingual("查看反馈", "View Feedback")}</button></div>
-	          <div class="card"><h3>${bilingual("课程术语导出", "Course Terminology Export")}</h3><p class="muted">${bilingual("按当前课程导出课程术语表；Free 用户导出会受套餐限制。", "Export terminology by current course; Free users remain subject to plan limits.")}</p><button class="secondary" onclick="Lexi.exportCards('course')">${bilingual("导出当前课程", "Export Current Course")}</button></div>
+	          <div class="card"><h3>Course Management</h3><p class="muted">Create courses, manage membership, and organize chapters.</p><button onclick="Lexi.goto('courses')">Manage Courses</button></div>
+	          <div class="card"><h3>English Courseware</h3><p class="muted">Upload English slides, notes, and authorized course materials.</p><button onclick="Lexi.goto('courseUpload')">Upload Courseware</button></div>
+	          <div class="card"><h3>Documents & Jobs</h3><p class="muted">${runningJobs} jobs are queued or running.</p><button onclick="Lexi.goto('jobs')">View Jobs</button></div>
+	          <div class="card"><h3>Alignment Coverage</h3><p class="muted">Inspect aggregate run coverage and processing failures without reviewing Chinese terms.</p><button onclick="Lexi.goto('alignmentRuns')">View Alignment Runs</button></div>
+	          <div class="card"><h3>Aggregate Learning Signals</h3><p class="muted">Review course-level English concept demand and difficulty signals; private student notes are excluded.</p><button onclick="Lexi.goto('feedback')">View Aggregate Signals</button></div>
 	        </div>
 	      `);
 	    }
@@ -2539,7 +2538,7 @@
     }
 
     async function loadReviewQueue() {
-      if (!state.user || !["teacher", "admin"].includes(state.user.role)) return;
+      if (!state.user || !["reviewer", "teacher", "admin"].includes(state.user.role)) return;
       const query = reviewQueryString();
       const payload = await api(`/api/concept-cards/review-queue${query ? `?${query}` : ""}`);
       const data = payload.data || {};
@@ -3178,8 +3177,10 @@
 	          if (["qc"].includes(page)) await loadQC();
 	          if (["conceptReview"].includes(page)) {
 	            await loadReviewQueue();
-	            await loadConceptCardFeedbackQueue();
-	            await loadTeacherLearningAnalytics();
+	            if (["teacher", "admin"].includes(state.user.role)) {
+	              await loadConceptCardFeedbackQueue();
+	              await loadTeacherLearningAnalytics();
+	            }
 	          }
           if (["sources", "courseKb"].includes(page)) await loadKnowledge();
           if (["versions"].includes(page)) await loadKnowledge();
