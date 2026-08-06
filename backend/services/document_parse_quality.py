@@ -229,8 +229,13 @@ def _parse_pdf_with_layout(path: str) -> tuple[str, list[dict[str, Any]], dict[s
     raw_text = _clean_text(layout_blocks_to_text(result.blocks))
     blocks = []
     text_pages = set()
+    ingestion_skipped_types = {
+        "header_footer",
+        "page_number",
+        "figure",
+    }
     for block in result.blocks:
-        if block.layout_type in SKIPPED_TEXT_LAYOUT_TYPES or not block.text.strip():
+        if block.layout_type in ingestion_skipped_types or not block.text.strip():
             continue
         text_pages.add(block.page_number)
         bbox = block.bbox

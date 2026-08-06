@@ -5619,6 +5619,17 @@ def generate_alignment_result(
     if translation_attempt.get("status") == "ok" and translation_attempt.get("chinese_term"):
         translation_candidate = translation_attempt["chinese_term"]
     translation_provider = translation_attempt.get("provider", "")
+    translation_hint = {
+        "generated": True,
+        "provider_id": translation_provider,
+        "provider_version": str(translation_attempt.get("model") or ""),
+        "no_evidence": True,
+        "provenance_type": "GENERATED_HINT",
+        "eligible_as_chinese_evidence": False,
+        "eligible_as_canonical_term": False,
+        "eligible_for_qualification": False,
+        "eligible_for_provider_readiness": False,
+    }
     chinese_query = " ".join([translation_candidate, english_term, courseware_sentence or ""]).strip()
     chinese_chunks = retrieve_evidence_results(
         chinese_query,
@@ -5666,6 +5677,7 @@ def generate_alignment_result(
                 "chapter": chapter,
                 "ai_translation_candidate": final_term,
                 "translation_provider": translation_provider,
+                "translation_hint": translation_hint,
                 "final_chinese_term": final_term,
                 "chinese_term": final_term,
                 "explanation": str(ai_result.get("concept_explanation") or ai_result.get("explanation") or "").strip(),
@@ -5719,6 +5731,7 @@ def generate_alignment_result(
         "chapter": chapter,
         "ai_translation_candidate": translation_candidate,
         "translation_provider": translation_provider,
+        "translation_hint": translation_hint,
         "final_chinese_term": final_term,
         "chinese_term": final_term,
         "explanation": first_evidence_text(chinese_evidence) or first_evidence_text(english_evidence) or "本地 fallback 未找到足够教材证据。",
@@ -8749,6 +8762,13 @@ def quality_flags_for_alignment(alignment, min_ocr_confidence=100):
         flags.append("domain_mismatch")
     if not str(alignment.get("english_term", "")).strip() or is_probably_noise(str(alignment.get("english_term", ""))):
         flags.append("invalid_term_candidate")
+    translation_hint = alignment.get("translation_hint")
+    if (
+        isinstance(translation_hint, dict)
+        and translation_hint.get("generated") is True
+        and translation_hint.get("no_evidence") is True
+    ):
+        flags.append("generated_translation_hint")
     return sorted(set(flags))
 
 
@@ -8843,6 +8863,8 @@ def card_status_from_alignment(alignment, min_ocr_confidence=100):
     if "domain_mismatch" in flags:
         return "pending_quality_control"
     if "weak_evidence" in flags:
+        return "pending_quality_control"
+    if "generated_translation_hint" in flags:
         return "pending_quality_control"
     if "multi_translation_conflict" in flags:
         return "conflict_detected"

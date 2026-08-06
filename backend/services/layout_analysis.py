@@ -27,6 +27,7 @@ LAYOUT_TYPE_PAGE_NUMBER = "page_number"
 LAYOUT_TYPE_TABLE = "table"
 LAYOUT_TYPE_FIGURE = "figure"
 LAYOUT_TYPE_FORMULA = "formula"
+LAYOUT_TYPE_LIST = "list"
 
 SKIPPED_TEXT_LAYOUT_TYPES = {
     LAYOUT_TYPE_HEADER_FOOTER,
@@ -837,6 +838,15 @@ def _classify_block(text, bbox, page_width, page_height, max_font_size, body_fon
 
     if _is_header_or_footer(normalized, bbox, page_height, max_font_size, body_font_size):
         return LAYOUT_TYPE_HEADER_FOOTER
+
+    if re.match(r"^(?:[-•·▪◦]|\d+[.)、])\s*", normalized):
+        return LAYOUT_TYPE_LIST
+
+    if "|" in normalized or "\t" in text:
+        return LAYOUT_TYPE_TABLE
+
+    if re.search(r"(?:=|∫|∑|√|≈|≤|≥)", normalized) and len(normalized) <= 180:
+        return LAYOUT_TYPE_FORMULA
 
     return LAYOUT_TYPE_TEXT
 

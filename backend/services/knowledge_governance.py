@@ -68,6 +68,12 @@ REVIEW_PARSE_STATUSES = {
     "formula_ocr_unavailable",
 }
 
+LAYOUT_CHUNK_MIN_CHARS = 12
+LAYOUT_CHUNK_MAX_CHARS = 1200
+LAYOUT_CHUNK_OVERLAP_CHARS = 120
+LAYOUT_NOISE_BLOCK_TYPES = {"header_footer", "page_number", "figure"}
+LAYOUT_HEADING_BLOCK_TYPES = {"title", "heading", "section_title"}
+
 
 class KnowledgeGovernanceError(ValueError):
     """Base error for knowledge governance service operations."""
@@ -134,6 +140,203 @@ def dumps_json_list(value: Any) -> str:
 def content_hash(text: str) -> str:
     normalized = " ".join(str(text or "").split())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _bounded_layout_parts(text: str) -> list[str]:
+    text = str(text or "").strip()
+    if len(text) <= LAYOUT_CHUNK_MAX_CHARS:
+        return [text] if text else []
+    parts = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + LAYOUT_CHUNK_MAX_CHARS)
+        if end < len(text):
+            boundary = max(
+                text.rfind("\n", start + LAYOUT_CHUNK_MIN_CHARS, end),
+                text.rfind("。", start + LAYOUT_CHUNK_MIN_CHARS, end),
+                text.rfind(". ", start + LAYOUT_CHUNK_MIN_CHARS, end),
+                text.rfind(" ", start + LAYOUT_CHUNK_MIN_CHARS, end),
+            )
+            if boundary > start:
+                end = boundary + 1
+        part = text[start:end].strip()
+        if part:
+            parts.append(part)
+        if end >= len(text):
+            break
+        start = max(end - LAYOUT_CHUNK_OVERLAP_CHARS, start + 1)
+    return parts
+
+
+def _layout_source_locator(
+    blocks: list[Any],
+    *,
+    text_length: int,
+) -> str:
+    pages = [
+        int(_field(block, "page_number"))
+        for block in blocks
+        if _field(block, "page_number") not in (None, "")
+    ]
+    page_scope = (
+        f"{min(pages)}-{max(pages)}" if pages else "unknown"
+    )
+    block_ids = [
+        str(_field(block, "block_uid") or f"index-{_field(block, 'block_index', 0)}")
+        for block in blocks
+    ]
+    prefix = f"pages:{page_scope};spans:0-{text_length};blocks:"
+    remaining = max(0, 160 - len(prefix))
+    return f"{prefix}{','.join(block_ids)[:remaining]}"
+
+
+def _layout_chunk_payloads(
+    parse_record: Any,
+    parse_blocks: list[Any],
+    source_uid: str,
+) -> list[dict[str, Any]]:
+    ordered = sorted(
+        parse_blocks or [],
+        key=lambda block: (
+            int(_field(block, "page_number") or 0),
+            int(_field(block, "block_index") or 0),
+            str(_field(block, "block_uid") or ""),
+        ),
+    )
+    unique = []
+    seen_block_ids = set()
+    for block in ordered:
+        block_type = str(_field(block, "block_type", "text") or "text").strip()
+        text = str(_field(block, "text", "") or "").strip()
+        block_uid = str(_field(block, "block_uid") or "")
+        if not text or block_type in LAYOUT_NOISE_BLOCK_TYPES:
+            continue
+        if block_uid and block_uid in seen_block_ids:
+            continue
+        if block_uid:
+            seen_block_ids.add(block_uid)
+        unique.append(block)
+
+    sections: list[list[Any]] = []
+    current: list[Any] = []
+    for block in unique:
+        block_type = str(_field(block, "block_type", "text") or "text").strip()
+        if block_type in LAYOUT_HEADING_BLOCK_TYPES:
+            if current:
+                sections.append(current)
+            current = [block]
+        elif current:
+            current.append(block)
+        else:
+            sections.append([block])
+    if current:
+        sections.append(current)
+
+    parser_name = str(_field(parse_record, "parser_name", "") or "")
+    parser_version = str(_field(parse_record, "parser_version", "") or "")
+    parse_warnings = normalize_list(_field(parse_record, "warnings", []))
+    layout_mode = (
+        "layout" in parser_name
+        or "layout_fallback_native" in parse_warnings
+        or any(
+            str(_field(block, "block_type", "text") or "text") != "text"
+            or "layout" in normalize_list(_field(block, "quality_flags", []))
+            for block in unique
+        )
+    )
+    payloads = []
+    for section in sections:
+        heading_block = next(
+            (
+                block for block in section
+                if str(_field(block, "block_type", "") or "")
+                in LAYOUT_HEADING_BLOCK_TYPES
+            ),
+            None,
+        )
+        heading = str(_field(heading_block, "text", "") or "").strip()
+        section_text = "\n".join(
+            str(_field(block, "text", "") or "").strip()
+            for block in section
+            if str(_field(block, "text", "") or "").strip()
+        )
+        block_types = []
+        for block in section:
+            block_type = str(_field(block, "block_type", "text") or "text")
+            if block_type not in block_types:
+                block_types.append(block_type)
+        block_type_value = "+".join(block_types)[:40] or "text"
+        flags = set(parse_warnings)
+        flags.update(normalize_list(_field(parse_record, "quality_flags", [])))
+        for block in section:
+            flags.update(normalize_list(_field(block, "quality_flags", [])))
+        flags.update(f"layout_type_{value}" for value in block_types)
+        flags.add("layout_aware_chunk")
+        if heading:
+            flags.add("heading_definition_bound")
+        if parser_name:
+            flags.add(f"parser_backend_{parser_name}")
+        if parser_version:
+            flags.add(f"parser_version_{parser_version}")
+
+        for part_index, part in enumerate(_bounded_layout_parts(section_text), start=1):
+            normalized = " ".join(part.split())
+            hash_value = content_hash(part)
+            stable_key = "|".join(
+                (
+                    source_uid,
+                    hash_value,
+                    heading,
+                    ",".join(
+                        str(_field(block, "block_uid") or "")
+                        for block in section
+                    ),
+                    str(part_index),
+                )
+            )
+            page_numbers = [
+                int(_field(block, "page_number"))
+                for block in section
+                if _field(block, "page_number") not in (None, "")
+            ]
+            formula_ids = [
+                str(_field(block, "block_uid") or "")
+                for block in section
+                if str(_field(block, "block_type", "") or "") == "formula"
+                and str(_field(block, "block_uid") or "")
+            ]
+            payloads.append({
+                "chunk_uid": str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key)),
+                "parse_block_uid": str(
+                    _field(section[0], "block_uid", "") or ""
+                ),
+                "text": part,
+                "normalized_text": normalized,
+                "content_hash": hash_value,
+                "source_locator": (
+                    _layout_source_locator(section, text_length=len(part))
+                    if layout_mode
+                    else str(_field(section[0], "source_locator", "") or "")
+                ),
+                "source_section": heading,
+                "page_number": min(page_numbers) if page_numbers else None,
+                "source_page": (
+                    f"pages {min(page_numbers)}-{max(page_numbers)}"
+                    if page_numbers else ""
+                ),
+                "block_type": block_type_value,
+                "quality_flags": sorted(flag for flag in flags if flag),
+                "formula_block_ids": formula_ids,
+                "char_count": len(part),
+                "token_count": len(normalized.split()),
+            })
+    return payloads
 
 
 def _clean_enum(value: Any, allowed: set[str], fallback: str) -> str:
@@ -528,6 +731,9 @@ def create_knowledge_chunks(
             block_type=str(raw.get("block_type") or "text"),
             token_count=raw.get("token_count") or len(normalized.split()),
             char_count=raw.get("char_count") or len(text),
+            formula_block_ids_json=dumps_json_list(
+                raw.get("formula_block_ids", [])
+            ),
             language=_clean_enum(raw.get("language") or getattr(source, "language", ""), VALID_LANGUAGES, "unknown"),
             knowledge_base_type=str(raw.get("knowledge_base_type") or getattr(source, "knowledge_base_type", "") or ""),
             owner_user_id=str(raw.get("owner_user_id") or getattr(source, "owner_user_id", "") or ""),
@@ -811,26 +1017,33 @@ def build_knowledge_chunks_from_parse_blocks(
         return []
     chunks = []
     record_flags = _quality_flags_from_parse(parse_record, metadata.get("quality_flags"))
-    for index, block in enumerate(parse_blocks or [], start=1):
-        text = str(getattr(block, "text", "") or "").strip()
-        if not text:
-            continue
+    layout_chunks = _layout_chunk_payloads(parse_record, parse_blocks, source_uid)
+    for index, layout_chunk in enumerate(layout_chunks, start=1):
+        text = layout_chunk["text"]
         block_flags = set(record_flags)
-        block_flags.update(normalize_list(getattr(block, "quality_flags", [])))
+        block_flags.update(layout_chunk["quality_flags"])
         chunks.append({
+            "chunk_uid": layout_chunk["chunk_uid"],
             "source_uid": source_uid,
             "parse_uid": getattr(parse_record, "parse_uid", ""),
-            "parse_block_uid": getattr(block, "block_uid", ""),
+            "parse_block_uid": layout_chunk["parse_block_uid"],
             "course": str(metadata.get("course") or "").strip(),
             "course_id": metadata.get("course_id"),
             "chapter": str(metadata.get("chapter") or "").strip(),
             "language": _clean_enum(metadata.get("language"), VALID_LANGUAGES, "unknown"),
             "chunk_index": index,
             "text": text,
-            "source_locator": getattr(block, "source_locator", "") or f"block:{index}",
-            "page_number": getattr(block, "page_number", None),
-            "slide_number": getattr(block, "slide_number", None),
-            "block_type": getattr(block, "block_type", "text") or "text",
+            "normalized_text": layout_chunk["normalized_text"],
+            "content_hash": layout_chunk["content_hash"],
+            "source_locator": layout_chunk["source_locator"],
+            "source_section": layout_chunk["source_section"],
+            "source_page": layout_chunk["source_page"],
+            "page_number": layout_chunk["page_number"],
+            "slide_number": None,
+            "block_type": layout_chunk["block_type"],
+            "token_count": layout_chunk["token_count"],
+            "char_count": layout_chunk["char_count"],
+            "formula_block_ids": layout_chunk["formula_block_ids"],
             "quality_status": quality_status,
             "quality_flags": sorted(flag for flag in block_flags if flag),
             "trust_level": _trust_from_quality(quality_status, str(metadata.get("trust_level") or "unknown")),
