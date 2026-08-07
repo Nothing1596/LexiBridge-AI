@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LexiBridge AI Local MVP API
-  version: 0.8.11-pr10
+  version: 0.8.12-task13b
   description: >
     OpenAPI contract for LexiBridge AI Local MVP, an AI-powered bilingual
     course knowledge alignment platform. This contract documents the local
@@ -1578,6 +1578,83 @@ paths:
         "200": {description: JSON export or CSV file, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}, text/csv: {schema: {type: string}}}}
         "401": {$ref: "#/components/responses/Error401"}
         "403": {$ref: "#/components/responses/Error403"}
+  /api/student/concept-materials:
+    get:
+      summary: List governed English materials available for student concept queries
+      description: Returns only personal sources owned by the caller and managed-course sources for active memberships.
+      responses:
+        "200": {description: Accessible material summaries, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+  /api/student/concept-materials/{source_uid}/chunks:
+    get:
+      summary: Read bounded parsed English chunks for concept selection
+      parameters: [{name: source_uid, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: Authorized bounded chunks and provenance, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+  /api/student/concept-queries:
+    post:
+      summary: Create or replay a private student ConceptQuery
+      description: Validates the selection against the server-side chunk, resolves a workspace-scoped Chinese evidence allow-list, and composes the existing governed Task 12 alignment chain. It never searches published ConceptCards as a substitute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace_scope, source_uid, chunk_uid, selected_text, selection_start, selection_end]
+              properties:
+                workspace_scope: {type: string, enum: [PERSONAL, MANAGED_COURSE]}
+                source_uid: {type: string}
+                chunk_uid: {type: string}
+                selected_text: {type: string, maxLength: 180}
+                selection_start: {type: integer, minimum: 0}
+                selection_end: {type: integer, minimum: 1}
+                request_id: {type: string}
+      responses:
+        "200": {description: Private non-official student AlignmentResult, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+  /api/student/concept-queries/{query_uid}:
+    get:
+      summary: Read the caller's private student AlignmentResult
+      parameters: [{name: query_uid, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: Student-owned AlignmentResult, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+  /api/student/concept-queries/{query_uid}/personal-record:
+    get:
+      summary: Read private learning state for a student AlignmentResult
+      parameters: [{name: query_uid, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: Caller-owned private learning state, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+    put:
+      summary: Save private learning state for a student AlignmentResult
+      parameters: [{name: query_uid, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version]
+              properties:
+                saved: {type: boolean}
+                note: {type: string, maxLength: 4000}
+                understanding_state: {type: string, enum: ["", UNDERSTOOD, STILL_CONFUSED]}
+                expected_version: {type: integer, minimum: 0}
+      responses:
+        "200": {description: Private learning state updated, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+        "409": {$ref: "#/components/responses/Error409"}
   /api/concept-cards:
     get:
       summary: List Concept Alignment Cards

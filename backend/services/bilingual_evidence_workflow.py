@@ -89,7 +89,7 @@ def build_bilingual_evidence_query(input_data: dict[str, Any] | None) -> dict[st
         raise BilingualEvidenceWorkflowError("english_term is required.")
     limit = max(1, min(_as_int(data.get("limit"), 5), MAX_BILINGUAL_LIMIT))
     filters = dict(data.get("filters") or {})
-    for key in ("include_needs_review", "include_low_quality", "visibility", "trust_level", "quality_status", "source_uid"):
+    for key in ("include_needs_review", "include_low_quality", "visibility", "trust_level", "quality_status", "source_uid", "source_uids"):
         if key in data and key not in filters:
             filters[key] = data[key]
     candidate_limit = max(1, min(_as_int(data.get("candidate_limit"), 10), chinese_term_candidates.MAX_CANDIDATE_LIMIT))
@@ -241,6 +241,18 @@ def retrieve_cross_language_chinese_evidence(
     governed_source_uid = _text(input_data.get("filters", {}).get("source_uid"))
     if governed_source_uid and hasattr(chunk_model, "source_uid"):
         chunk_query = chunk_query.filter(chunk_model.source_uid == governed_source_uid)
+    raw_governed_source_uids = input_data.get("filters", {}).get("source_uids", [])
+    if isinstance(raw_governed_source_uids, str):
+        raw_governed_source_uids = [raw_governed_source_uids]
+    governed_source_uids = tuple(
+        sorted({
+            _text(value)
+            for value in raw_governed_source_uids
+            if _text(value)
+        })
+    )
+    if governed_source_uids and hasattr(chunk_model, "source_uid"):
+        chunk_query = chunk_query.filter(chunk_model.source_uid.in_(governed_source_uids))
     chunks = chunk_query.order_by(chunk_model.id.asc()).limit(
         cross_language_retrieval.MAX_PASSAGE_CANDIDATES
     ).all()
@@ -476,6 +488,11 @@ def retrieve_bilingual_evidence(
         "english_context": english_context,
         "discipline": discipline,
     })
+    english_filters = dict(input_data["filters"])
+    english_filters.pop("source_uids", None)
+    english_source_uid = _text(english_filters.pop("english_source_uid", ""))
+    if english_source_uid:
+        english_filters["source_uid"] = english_source_uid
     english_candidates = retrieve_english_evidence(
         session,
         chunk_model,
@@ -484,7 +501,7 @@ def retrieve_bilingual_evidence(
         course=input_data["course"],
         chapter=input_data["chapter"],
         limit=input_data["limit"],
-        filters=input_data["filters"],
+        filters=english_filters,
     )
     generated_candidates: list[dict[str, Any]] = []
     selected_candidate = None

@@ -142,6 +142,12 @@ def _quality_flags(chunk: Any, source: Any = None) -> list[str]:
 
 def normalize_evidence_filters(filters: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(filters or {})
+    raw_source_uids = raw.get("source_uids") or []
+    if isinstance(raw_source_uids, str):
+        raw_source_uids = [raw_source_uids]
+    source_uids = tuple(sorted({
+        _text(value) for value in raw_source_uids if _text(value)
+    }))
     normalized = {
         "course": _text(raw.get("course")),
         "chapter": _text(raw.get("chapter")),
@@ -152,6 +158,7 @@ def normalize_evidence_filters(filters: dict[str, Any] | None) -> dict[str, Any]
         "quality_status": _text(raw.get("quality_status")),
         "status": _text(raw.get("status")),
         "source_uid": _text(raw.get("source_uid")),
+        "source_uids": source_uids,
         "visibility": _text(raw.get("visibility")),
         "include_low_quality": _as_bool(raw.get("include_low_quality")),
         "include_needs_review": _as_bool(raw.get("include_needs_review")),
@@ -174,6 +181,8 @@ def should_include_chunk_as_evidence(chunk: Any, filters: dict[str, Any] | None 
     if not text:
         return False
     if not _source_uid(chunk, source):
+        return False
+    if filters.get("source_uids") and _source_uid(chunk, source) not in set(filters["source_uids"]):
         return False
 
     chunk_status = _combined_field(chunk, source, "status", "active")
