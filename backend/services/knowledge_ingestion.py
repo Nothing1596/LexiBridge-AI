@@ -232,6 +232,17 @@ def get_or_create_knowledge_source_for_parse(
             "source_filename",
             "file_type",
             "content_hash",
+            "license_status",
+            "license_type",
+            "authorization_status",
+            "source_quality",
+            "allow_full_text_indexing",
+            "allow_student_search",
+            "allow_derivative_cards",
+            "knowledge_base_type",
+            "scope_type",
+            "document_id",
+            "owner_user_id",
         ):
             if field in metadata and hasattr(source, field):
                 value = metadata[field]

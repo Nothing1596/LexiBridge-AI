@@ -1002,6 +1002,13 @@ def build_knowledge_source_from_parse_record(parse_record: Any, metadata: dict[s
         "owner_user_id": metadata.get("owner_user_id"),
         "knowledge_base_type": metadata.get("knowledge_base_type", ""),
         "access_method": metadata.get("access_method", "document_parse"),
+        "license_status": metadata.get("license_status", "unknown"),
+        "license_type": metadata.get("license_type", "unknown"),
+        "authorization_status": metadata.get("authorization_status", "unknown"),
+        "source_quality": metadata.get("source_quality", 0.4),
+        "allow_full_text_indexing": bool(metadata.get("allow_full_text_indexing", False)),
+        "allow_student_search": bool(metadata.get("allow_student_search", False)),
+        "allow_derivative_cards": bool(metadata.get("allow_derivative_cards", False)),
     }
 
 

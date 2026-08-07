@@ -441,13 +441,43 @@ def wait_text_change(page, selector: str, previous: str) -> None:
     )
 
 
-def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture) -> None:
+def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture, app_module: Any) -> None:
     student = summary["users"]["student"]
     open_frontend(page, capture.port, flow)
     probe_external_block(page, capture, flow)
     login(page, student["email"], student["password"], flow)
     assert page.locator('[data-testid="concept-review-nav"]').count() == 0
     add_step(flow, "teacher review nav hidden for student")
+
+    # Task 13C: exercise the real student upload route and the existing
+    # layout-aware ingestion worker with a synthetic, repository-independent PDF.
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    personal_pdf = artifact_dir / "synthetic-personal-physics.pdf"
+    personal_pdf.parent.mkdir(parents=True, exist_ok=True)
+    pdf = canvas.Canvas(str(personal_pdf), pagesize=letter)
+    pdf.drawString(72, 720, "Electric potential")
+    pdf.drawString(72, 690, "Electric potential is potential energy per unit charge.")
+    pdf.save()
+    page.locator('[data-testid="my-workspace-nav"]').first.click()
+    expect_visible(page, '[data-testid="student-personal-workspace"]', "My Workspace visible", flow)
+    page.locator('[data-testid="personal-material-upload-form"] input[type="file"]').set_input_files(str(personal_pdf))
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url.endswith("/api/documents/upload"),
+        timeout=10000,
+    ) as upload_info:
+        page.locator('[data-testid="personal-material-upload"]').click()
+    upload_payload = upload_info.value.json()["data"]
+    with app_module.app.app_context():
+        app_module.run_background_job(upload_payload["job_id"], worker_id="browser-13c")
+    page.locator('[data-testid="my-workspace-nav"]').first.click()
+    ready_material = expect_visible(
+        page, '[data-testid="personal-material-item"]',
+        "personal PDF parsed into private evidence material", flow,
+    )
+    assert "READY" in ready_material.inner_text()
+    add_step(flow, "personal PDF upload, parse, chunk, and private index completed")
 
     page.locator('[data-testid="student-concept-card-nav"]').first.click()
     expect_visible(page, '[data-testid="student-concept-card-page"]', "student Concept Cards page visible", flow)
@@ -865,7 +895,14 @@ def run_one_flow(playwright_browser, flow_name: str, base_dir: Path, artifacts_d
         page = context.new_page()
         capture.attach_page(page)
         if flow_name == "student":
-            run_student_flow(page, runtime["summary"], flow, artifacts_dir, capture)
+            run_student_flow(
+                page,
+                runtime["summary"],
+                flow,
+                artifacts_dir,
+                capture,
+                runtime["app_module"],
+            )
         elif flow_name == "instructor":
             run_instructor_flow(page, runtime["summary"], flow, artifacts_dir, capture)
         elif flow_name == "reviewer":

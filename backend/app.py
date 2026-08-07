@@ -10614,6 +10614,27 @@ def upload_document():
         scope_type = "personal" if user.role == "student" else "course"
     if scope_type not in KB_SCOPES:
         return api_error_with_audit_context("VALIDATION_ERROR", "scope_type 只能是 global、course 或 personal。", 400, audit_context)
+    upload_extension = (
+        file.filename.rsplit(".", 1)[-1].lower()
+        if "." in str(file.filename or "")
+        else ""
+    )
+    personal_workspace_contract = str(
+        request.form.get("personal_workspace_contract", "")
+    ).strip()
+    if (
+        user.role == "student"
+        and scope_type == "personal"
+        and personal_workspace_contract == "13C"
+        and upload_extension != "pdf"
+    ):
+        return api_error_with_audit_context(
+            "PERSONAL_MATERIAL_PDF_REQUIRED",
+            "个人学习空间当前仅支持 PDF 资料。",
+            415,
+            audit_context,
+            {"supported_types": ["pdf"]},
+        )
 
     course = get_course_by_id_or_name(
         request.form.get("course_id", "").strip(),
@@ -11073,6 +11094,198 @@ def list_documents():
         "count": len(documents),
         "documents": [serialize_document(document) for document in documents]
     })
+
+
+def personal_material_processing_status(document):
+    status = str(getattr(document, "parsing_status", "") or "").lower()
+    if getattr(document, "deleted_at", ""):
+        return "DELETED"
+    if status in {"parsed", "parsed_with_warnings"}:
+        return "READY"
+    if status in {"processing", "running"}:
+        return "PARSING"
+    if status in {"queued", "pending"}:
+        return "UPLOADED"
+    return "FAILED"
+
+
+def serialize_personal_material(document):
+    parse_record = (
+        DocumentParseRecord.query.filter_by(parse_uid=document.parse_uid).first()
+        if document.parse_uid
+        else None
+    )
+    source = KnowledgeSource.query.filter_by(document_id=document.id).first()
+    chunk_count = (
+        KnowledgeChunk.query.filter_by(source_uid=source.source_uid).count()
+        if source is not None
+        else 0
+    )
+    return {
+        "material_id": document.id,
+        "owner_id": document.owner_user_id,
+        "workspace_scope": "PERSONAL",
+        "filename": document.original_filename or document.filename,
+        "file_hash": document.sha256 or document.file_sha256,
+        "mime_type": document.content_type or "application/pdf",
+        "upload_time": document.upload_time,
+        "processing_status": personal_material_processing_status(document),
+        "lifecycle_status": "DELETED" if document.deleted_at else "ACTIVE",
+        "visibility": "PRIVATE",
+        "language": document.language,
+        "page_count": int(getattr(parse_record, "page_count", 0) or 0),
+        "chunk_count": chunk_count,
+        "source_uid": getattr(source, "source_uid", ""),
+        "parser_id": getattr(parse_record, "parser_name", ""),
+        "parser_version": getattr(parse_record, "parser_version", ""),
+        "quality_status": getattr(parse_record, "quality_status", ""),
+        "error_code": getattr(parse_record, "error_code", "") or (
+            "PERSONAL_MATERIAL_PROCESSING_FAILED"
+            if personal_material_processing_status(document) == "FAILED"
+            else ""
+        ),
+    }
+
+
+def owned_personal_material(user, material_id, include_deleted=False):
+    document = Document.query.filter_by(
+        id=material_id,
+        owner_user_id=user.id,
+        scope_type="personal",
+    ).first()
+    if document is None:
+        return None
+    if not include_deleted and document.deleted_at:
+        return None
+    return document
+
+
+@app.route("/api/student/personal-materials", methods=["GET"])
+def list_personal_materials():
+    audit_context = get_route_audit_context()
+    user, error_response = require_current_user({"student"})
+    if error_response:
+        return attach_request_id_to_response(error_response, audit_context)
+    audit_context = get_route_audit_context(user)
+    documents = Document.query.filter(
+        Document.owner_user_id == user.id,
+        Document.scope_type == "personal",
+        db.or_(Document.deleted_at == "", Document.deleted_at.is_(None)),
+    ).order_by(Document.id.desc()).all()
+    return api_success_with_audit_context(
+        {"items": [serialize_personal_material(item) for item in documents]},
+        audit_context=audit_context,
+    )
+
+
+@app.route("/api/student/personal-materials/<int:material_id>", methods=["GET", "DELETE"])
+def personal_material_detail(material_id):
+    audit_context = get_route_audit_context()
+    user, error_response = require_current_user({"student"})
+    if error_response:
+        return attach_request_id_to_response(error_response, audit_context)
+    audit_context = get_route_audit_context(user)
+    document = owned_personal_material(
+        user, material_id, include_deleted=request.method == "DELETE"
+    )
+    if document is None:
+        return api_error_with_audit_context(
+            "PERSONAL_MATERIAL_NOT_FOUND",
+            "Personal material is not available.",
+            404,
+            audit_context,
+        )
+    if request.method == "GET":
+        return api_success_with_audit_context(
+            {"material": serialize_personal_material(document)},
+            audit_context=audit_context,
+        )
+    if document.deleted_at:
+        return api_success_with_audit_context(
+            {"material": serialize_personal_material(document), "idempotent_replay": True},
+            audit_context=audit_context,
+        )
+
+    now = current_time_text()
+    document.deleted_at = now
+    document.parsing_status = "deleted"
+    source = KnowledgeSource.query.filter_by(document_id=document.id).first()
+    if source is not None:
+        previous_hash = source.content_hash
+        source.status = "deprecated"
+        source.allow_student_search = False
+        source.allow_full_text_indexing = False
+        source.allow_derivative_cards = False
+        source.effective_to = now
+        source.version = int(source.version or 1) + 1
+        KnowledgeChunk.query.filter_by(source_uid=source.source_uid).update(
+            {
+                "status": "deprecated",
+                "is_active": False,
+                "updated_at": now,
+            },
+            synchronize_session=False,
+        )
+        db.session.add(KnowledgeVersion(
+            source_uid=source.source_uid,
+            version_number=source.version,
+            change_type="deprecated",
+            previous_content_hash=previous_hash,
+            new_content_hash="",
+            parse_uid=source.parse_uid,
+            changed_by=user.id,
+            change_note="Personal material deleted by its owner.",
+            created_at=now,
+        ))
+    storage_record = (
+        db.session.get(StorageObject, document.storage_object_id)
+        if document.storage_object_id
+        else None
+    )
+    if storage_record is not None:
+        storage_record.status = "deleted"
+        storage_record.updated_at = now
+    audit_record_service.create_audit_record(
+        db.session,
+        AuditRecord,
+        {
+            "event_type": "personal_material_deleted",
+            "target_type": "personal_material",
+            "target_uid": str(document.id),
+            "input_payload": {
+                "material_id": document.id,
+                "workspace_scope": "PERSONAL",
+            },
+            "output_payload": {
+                "lifecycle_status": "DELETED",
+                "source_status": getattr(source, "status", ""),
+            },
+            "changed_fields": [
+                "deleted_at",
+                "parsing_status",
+                "knowledge_source.status",
+            ],
+            "result": "success",
+        },
+        audit_context=audit_context,
+        now_fn=current_time_text,
+        commit=False,
+    )
+    db.session.commit()
+    if document.storage_key:
+        try:
+            storage_service().delete(document.storage_key)
+        except Exception as exc:
+            add_system_log(
+                "error",
+                "storage",
+                f"Personal material {document.id} metadata deleted but object removal failed: {redact_for_log(exc)}",
+            )
+    return api_success_with_audit_context(
+        {"material": serialize_personal_material(document), "idempotent_replay": False},
+        "Personal material deleted.",
+        audit_context,
+    )
 
 
 @app.route("/api/documents/<int:document_id>/chunks", methods=["GET"])
@@ -13640,6 +13853,8 @@ def build_governed_ingestion_metadata(
         flags.add(quality_status)
     effective_owner_id = owner_user_id if owner_user_id not in (None, "") else getattr(owner_user, "id", None)
     owner_role = getattr(owner_user, "role", "") or ("student" if normalized_scope == "personal" else "teacher")
+    is_personal = normalized_scope == "personal"
+    is_global = normalized_scope == "global"
     return {
         "title": title or getattr(parse_record, "source_filename", "") or "Untitled knowledge source",
         "course": course_name or (course.name if course else ""),
@@ -13663,6 +13878,15 @@ def build_governed_ingestion_metadata(
         "quality_flags": sorted(flag for flag in flags if flag),
         "created_by": getattr(owner_user, "id", None),
         "access_method": "document_parse",
+        "license_status": "restricted" if is_personal else ("open_licensed" if is_global else "authorized"),
+        "license_type": "student_private_upload" if is_personal else ("open_license" if is_global else "course_authorized"),
+        "authorization_status": "allowed_for_private_use" if is_personal else ("authorized" if is_global else "allowed_for_course_use"),
+        "source_quality": 0.6 if is_personal else 0.9,
+        # Search authorization is independent from visibility. Personal material
+        # is searchable only inside its owner's evidence scope.
+        "allow_full_text_indexing": True,
+        "allow_student_search": True,
+        "allow_derivative_cards": not is_personal,
     }
 
 

@@ -588,6 +588,7 @@
         studentVisibilityError: "",
         studentProgress: null,
         studentConceptMaterials: [],
+        personalMaterials: [],
         studentConceptChunks: [],
         conceptCardFeedbackQueue: [],
         conceptCardFeedbackPagination: null,
@@ -624,7 +625,7 @@
     const rolePages = {
       student: [
         ["conceptQuery", bilingual("概念查询", "Concept Query")],
-        ["personal", bilingual("个人工作区", "Personal Workspace")],
+        ["personal", bilingual("我的学习空间", "My Workspace")],
         ["personalUpload", bilingual("上传个人资料", "Upload Personal Document")],
         ["learning", bilingual("收藏与学习", "Favorites & Learning")],
         ["subscription", bilingual("会员与用量", "Subscription & Usage")]
@@ -796,7 +797,7 @@
     function renderTopNav() {
       const nav = document.getElementById("topNav");
       nav.innerHTML = navItems().map(([id, label]) =>
-        `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
+        `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : id === "personal" ? 'data-testid="my-workspace-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
       ).join("");
       const chip = document.getElementById("userChip");
       if (!state.user) {
@@ -857,7 +858,7 @@
       return `
         <div class="app-layout">
           <aside class="sidebar">${navItems().filter(([id]) => !publicPages.some(([pid]) => pid === id)).map(([id, label]) =>
-            `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
+            `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : id === "personal" ? 'data-testid="my-workspace-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
           ).join("")}</aside>
           <section class="section"><h2>${title}</h2><p class="muted">${subtitle || ""}</p>${message}${body}</section>
         </div>
@@ -1227,7 +1228,7 @@
 	          <div><label>${bilingual("章节", "Chapter")}</label><input name="chapter" placeholder="Chapter or module" /></div>
 	          <div><label>${bilingual("OCR", "OCR")}</label><select name="ocr_requested"><option value="true">启用 OCR / Enable OCR</option><option value="false">不主动触发 / Do not force</option></select></div>
 	          <div><label>${bilingual("公式检测", "Formula Detection")}</label><select name="formula_detection_requested"><option value="true">检测公式 / Detect Formula</option><option value="false">跳过 / Skip</option></select></div>
-	          <div class="full"><label>${bilingual("文件", "File")}</label><input name="file" type="file" accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.jpg,.jpeg,.png" required /></div>
+	          <div class="full"><label>${bilingual("文件", "File")}</label><input name="file" type="file" accept="${isPersonal ? ".pdf,application/pdf" : ".pdf,.docx,.pptx,.txt,.md,.markdown,.jpg,.jpeg,.png"}" required /></div>
 	          <button>${isPersonal ? bilingual("上传到个人工作区", "Upload to Personal Workspace") : bilingual("上传到课程知识库", "Upload to Course Knowledge Base")}</button>
 	        </form>
 	        <div class="notice">${bilingual("定义课程名称后上传教师课件。课程至少有一份课件后才会在学生端课程搜索中出现。专业知识库不应要求教师手工上传。", "After defining the course name, upload teacher courseware. The course appears in student course search only after at least one courseware document exists. Domain KBs should not be a teacher manual-upload obligation.")}</div>
@@ -1329,6 +1330,39 @@
 	          ${["teacher", "admin"].includes(state.user.role) && doc.scope_type === "course" ? `<div class="row"><button type="button" class="small secondary" data-testid="formal-alignment-start" data-document-id="${Number(doc.id)}" onclick="Lexi.startFormalAlignmentForDocument(${Number(doc.id)})" ${state.formalAlignment.submitting || state.formalAlignment.polling ? "disabled" : ""}>${bilingual("开始正式术语对齐", "Start Formal Alignment")}</button></div>` : ""}
 	        </div>
       `}).join("");
+    }
+
+    function renderPersonalWorkspace() {
+      const materials = state.cache.personalMaterials || [];
+      const rows = materials.map(material => `
+        <article class="card" data-testid="personal-material-item" data-material-id="${Number(material.material_id)}">
+          <div class="between">
+            <strong>${escapeHtml(material.filename)}</strong>
+            <span class="badge ${material.processing_status === "READY" ? "good" : material.processing_status === "FAILED" ? "bad" : "warn"}" data-testid="personal-material-status">${escapeHtml(material.processing_status)}</span>
+          </div>
+          <p class="muted">PRIVATE · ${Number(material.page_count || 0)} 页 · ${Number(material.chunk_count || 0)} 个证据块</p>
+          <p class="muted">${escapeHtml(material.parser_id || "pending")} ${escapeHtml(material.parser_version || "")}</p>
+          <div class="row">
+            ${material.processing_status === "READY" && material.source_uid ? `<button class="small" data-testid="personal-material-query" onclick="Lexi.openPersonalMaterialQuery('${escapeHtml(material.source_uid)}')">选词学习</button>` : ""}
+            <button class="small danger" data-testid="personal-material-delete" onclick="Lexi.deletePersonalMaterial(${Number(material.material_id)})">删除资料</button>
+          </div>
+        </article>
+      `).join("") || `<div class="card" data-testid="personal-material-empty"><p class="muted">还没有个人资料。上传一份英文课程 PDF 开始学习。</p></div>`;
+      return pageShell("我的学习空间", "你上传的资料仅供本人使用，不进入课程知识库或 Reviewer 队列。", `
+        <section data-testid="student-personal-workspace">
+          <form class="card form-grid" data-testid="personal-material-upload-form" onsubmit="Lexi.uploadDocument(event, 'personal')">
+            <input type="hidden" name="language" value="en" />
+            <input type="hidden" name="source_type" value="student_upload" />
+            <input type="hidden" name="personal_workspace_contract" value="13C" />
+            <div class="full"><label>英文课程 PDF</label><input name="file" type="file" accept=".pdf,application/pdf" required /></div>
+            <div><label>学科（可选）</label><input name="discipline" maxlength="120" /></div>
+            <div><label>章节（可选）</label><input name="chapter" maxlength="160" /></div>
+            <button data-testid="personal-material-upload">上传并建立私人证据空间</button>
+          </form>
+          <div class="notice">仅支持 PDF。系统保留页码、区块和文本跨度来源；不会翻译整篇资料，也不会把资料分享给教师或 Reviewer。</div>
+          <div class="stack" data-testid="personal-material-list">${rows}</div>
+        </section>
+      `);
     }
 
     function renderStudentConceptResult(result) {
@@ -2423,7 +2457,8 @@
       if (page === "courses") app.innerHTML = renderCourses();
       else if (page === "search") app.innerHTML = renderSearch();
       else if (page === "jobs") app.innerHTML = renderJobs();
-      else if (page === "personal" || page === "personalUpload") app.innerHTML = renderUpload("personal");
+      else if (page === "personal") app.innerHTML = renderPersonalWorkspace();
+      else if (page === "personalUpload") app.innerHTML = renderUpload("personal");
       else if (page === "learning") app.innerHTML = renderLearning();
       else if (page === "studentConceptCards") app.innerHTML = renderStudentConceptCards();
       else if (page === "conceptQuery") app.innerHTML = renderStudentConceptQuery();
@@ -2469,6 +2504,11 @@
     async function loadDocuments(scope = "") {
       const payload = await api(`/api/documents${scope ? `?scope_type=${encodeURIComponent(scope)}` : ""}`);
       state.cache.documents = payload.documents || [];
+    }
+
+    async function loadPersonalMaterials() {
+      const payload = await api("/api/student/personal-materials");
+      state.cache.personalMaterials = (payload.data && payload.data.items) || [];
     }
 
     async function loadJobs() {
@@ -3302,7 +3342,8 @@
 	          if (["feedback"].includes(page)) await loadFeedback();
 	          if (["backlog"].includes(page)) await loadBacklog();
 	          if (["pilotReport"].includes(page)) await loadPilotReport();
-	          if (["personal", "personalUpload", "courseUpload", "courseKb"].includes(page)) await loadDocuments(page.includes("personal") ? "personal" : "");
+	          if (["personalUpload", "courseUpload", "courseKb"].includes(page)) await loadDocuments(page.includes("personal") ? "personal" : "");
+          if (page === "personal") await loadPersonalMaterials();
           if (["subscription", "plans"].includes(page)) { await loadPlans(); await loadSubscription(); }
 	          if (["qc"].includes(page)) await loadQC();
 	          if (["conceptReview"].includes(page)) {
@@ -3576,6 +3617,7 @@
 	          const payload = await api("/api/documents/upload", { method: "POST", body: form });
 	          const data = payload.data || {};
 	          await loadDocuments(scopeType === "personal" ? "personal" : "");
+            if (scopeType === "personal") await loadPersonalMaterials();
 	          await loadJobs();
 	          if (data.job_id) {
 	            setMessage(`文件已保存，后台任务 #${data.job_id} 已排队，状态：${data.job_status}。请打开“任务状态”查看进度；任务完成后再运行术语对齐。 / File saved. Background job #${data.job_id} is queued with status: ${data.job_status}. Open Job Status to track progress; run terminology alignment after completion.`, "success");
@@ -3600,6 +3642,26 @@
           const warnings = (payload.warnings || []).slice(0, 3).join(" | ");
           setMessage(`${error.message} OCR：${doc.ocr_status || "not_required"}；公式 OCR：${formulaStatus}；公式块：${formulaCount}${warnings ? `；警告：${warnings}` : ""} / Upload failed. OCR: ${doc.ocr_status || "not_required"}; Formula OCR: ${formulaStatus}; Formula blocks: ${formulaCount}${warnings ? `; Warnings: ${warnings}` : ""}`, "notice error");
         }
+      },
+      async deletePersonalMaterial(materialId) {
+        try {
+          await api(`/api/student/personal-materials/${Number(materialId)}`, {
+            method: "DELETE"
+          });
+          await loadPersonalMaterials();
+          await loadStudentConceptMaterials();
+          setMessage("资料已删除；既有学习结果会保留并标记证据来源不可用。", "success");
+          render();
+        } catch (error) {
+          setMessage(formatApiError(error, "删除资料失败。"), "notice error");
+        }
+      },
+      async openPersonalMaterialQuery(sourceUid) {
+        state.page = "conceptQuery";
+        await loadStudentConceptMaterials();
+        const exists = state.cache.studentConceptMaterials.some(item => item.source_uid === sourceUid);
+        if (exists) await this.selectConceptMaterial(sourceUid);
+        render();
       },
 	      async startFormalAlignmentForDocument(documentId) {
 	        if (!state.user || !["teacher", "admin"].includes(state.user.role)) return;
