@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run real-browser pilot E2E checks for student and teacher workflows.
+"""Run real-browser E2E checks for Student, Instructor, and Reviewer workflows.
 
 Exit codes:
   0: browser E2E passed
@@ -149,6 +149,7 @@ def flow_result(name: str) -> dict[str, Any]:
         "console_errors": [],
         "page_errors": [],
         "failed_requests": [],
+        "requests": [],
         "downloads": [],
     }
 
@@ -176,6 +177,8 @@ def build_overall_result(
     browser_name: str = "chromium",
     browser_version: str = "",
     student_flow: dict[str, Any] | None = None,
+    instructor_flow: dict[str, Any] | None = None,
+    reviewer_flow: dict[str, Any] | None = None,
     teacher_flow: dict[str, Any] | None = None,
     blocked_external_requests: list[dict[str, Any]] | None = None,
     artifacts_directory: str | None = None,
@@ -183,11 +186,19 @@ def build_overall_result(
     message: str = "",
 ) -> dict[str, Any]:
     student_flow = student_flow or flow_result("student")
-    teacher_flow = teacher_flow or flow_result("teacher")
+    instructor_flow = instructor_flow or teacher_flow or flow_result("instructor")
+    reviewer_flow = reviewer_flow or flow_result("reviewer")
+    # Compatibility field for existing readiness/artifact consumers. It now
+    # aliases the Instructor flow and no longer means bilingual review.
+    teacher_flow = instructor_flow
     blocked_external_requests = blocked_external_requests or []
     external_dependencies = [item for item in blocked_external_requests if item.get("source") == "page"]
     if status is None:
-        requested_flows = [flow for flow in (student_flow, teacher_flow) if flow.get("status") != "SKIPPED"]
+        requested_flows = [
+            flow
+            for flow in (student_flow, instructor_flow, reviewer_flow)
+            if flow.get("status") != "SKIPPED"
+        ]
         status = (
             "PASS"
             if requested_flows
@@ -204,7 +215,10 @@ def build_overall_result(
             "playwright_version": playwright_version(),
         },
         "student_flow": student_flow,
+        "instructor_flow": instructor_flow,
+        "reviewer_flow": reviewer_flow,
         "teacher_flow": teacher_flow,
+        "teacher_flow_compatibility": "instructor_flow_alias",
         "blocked_external_requests": blocked_external_requests,
         "external_dependency_requests": external_dependencies,
         "artifacts_directory": artifacts_directory,
@@ -229,6 +243,7 @@ class FlowCapture:
     def route(self, route, request) -> None:
         url = request.url
         if self.is_allowed(url):
+            self.flow["requests"].append(url)
             route.continue_()
             return
         source = "probe" if url in self.probe_urls else "page"
@@ -394,7 +409,8 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     add_step(flow, "student cannot trigger review action")
 
 
-def run_teacher_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture) -> None:
+def run_legacy_teacher_review_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture) -> None:
+    """Deprecated pre-13A flow retained temporarily for source history; never dispatched."""
     teacher = summary["users"]["teacher"]
     open_frontend(page, capture.port, flow)
     probe_external_block(page, capture, flow)
@@ -505,6 +521,153 @@ def run_teacher_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     add_step(flow, "policy block request_id visible")
 
 
+def run_instructor_flow(
+    page,
+    summary: dict[str, Any],
+    flow: dict[str, Any],
+    artifact_dir: Path,
+    capture: FlowCapture,
+) -> None:
+    del artifact_dir
+    instructor = summary["users"]["teacher"]
+    open_frontend(page, capture.port, flow)
+    probe_external_block(page, capture, flow)
+    login(page, instructor["email"], instructor["password"], flow)
+    dashboard = expect_visible(
+        page,
+        '[data-testid="instructor-dashboard"]',
+        "Instructor English dashboard visible",
+        flow,
+    )
+    assert page.locator('[data-testid="concept-review-nav"]').count() == 0
+    add_step(flow, "Reviewer Console navigation hidden for Instructor")
+    text = dashboard.inner_text()
+    assert "Teacher Dashboard" in page.locator("body").inner_text()
+    for forbidden_copy in ("概念卡审核", "中文证据", "选择正确中文候选"):
+        assert forbidden_copy not in text
+    add_step(flow, "Instructor primary dashboard is English course-side")
+    page.wait_for_timeout(300)
+    reviewer_only_fragments = (
+        "/api/concept-cards/review-queue",
+        "/reviews",
+        "/review-case",
+        "/api/concept-cards/student-feedback-queue",
+        "/api/quality-control",
+    )
+    unexpected = [
+        url
+        for url in flow["requests"]
+        if any(fragment in url for fragment in reviewer_only_fragments)
+    ]
+    assert unexpected == [], f"Instructor prefetched Reviewer-only data: {unexpected}"
+    add_step(flow, "Instructor initialization did not prefetch Reviewer data")
+
+
+def run_reviewer_flow(
+    page,
+    summary: dict[str, Any],
+    flow: dict[str, Any],
+    artifact_dir: Path,
+    capture: FlowCapture,
+) -> None:
+    del artifact_dir
+    reviewer = summary["users"]["reviewer"]
+    open_frontend(page, capture.port, flow)
+    probe_external_block(page, capture, flow)
+    login(page, reviewer["email"], reviewer["password"], flow)
+    expect_visible(
+        page,
+        '[data-testid="concept-review-nav"]',
+        "Reviewer Console navigation visible",
+        flow,
+    )
+    assert "Reviewer Console" in page.locator("body").inner_text()
+    add_step(flow, "Reviewer Console product identity visible")
+    expect_visible(page, '[data-testid="review-queue"]', "Reviewer queue readable", flow)
+    page.locator('[data-testid="review-filter-course"]').fill("DEMO Signals and Systems")
+    with page.expect_response(
+        lambda response: (
+            "/api/concept-cards/review-queue?" in response.url
+            and "course=DEMO+Signals+and+Systems" in response.url
+        ),
+        timeout=10000,
+    ):
+        page.locator("form").filter(
+            has=page.locator('[data-testid="review-filter-course"]')
+        ).locator("button").first.click()
+    expect_visible(
+        page,
+        '[data-testid="review-card-row"]',
+        "Reviewer queue filtered",
+        flow,
+    )
+    row = page.locator('[data-testid="review-card-row"]').filter(
+        has_text="Fourier transform"
+    ).first
+    with page.expect_response(
+        lambda response: response.url.endswith("/review-case"),
+        timeout=10000,
+    ):
+        row.click()
+    expect_visible(page, '[data-testid="review-card-detail"]', "Reviewer detail visible", flow)
+    page.get_by_text("Fourier transform", exact=True).first.wait_for(
+        state="visible",
+        timeout=10000,
+    )
+    expect_visible(
+        page,
+        '[data-testid="teacher-alignment-review-case"]',
+        "Task 12J-B review case readable by Reviewer",
+        flow,
+    )
+    expect_visible(
+        page,
+        '[data-testid="english-evidence-list"] .quote',
+        "Reviewer English evidence visible",
+        flow,
+    )
+    expect_visible(
+        page,
+        '[data-testid="chinese-evidence-list"] .quote',
+        "Reviewer Chinese evidence visible",
+        flow,
+    )
+    accept_form = page.locator("form").filter(
+        has=page.locator('[data-testid="review-action-accept-recommendation"]')
+    ).first
+    accept_form.locator('textarea[name="review_comment"]').fill(
+        "Reviewer browser smoke accepts the governed recommendation."
+    )
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and response.url.endswith("/review")
+        ),
+        timeout=30000,
+    ) as review_response:
+        accept_form.locator('[data-testid="review-action-accept-recommendation"]').click()
+    assert review_response.value.status == 200
+    page.get_by_text("Reviewer review saved.", exact=False).wait_for(
+        state="visible",
+        timeout=10000,
+    )
+    add_step(flow, "Reviewer decision saved")
+    page.wait_for_function(
+        """() => document.querySelector('[data-testid="teacher-alignment-review-case"]')?.innerText.includes('HUMAN_APPROVED')""",
+        timeout=10000,
+    )
+    add_step(flow, "Reviewer safe approval preserved machine decision and audit")
+    page.locator('[data-testid="review-generate-draft"]').click()
+    draft = expect_visible(
+        page,
+        '[data-testid="teacher-draft-editor"]',
+        "Reviewer fake draft generated",
+        flow,
+    )
+    assert "NOT_PUBLISHED" in draft.inner_text()
+    add_step(flow, "Reviewer fake draft remained unpublished")
+
+
 def run_one_flow(playwright_browser, flow_name: str, base_dir: Path, artifacts_dir: Path, blocked_external_requests: list[dict[str, Any]], headed: bool) -> dict[str, Any]:
     flow = flow_result(flow_name)
     flow["status"] = "RUNNING"
@@ -525,8 +688,10 @@ def run_one_flow(playwright_browser, flow_name: str, base_dir: Path, artifacts_d
         capture.attach_page(page)
         if flow_name == "student":
             run_student_flow(page, runtime["summary"], flow, artifacts_dir, capture)
-        elif flow_name == "teacher":
-            run_teacher_flow(page, runtime["summary"], flow, artifacts_dir, capture)
+        elif flow_name == "instructor":
+            run_instructor_flow(page, runtime["summary"], flow, artifacts_dir, capture)
+        elif flow_name == "reviewer":
+            run_reviewer_flow(page, runtime["summary"], flow, artifacts_dir, capture)
         else:
             raise ValueError(f"unknown flow: {flow_name}")
     except Exception as exc:
@@ -554,14 +719,16 @@ def run_browser_checks(
     artifact_dir: Path,
     headed: bool = False,
     run_student: bool = True,
-    run_teacher: bool = True,
+    run_instructor: bool = True,
+    run_reviewer: bool = True,
 ) -> dict[str, Any]:
     assert_playwright_available()
     from playwright.sync_api import sync_playwright
 
     blocked_external_requests: list[dict[str, Any]] = []
     student_flow = flow_result("student")
-    teacher_flow = flow_result("teacher")
+    instructor_flow = flow_result("instructor")
+    reviewer_flow = flow_result("reviewer")
     browser_version = ""
 
     with sync_playwright() as playwright:
@@ -576,15 +743,22 @@ def run_browser_checks(
         try:
             if run_student:
                 student_flow = run_one_flow(browser, "student", base_dir, artifact_dir, blocked_external_requests, headed)
-            if run_teacher:
-                teacher_flow = run_one_flow(browser, "teacher", base_dir, artifact_dir, blocked_external_requests, headed)
+            if run_instructor:
+                instructor_flow = run_one_flow(
+                    browser, "instructor", base_dir, artifact_dir, blocked_external_requests, headed
+                )
+            if run_reviewer:
+                reviewer_flow = run_one_flow(
+                    browser, "reviewer", base_dir, artifact_dir, blocked_external_requests, headed
+                )
         finally:
             browser.close()
 
     return build_overall_result(
         browser_version=browser_version,
         student_flow=student_flow,
-        teacher_flow=teacher_flow,
+        instructor_flow=instructor_flow,
+        reviewer_flow=reviewer_flow,
         blocked_external_requests=blocked_external_requests,
         artifacts_directory=str(artifact_dir),
     )
@@ -595,13 +769,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-output", help="Write machine-readable result JSON.")
     parser.add_argument("--headed", action="store_true", help="Run Chromium headed for local debugging.")
     parser.add_argument("--student-only", action="store_true", help="Run only the student browser flow.")
-    parser.add_argument("--teacher-only", action="store_true", help="Run only the teacher browser flow.")
+    parser.add_argument("--instructor-only", action="store_true", help="Run only the Instructor browser flow.")
+    parser.add_argument(
+        "--teacher-only",
+        action="store_true",
+        help="Compatibility alias for --instructor-only.",
+    )
+    parser.add_argument("--reviewer-only", action="store_true", help="Run only the Reviewer browser flow.")
     parser.add_argument("--keep-artifacts", action="store_true", help="Keep temp DB/uploads/downloads/screenshots after success.")
     parser.add_argument("--artifacts", help="Optional artifact directory for screenshots/downloads.")
     args = parser.parse_args(argv)
 
-    if args.student_only and args.teacher_only:
-        print("--student-only and --teacher-only cannot be combined", file=sys.stderr)
+    selected_only = sum(
+        bool(value)
+        for value in (
+            args.student_only,
+            args.instructor_only or args.teacher_only,
+            args.reviewer_only,
+        )
+    )
+    if selected_only > 1:
+        print("Only one of --student-only, --instructor-only/--teacher-only, or --reviewer-only may be used", file=sys.stderr)
         return 1
 
     base_dir = Path(tempfile.mkdtemp(prefix="lexibridge-browser-e2e-"))
@@ -612,8 +800,13 @@ def main(argv: list[str] | None = None) -> int:
                 base_dir=base_dir,
                 artifact_dir=artifact_dir,
                 headed=args.headed,
-                run_student=not args.teacher_only,
-                run_teacher=not args.student_only,
+                run_student=not (
+                    args.instructor_only or args.teacher_only or args.reviewer_only
+                ),
+                run_instructor=not (args.student_only or args.reviewer_only),
+                run_reviewer=not (
+                    args.student_only or args.instructor_only or args.teacher_only
+                ),
             )
             exit_code = 0 if result["status"] == "PASS" else 1
         except RuntimeError as exc:

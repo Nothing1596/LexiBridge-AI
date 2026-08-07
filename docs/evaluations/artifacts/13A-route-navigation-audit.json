@@ -10,7 +10,14 @@
     "teacher_access": "transitional compatibility",
     "reviewer_course_permission_required": true,
     "instructor_primary_navigation_included_review": false,
+    "instructor_initial_reviewer_prefetch": false,
     "review_page_product_label": "Reviewer Console",
+    "browser_flows": {
+      "student": "PASS",
+      "instructor": "PASS",
+      "reviewer": "PASS",
+      "teacher_flow": "instructor compatibility alias"
+    },
     "student_review_access": false,
     "student_unpublished_draft_access": false,
     "five_dimension_serializer": true

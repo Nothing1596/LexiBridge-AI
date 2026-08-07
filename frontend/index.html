@@ -767,8 +767,14 @@
 
     function navItems() {
       if (!state.user) return publicPages;
-      const items = [...sharedPages];
       const role = state.user.role;
+      if (role === "reviewer") {
+        return [
+          ...rolePages.reviewer,
+          ["account", bilingual("账号中心", "Account Center")]
+        ];
+      }
+      const items = [...sharedPages];
       if (rolePages[role]) items.push(...rolePages[role]);
       if (role === "admin") items.push(...rolePages.teacher, ...rolePages.reviewer);
       return items;
@@ -996,6 +1002,7 @@
 	      const pending = countCardsBy(["pending_quality_control"]);
 	      const runningJobs = state.cache.jobs.filter(job => ["queued", "running", "retrying"].includes(job.status)).length;
 	      return pageShell("Teacher Dashboard", "Manage English course context and view aggregate course operations. Bilingual exception review is handled separately by the Reviewer Console.", `
+	        <section data-testid="instructor-dashboard">
 	        <div class="workspace-header">
 	          <div class="notice">Create a course, upload English courseware, organize chapters, and inspect aggregate processing status. Student concept queries do not wait for Instructor approval.</div>
 	          <div class="card">${currentCourseSelector()}</div>
@@ -1013,6 +1020,7 @@
 	          <div class="card"><h3>Alignment Coverage</h3><p class="muted">Inspect aggregate run coverage and processing failures without reviewing Chinese terms.</p><button onclick="Lexi.goto('alignmentRuns')">View Alignment Runs</button></div>
 	          <div class="card"><h3>Aggregate Learning Signals</h3><p class="muted">Review course-level English concept demand and difficulty signals; private student notes are excluded.</p><button onclick="Lexi.goto('feedback')">View Aggregate Signals</button></div>
 	        </div>
+	        </section>
 	      `);
 	    }
 
@@ -1801,7 +1809,7 @@
         <section class="stack" data-testid="teacher-alignment-review-case">
           <div class="card">
             <div class="between">
-              <h3>${bilingual("统一教师审核案例", "Teacher Alignment Review Case")}</h3>
+              <h3>${bilingual("统一双语审核案例", "Reviewer Alignment Review Case")}</h3>
               <span class="badge blue">${escapeHtml(reviewCase.business_status || "REVIEW_REQUIRED")}</span>
             </div>
             <p>${bilingual("机器决定", "Machine decision")}: <strong>${escapeHtml(machine.decision || machine.status || "REVIEW_REQUIRED")}</strong></p>
@@ -2538,7 +2546,7 @@
     }
 
     async function loadReviewQueue() {
-      if (!state.user || !["reviewer", "teacher", "admin"].includes(state.user.role)) return;
+      if (!state.user || !["reviewer", "admin"].includes(state.user.role)) return;
       const query = reviewQueryString();
       const payload = await api(`/api/concept-cards/review-queue${query ? `?${query}` : ""}`);
       const data = payload.data || {};
@@ -2643,30 +2651,64 @@
 
     async function loadEverything() {
       if (!state.user) return;
-      await Promise.all([
-        loadCourses(),
-        loadCards(),
-	        loadDocuments(),
-	        loadJobs(),
-	        loadAlignmentRuns(),
-	        loadPlans(),
-        loadSubscription(),
-        loadKnowledge(),
-        loadQC(),
-        loadReviewQueue(),
-        loadConceptCardFeedbackQueue(),
-        loadTeacherLearningAnalytics(),
-        loadStudentCourses(),
-        loadStudentProgress(),
-        loadStudentConceptCards(),
-        loadFeedback(),
-        loadBacklog(),
-        state.user.role === "admin" ? loadPilotReport() : Promise.resolve(),
-        state.user.role === "admin" ? loadEvaluationRuns() : Promise.resolve(),
-        state.user.role === "admin" ? loadAiGovernance() : Promise.resolve(),
-        state.user.role === "admin" ? loadRetrievalDiagnostics() : Promise.resolve(),
-        loadAdmin()
-      ]);
+      const role = state.user.role;
+      if (role === "reviewer") {
+        await loadReviewQueue();
+        render();
+        return;
+      }
+      if (role === "teacher") {
+        await Promise.all([
+          loadCourses(),
+          loadCards(),
+          loadDocuments(),
+          loadJobs(),
+          loadAlignmentRuns(),
+          loadPlans(),
+          loadSubscription(),
+          loadKnowledge()
+        ]);
+        render();
+        return;
+      }
+      if (role === "student") {
+        await Promise.all([
+          loadCourses(),
+          loadCards(),
+          loadDocuments(),
+          loadJobs(),
+          loadPlans(),
+          loadSubscription(),
+          loadStudentCourses(),
+          loadStudentProgress(),
+          loadStudentConceptCards()
+        ]);
+        render();
+        return;
+      }
+      if (role === "admin") {
+        await Promise.all([
+          loadCourses(),
+          loadCards(),
+          loadDocuments(),
+          loadJobs(),
+          loadAlignmentRuns(),
+          loadPlans(),
+          loadSubscription(),
+          loadKnowledge(),
+          loadQC(),
+          loadReviewQueue(),
+          loadConceptCardFeedbackQueue(),
+          loadTeacherLearningAnalytics(),
+          loadFeedback(),
+          loadBacklog(),
+          loadPilotReport(),
+          loadEvaluationRuns(),
+          loadAiGovernance(),
+          loadRetrievalDiagnostics(),
+          loadAdmin()
+        ]);
+      }
       render();
     }
 
@@ -3039,7 +3081,7 @@
 	          });
 	          state.cache.reviewCase = response.data && response.data.case;
 	          await loadReviewCard(card.card_uid);
-	          setMessage(`教师审核已保存。/ Teacher review saved. request_id=${response.request_id || "-"}`, "success");
+	          setMessage(`审核者决定已保存。/ Reviewer review saved. request_id=${response.request_id || "-"}`, "success");
 	          render();
 	        } catch (error) {
 	          const message = error.status === 409
@@ -3176,8 +3218,10 @@
           if (["subscription", "plans"].includes(page)) { await loadPlans(); await loadSubscription(); }
 	          if (["qc"].includes(page)) await loadQC();
 	          if (["conceptReview"].includes(page)) {
-	            await loadReviewQueue();
-	            if (["teacher", "admin"].includes(state.user.role)) {
+	            if (["reviewer", "admin"].includes(state.user.role)) {
+	              await loadReviewQueue();
+	            }
+	            if (state.user.role === "admin") {
 	              await loadConceptCardFeedbackQueue();
 	              await loadTeacherLearningAnalytics();
 	            }

@@ -35,9 +35,19 @@ def test_review_demo_seed_is_idempotent_and_marked(app_module):
         assert first["card_uids"] == second["card_uids"]
         assert app_module.Course.query.filter_by(name=seed.DEMO_COURSE).count() == 1
         assert app_module.Course.query.filter_by(name=seed.DEMO_HIDDEN_COURSE).count() == 1
-        assert app_module.User.query.filter(app_module.User.email.in_([data["email"] for data in seed.DEMO_USERS.values()])).count() == 4
+        assert app_module.User.query.filter(app_module.User.email.in_([data["email"] for data in seed.DEMO_USERS.values()])).count() == 5
+        reviewer = app_module.User.query.filter_by(
+            email=seed.DEMO_USERS["reviewer"]["email"],
+            role="reviewer",
+        ).one()
+        reviewer_permission = app_module.CourseReviewPermission.query.filter_by(
+            course=seed.DEMO_COURSE,
+            reviewer_id=reviewer.id,
+        ).one()
+        assert reviewer_permission.reviewer_role == "reviewer"
+        assert reviewer_permission.can_review is True
         assert app_module.CourseReviewPolicy.query.filter_by(course=seed.DEMO_COURSE).count() == 1
-        assert app_module.CourseReviewPermission.query.filter_by(course=seed.DEMO_COURSE).count() == 2
+        assert app_module.CourseReviewPermission.query.filter_by(course=seed.DEMO_COURSE).count() == 3
         assert app_module.CourseStudentVisibilityPolicy.query.filter_by(course=seed.DEMO_COURSE).count() == 1
         assert app_module.CourseStudentVisibilityPolicy.query.filter_by(course=seed.DEMO_HIDDEN_COURSE).count() == 1
         assert app_module.StudentCourseMembership.query.filter_by(course=seed.DEMO_COURSE, status="active").count() == 2

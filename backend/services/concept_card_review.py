@@ -1,4 +1,4 @@
-"""Teacher/admin review workflow for Concept Alignment Cards."""
+"""Governed Reviewer Console workflow for Concept Alignment Cards."""
 
 from __future__ import annotations
 
@@ -234,10 +234,10 @@ def _reviewer_context(reviewer_context: Any) -> dict[str, Any]:
     }
 
 
-def _require_teacher_or_admin(reviewer_context: Any) -> dict[str, Any]:
+def _require_authorized_reviewer_role(reviewer_context: Any) -> dict[str, Any]:
     reviewer = _reviewer_context(reviewer_context)
-    if reviewer["reviewer_role"] not in {"teacher", "admin"}:
-        raise ConceptCardReviewError("teacher or admin reviewer is required.")
+    if reviewer["reviewer_role"] not in {"teacher", "reviewer", "admin"}:
+        raise ConceptCardReviewError("an authorized reviewer role is required.")
     return reviewer
 
 
@@ -300,7 +300,7 @@ def validate_review_action(card: Any, action: str, data: dict[str, Any], reviewe
     action = _text(action)
     if action not in REVIEW_ACTIONS:
         raise ConceptCardReviewError(f"action must be one of {sorted(REVIEW_ACTIONS)}.")
-    reviewer = _require_teacher_or_admin(reviewer_context)
+    reviewer = _require_authorized_reviewer_role(reviewer_context)
     reason = _validate_reason(action, data)
     comment = _text(data.get("review_comment"))
     if action in {"reject", "request_revision", "mark_needs_more_evidence"} and not (comment or normalize_list(data.get("required_changes"))):

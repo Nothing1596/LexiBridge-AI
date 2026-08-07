@@ -34,20 +34,25 @@ def test_flow_result_json_schema_shape():
     flow = module.flow_result("student")
     assert flow["name"] == "student"
     assert flow["status"] == "SKIPPED"
-    for key in ["steps", "console_errors", "page_errors", "failed_requests", "downloads"]:
+    for key in ["steps", "console_errors", "page_errors", "failed_requests", "downloads", "requests"]:
         assert isinstance(flow[key], list)
 
 
 def test_overall_pass_requires_requested_flows_to_pass():
     module = load_runner_module()
+    instructor = passing_flow(module, "instructor")
     result = module.build_overall_result(
         student_flow=passing_flow(module, "student"),
-        teacher_flow=passing_flow(module, "teacher"),
+        instructor_flow=instructor,
+        reviewer_flow=passing_flow(module, "reviewer"),
         blocked_external_requests=[],
     )
     assert result["status"] == "PASS"
     assert result["student_flow"]["status"] == "PASS"
-    assert result["teacher_flow"]["status"] == "PASS"
+    assert result["instructor_flow"]["status"] == "PASS"
+    assert result["reviewer_flow"]["status"] == "PASS"
+    assert result["teacher_flow"] == instructor
+    assert result["teacher_flow_compatibility"] == "instructor_flow_alias"
 
 
 def test_student_failure_makes_overall_fail():
@@ -56,19 +61,30 @@ def test_student_failure_makes_overall_fail():
     student["status"] = "FAIL"
     result = module.build_overall_result(
         student_flow=student,
-        teacher_flow=passing_flow(module, "teacher"),
+        instructor_flow=passing_flow(module, "instructor"),
+        reviewer_flow=passing_flow(module, "reviewer"),
         blocked_external_requests=[],
     )
     assert result["status"] == "FAIL"
 
 
-def test_teacher_failure_makes_overall_fail():
+def test_instructor_or_reviewer_failure_makes_overall_fail():
     module = load_runner_module()
-    teacher = passing_flow(module, "teacher")
-    teacher["status"] = "FAIL"
+    instructor = passing_flow(module, "instructor")
+    instructor["status"] = "FAIL"
     result = module.build_overall_result(
         student_flow=passing_flow(module, "student"),
-        teacher_flow=teacher,
+        instructor_flow=instructor,
+        reviewer_flow=passing_flow(module, "reviewer"),
+        blocked_external_requests=[],
+    )
+    assert result["status"] == "FAIL"
+    reviewer = passing_flow(module, "reviewer")
+    reviewer["status"] = "FAIL"
+    result = module.build_overall_result(
+        student_flow=passing_flow(module, "student"),
+        instructor_flow=passing_flow(module, "instructor"),
+        reviewer_flow=reviewer,
         blocked_external_requests=[],
     )
     assert result["status"] == "FAIL"
@@ -76,12 +92,13 @@ def test_teacher_failure_makes_overall_fail():
 
 def test_console_error_makes_flow_and_overall_fail():
     module = load_runner_module()
-    teacher = passing_flow(module, "teacher")
-    teacher["console_errors"].append("Unhandled browser error")
-    assert module.flow_has_failures(teacher, []) is True
+    reviewer = passing_flow(module, "reviewer")
+    reviewer["console_errors"].append("Unhandled browser error")
+    assert module.flow_has_failures(reviewer, []) is True
     result = module.build_overall_result(
         student_flow=passing_flow(module, "student"),
-        teacher_flow=teacher,
+        instructor_flow=passing_flow(module, "instructor"),
+        reviewer_flow=reviewer,
         blocked_external_requests=[],
     )
     assert result["status"] == "FAIL"
@@ -92,7 +109,8 @@ def test_external_page_dependency_makes_overall_fail():
     blocked = [{"flow": "student", "source": "page", "url": "https://cdn.example.invalid/app.js"}]
     result = module.build_overall_result(
         student_flow=passing_flow(module, "student"),
-        teacher_flow=passing_flow(module, "teacher"),
+        instructor_flow=passing_flow(module, "instructor"),
+        reviewer_flow=passing_flow(module, "reviewer"),
         blocked_external_requests=blocked,
     )
     assert result["status"] == "FAIL"
@@ -138,6 +156,8 @@ def test_readiness_e2e_summary_maps_json_fields():
             "status": "PASS",
             "browser": {"name": "chromium", "version": "148.0.7778.96"},
             "student_flow": {"status": "PASS", "console_errors": [], "page_errors": []},
+            "instructor_flow": {"status": "PASS", "console_errors": [], "page_errors": []},
+            "reviewer_flow": {"status": "PASS", "console_errors": [], "page_errors": []},
             "teacher_flow": {"status": "PASS", "console_errors": [], "page_errors": []},
             "blocked_external_requests": [{"source": "probe", "url": "https://example.invalid"}],
             "external_dependency_requests": [],

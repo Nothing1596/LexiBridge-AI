@@ -45,6 +45,18 @@ def test_frontend_calls_task_12jb_review_workflow_reused_not_duplicated():
     assert "Reviewer Console" in FRONTEND
 
 
+def test_role_aware_initial_load_does_not_prefetch_reviewer_data_for_instructor():
+    load_block = FRONTEND.split("async function loadEverything()", 1)[1].split("const Lexi =", 1)[0]
+    assert 'if (role === "reviewer")' in load_block
+    assert 'if (role === "teacher")' in load_block
+    assert "loadReviewQueue()" not in load_block.split('if (role === "teacher")', 1)[1].split(
+        'if (role === "admin")', 1
+    )[0]
+    assert "loadQC()" not in load_block.split('if (role === "teacher")', 1)[1].split(
+        'if (role === "admin")', 1
+    )[0]
+
+
 def test_role_contract_blocks_students_from_reviewer_capabilities():
     assert "REVIEW_BILINGUAL_ALIGNMENT_EXCEPTIONS" not in boundaries.role_capabilities("student")
 
