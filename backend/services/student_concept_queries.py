@@ -65,7 +65,13 @@ def _source_is_governed(source: Any) -> bool:
         return False
     authorization = _text(_field(source, "authorization_status")).lower()
     license_status = _text(_field(source, "license_status")).lower()
-    return authorization in {"authorized", "approved", "granted"} and license_status not in {
+    return authorization in {
+        "authorized",
+        "approved",
+        "granted",
+        "allowed_for_private_use",
+        "allowed_for_course_use",
+    } and license_status not in {
         "", "unknown", "blocked", "rejected",
     }
 

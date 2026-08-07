@@ -67,6 +67,57 @@ def register_student_concept_query_routes(
             and membership_active(user.id, source.course_id)
         )
 
+    def source_owned_or_member(user, source, scope):
+        if scope == "PERSONAL":
+            return (
+                str(source.scope_type or "").lower() == "personal"
+                and str(source.owner_user_id) == str(user.id)
+            )
+        return (
+            scope == "MANAGED_COURSE"
+            and str(source.scope_type or "").lower() in {"course", "managed_course"}
+            and source.course_id is not None
+            and membership_active(user.id, source.course_id)
+        )
+
+    def lifecycle_not_ready(reason, context, *, source=None):
+        scope = (
+            "PERSONAL"
+            if source is not None and str(source.scope_type or "").lower() == "personal"
+            else "MANAGED_COURSE"
+        )
+        return core.api_success_with_audit_context(
+            {
+                "query": {
+                    "contract_id": student_concept_queries.ALIGNMENT_RESULT_CONTRACT_VERSION,
+                    "workspace_scope": scope,
+                    "workspace_uid": (
+                        f"personal:{source.owner_user_id}"
+                        if scope == "PERSONAL"
+                        else f"course:{getattr(source, 'course_id', '')}"
+                    ),
+                    "visibility": "PRIVATE",
+                    "authority": "NON_OFFICIAL",
+                    "publication_status": "NOT_APPLICABLE",
+                    "alignment_status": "NOT_READY",
+                    "display_mode": "NO_RELIABLE_ALIGNMENT",
+                    "uncertain": False,
+                    "recommended_chinese_concept": None,
+                    "english_evidence": [],
+                    "chinese_evidence": [],
+                    "chinese_candidates": [],
+                    "generated_hints": [],
+                    "source_availability": "SOURCE_UNAVAILABLE",
+                    "evidence_availability": "UNAVAILABLE",
+                    "student_explanation": "资料尚未完成处理、已被删除，或缺少可审计来源信息。",
+                    "student_risk_summary": [reason],
+                    "reason_code": reason,
+                },
+                "idempotent_replay": False,
+            },
+            audit_context=context,
+        )
+
     def get_owned_query(user, query_uid):
         query = models.StudentConceptQuery.query.filter_by(
             query_uid=query_uid, student_id=user.id
@@ -77,10 +128,29 @@ def register_student_concept_query_routes(
             user.id, query.course_id
         ):
             return None
-        source = models.KnowledgeSource.query.filter_by(source_uid=query.source_uid).first()
-        if source is None or not source_access(user, source, query.workspace_scope):
-            return None
         return query
+
+    def source_availability(query):
+        source = models.KnowledgeSource.query.filter_by(
+            source_uid=query.source_uid
+        ).first()
+        if source is None:
+            return "SOURCE_UNAVAILABLE"
+        if (
+            str(source.status or "").lower() != "active"
+            or not bool(source.allow_student_search)
+        ):
+            return "SOURCE_UNAVAILABLE"
+        if query.workspace_scope == "PERSONAL" and (
+            str(source.scope_type or "").lower() != "personal"
+            or str(source.owner_user_id) != str(query.student_id)
+        ):
+            return "SOURCE_UNAVAILABLE"
+        if query.workspace_scope == "MANAGED_COURSE" and not membership_active(
+            query.student_id, query.course_id
+        ):
+            return "SOURCE_UNAVAILABLE"
+        return "AVAILABLE"
 
     def personal_state(query):
         record = models.PersonalLearningRecord.query.filter_by(
@@ -103,7 +173,15 @@ def register_student_concept_query_routes(
     def serialize_query(query):
         raw = json.loads(query.result_json or "{}")
         raw["personal_state"] = personal_state(query)
-        return student_concept_queries.serialize_alignment_result(raw)
+        serialized = student_concept_queries.serialize_alignment_result(raw)
+        serialized["source_availability"] = source_availability(query)
+        if serialized["source_availability"] == "SOURCE_UNAVAILABLE":
+            serialized["evidence_availability"] = "UNAVAILABLE"
+            serialized["source_unavailable_reason"] = "PERSONAL_MATERIAL_DELETED_OR_INACCESSIBLE"
+        else:
+            serialized["evidence_availability"] = "AVAILABLE"
+            serialized["source_unavailable_reason"] = ""
+        return serialized
 
     def audit(event_type, *, user, query, request_id, action="", result="success"):
         core.audit_record_service.create_audit_record(
@@ -140,14 +218,29 @@ def register_student_concept_query_routes(
         source = models.KnowledgeSource.query.filter_by(
             source_uid=str(data.get("source_uid") or "").strip()
         ).first()
-        if source is None or not source_access(user, source, scope):
+        if source is None or not source_owned_or_member(user, source, scope):
             return error("STUDENT_CONCEPT_SOURCE_NOT_ACCESSIBLE", "Source is not available.", 404, context)
+        if not source_access(user, source, scope):
+            return lifecycle_not_ready(
+                "STUDENT_CONCEPT_SOURCE_NOT_READY", context, source=source
+            )
         chunk = models.KnowledgeChunk.query.filter_by(
             chunk_uid=str(data.get("chunk_uid") or "").strip(),
             source_uid=source.source_uid,
         ).first()
         if chunk is None or str(chunk.language or "").lower() != "en":
             return error("STUDENT_CONCEPT_SOURCE_CHUNK_INVALID", "English source chunk is not available.", 404, context)
+        if (
+            str(source.scope_type or "").lower() == "personal"
+            and source.document_id is not None
+            and not (
+                str(chunk.parse_block_uid or "").strip()
+                and chunk.page_number is not None
+            )
+        ):
+            return lifecycle_not_ready(
+                "STUDENT_CONCEPT_PROVENANCE_INCOMPLETE", context, source=source
+            )
         try:
             selection = student_concept_queries.validate_selection(
                 chunk,
@@ -186,8 +279,22 @@ def register_student_concept_query_routes(
             workspace_scope=scope,
             student_id=user.id,
             course_id=source.course_id if scope == "MANAGED_COURSE" else None,
-            allow_platform_governed=bool(current_app.config.get("STUDENT_ALLOW_PLATFORM_EVIDENCE", False)),
+            allow_platform_governed=False,
         )
+        # Personal/course evidence is the first tier. Platform-governed Chinese
+        # evidence is an explicit fallback only when the workspace has no
+        # eligible independent Chinese source.
+        if (
+            not evidence_scope.allowed_source_uids
+            and bool(current_app.config.get("STUDENT_ALLOW_PLATFORM_EVIDENCE", False))
+        ):
+            evidence_scope = student_concept_queries.resolve_evidence_scope(
+                sources,
+                workspace_scope=scope,
+                student_id=user.id,
+                course_id=source.course_id if scope == "MANAGED_COURSE" else None,
+                allow_platform_governed=True,
+            )
         now = core.current_time_text()
         query_uid, result_uid = str(uuid.uuid4()), str(uuid.uuid4())
         runner = current_app.config.get("STUDENT_ALIGNMENT_RUNNER")
