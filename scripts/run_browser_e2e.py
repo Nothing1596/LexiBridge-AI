@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,10 @@ PYTHON = ROOT / "backend" / ".venv-macos" / "bin" / "python"
 PYTHON_CMD = str(PYTHON if PYTHON.exists() else sys.executable)
 E2E_ENVIRONMENT_UNAVAILABLE = 2
 ALLOWED_SCHEMES = ("data:", "blob:", "about:")
+SYSTEM_CHROMIUM_CANDIDATES = (
+    Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+)
 
 
 def utc_now() -> str:
@@ -83,7 +88,89 @@ def run_setup(database: Path, uploads: Path, flow_name: str) -> dict[str, Any]:
     seed_spec.loader.exec_module(seed)
     with app_module.app.app_context():
         summary = seed.seed_review_demo(app_module, reset_demo=False)
+        seed_student_concept_query_demo(app_module)
+    app_module.app.config["STUDENT_ALIGNMENT_RUNNER"] = browser_fake_alignment_runner
     return {"app_module": app_module, "summary": summary}
+
+
+def browser_fake_alignment_runner(**kwargs):
+    allowed = tuple(kwargs.get("allowed_source_uids") or ())
+    chinese_source = allowed[0] if allowed else ""
+    return SimpleNamespace(
+        english_term=kwargs["english_term"],
+        english_evidence_candidates=[{
+            "source_uid": kwargs["english_source_uid"], "chunk_uid": "browser-en-evidence",
+            "snippet": kwargs["english_context"], "page_number": 1,
+        }],
+        chinese_evidence_candidates=[{
+            "source_uid": chinese_source, "chunk_uid": "browser-zh-evidence",
+            "snippet": "电势表示单位电荷在电场中的电势能。", "page_number": 2,
+        }] if chinese_source else [],
+        chinese_term_candidates=[{
+            "candidate_uid": "browser-candidate-potential", "chinese_term": "电势",
+            "source_uid": chinese_source, "chunk_uid": "browser-zh-evidence",
+        }] if chinese_source else [],
+        selected_chinese_candidate={
+            "candidate_uid": "browser-candidate-potential", "chinese_term": "电势",
+            "source_uid": chinese_source, "chunk_uid": "browser-zh-evidence",
+        } if chinese_source else None,
+        evidence_qualification={"decision": "QUALIFIED"} if chinese_source else None,
+        risk_labels=[] if chinese_source else ["no_chinese_evidence"],
+    )
+
+
+def seed_student_concept_query_demo(app_module: Any) -> None:
+    student = app_module.User.query.filter_by(email="review.student@lexibridge.local").first()
+    course = app_module.Course.query.filter_by(name="DEMO Signals and Systems").first()
+    if student is None or course is None:
+        raise RuntimeError("Task 13B browser fixture requires seeded Student and course.")
+    membership = app_module.CourseMember.query.filter_by(
+        user_id=student.id, course_id=course.id
+    ).first()
+    if membership is None:
+        app_module.db.session.add(app_module.CourseMember(
+            user_id=student.id, course_id=course.id, role="student",
+            role_in_course="student", status="active",
+            created_at=app_module.current_time_text(), joined_at=app_module.current_time_text(),
+        ))
+    sources = [
+        dict(uid="e2e-personal-en", title="My Physics Notes", language="en", scope="personal",
+             owner=student.id, course_id=None, visibility="private", role="english_course_material"),
+        dict(uid="e2e-personal-zh", title="我的中文物理参考", language="zh", scope="personal",
+             owner=student.id, course_id=None, visibility="private", role="chinese_reference_material"),
+        dict(uid="e2e-course-en", title="Course Electrostatics", language="en", scope="course",
+             owner=None, course_id=course.id, visibility="course", role="english_course_material"),
+        dict(uid="e2e-course-zh", title="课程中文电磁学证据", language="zh", scope="course",
+             owner=None, course_id=course.id, visibility="course", role="chinese_reference_material"),
+    ]
+    for item in sources:
+        source = app_module.KnowledgeSource.query.filter_by(source_uid=item["uid"]).first()
+        if source is None:
+            source = app_module.KnowledgeSource(
+                source_uid=item["uid"], name=item["title"], title=item["title"],
+                language=item["language"], scope_type=item["scope"], owner_user_id=item["owner"],
+                course_id=item["course_id"], course=course.name if item["course_id"] else "",
+                visibility=item["visibility"], source_role=item["role"], status="active",
+                version=1, authorization_status="authorized", license_status="licensed",
+                allow_student_search=True, quality_status="qualified",
+            )
+            app_module.db.session.add(source)
+    app_module.db.session.flush()
+    for uid, source_uid, scope, course_id, owner in (
+        ("e2e-personal-en-chunk", "e2e-personal-en", "personal", None, student.id),
+        ("e2e-course-en-chunk", "e2e-course-en", "course", course.id, None),
+    ):
+        if app_module.KnowledgeChunk.query.filter_by(chunk_uid=uid).first() is None:
+            text = "The electric potential at a point equals potential energy per unit charge."
+            app_module.db.session.add(app_module.KnowledgeChunk(
+                chunk_uid=uid, source_uid=source_uid, document_id=910000 + len(uid),
+                content=text, normalized_text=text.lower(), language="en",
+                scope_type=scope, course_id=course_id, course=course.name if course_id else "",
+                owner_user_id=str(owner or ""), visibility="course" if course_id else "private",
+                status="active", quality_status="qualified", page_number=1,
+                parse_block_uid=f"{uid}-block",
+            ))
+    app_module.db.session.commit()
 
 
 def find_free_port() -> int:
@@ -407,6 +494,97 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     )
     assert page.locator('[data-testid="review-action-approve"]').count() == 0
     add_step(flow, "student cannot trigger review action")
+
+    page.get_by_role("button", name="概念查询 Concept Query").first.click()
+    expect_visible(page, '[data-testid="student-concept-query-page"]', "student ConceptQuery page visible", flow)
+    for source_uid, expected_scope, step_prefix in (
+        ("e2e-personal-en", "PERSONAL", "Personal Workspace"),
+        ("e2e-course-en", "MANAGED_COURSE", "Managed Course"),
+    ):
+        with page.expect_response(
+            lambda response: response.url.endswith(f"/api/student/concept-materials/{source_uid}/chunks"),
+            timeout=10000,
+        ):
+            page.locator('[data-testid="student-concept-material-select"]').select_option(source_uid)
+        chunk = expect_visible(
+            page, '[data-testid="student-material-chunk"]',
+            f"{step_prefix} English material visible", flow,
+        )
+        chunk.evaluate(
+            """(el, chunkUid) => {
+                const text = el.textContent;
+                const start = text.indexOf('electric potential');
+                const range = document.createRange();
+                range.setStart(el.firstChild, start);
+                range.setEnd(el.firstChild, start + 'electric potential'.length);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                window.Lexi.captureConceptSelection({currentTarget: el}, chunkUid);
+            }""",
+            chunk.get_attribute("data-chunk-uid"),
+        )
+        selection_summary = expect_visible(
+            page,
+            '[data-testid="student-selection-summary"]',
+            f"{step_prefix} selection captured",
+            flow,
+        )
+        assert "electric potential" in selection_summary.inner_text()
+        page.locator('[data-testid="student-concept-align-action"]').click()
+        result = expect_visible(
+            page, '[data-testid="student-concept-result"]',
+            f"{step_prefix} alignment result visible", flow,
+        )
+        assert "PRIVATE" in result.inner_text()
+        assert "NON_OFFICIAL" in result.inner_text()
+        assert "电势" in result.inner_text()
+        expect_visible(page, '[data-testid="student-query-english-evidence"] .quote', f"{step_prefix} English evidence visible", flow)
+        expect_visible(page, '[data-testid="student-query-chinese-evidence"] .quote', f"{step_prefix} Chinese evidence visible", flow)
+        if expected_scope == "PERSONAL":
+            private_query_uid = page.evaluate(
+                "() => window.Lexi && state.studentConceptQuery.result.query_uid"
+            )
+            with page.expect_response(
+                lambda response: response.request.method == "PUT" and response.url.endswith("/personal-record"),
+                timeout=10000,
+            ):
+                page.locator('[data-testid="student-query-save"]').click()
+            page.locator('[data-testid="student-query-note"]').fill("Browser private learning note.")
+            with page.expect_response(
+                lambda response: response.request.method == "PUT" and response.url.endswith("/personal-record"),
+                timeout=10000,
+            ):
+                page.locator('[data-testid="student-query-note-save"]').click()
+            with page.expect_response(
+                lambda response: response.request.method == "PUT" and response.url.endswith("/personal-record"),
+                timeout=10000,
+            ):
+                page.locator('[data-testid="student-query-understood"]').click()
+            page.wait_for_function(
+                """() => document.querySelector('[data-testid="student-query-note"]')?.value === 'Browser private learning note.'""",
+                timeout=10000,
+            )
+            add_step(flow, "Personal learning record saved with note and understanding")
+        add_step(flow, f"{step_prefix} remained private and non-official")
+
+    page.evaluate("() => window.Lexi.logout()")
+    page.wait_for_function("() => !document.querySelector('#userChip')?.innerText.includes('@')")
+    student2 = summary["users"]["student2"]
+    login(page, student2["email"], student2["password"], flow)
+    student2_token = page.evaluate("() => state.token")
+    api_base = f"http://127.0.0.1:{capture.port}"
+    query_probe = page.context.request.get(
+        f"{api_base}/api/student/concept-queries/{private_query_uid}",
+        headers={"Authorization": f"Bearer {student2_token}"},
+    )
+    record_probe = page.context.request.put(
+        f"{api_base}/api/student/concept-queries/{private_query_uid}/personal-record",
+        headers={"Authorization": f"Bearer {student2_token}"},
+        data={"saved": True, "expected_version": 0},
+    )
+    assert [query_probe.status, record_probe.status] == [404, 404]
+    add_step(flow, "Student 2 blocked from Student 1 query and personal record")
 
 
 def run_legacy_teacher_review_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture) -> None:
@@ -735,10 +913,18 @@ def run_browser_checks(
         try:
             browser = playwright.chromium.launch(headless=not headed)
         except Exception as exc:
-            raise RuntimeError(
-                "E2E_ENVIRONMENT_UNAVAILABLE: Playwright Chromium runtime is not installed. "
-                "Run `python -m playwright install chromium` in the project environment."
-            ) from exc
+            configured = str(os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or "").strip()
+            fallback = Path(configured) if configured else next(
+                (path for path in SYSTEM_CHROMIUM_CANDIDATES if path.exists()), None
+            )
+            if fallback is None or not fallback.exists():
+                raise RuntimeError(
+                    "E2E_ENVIRONMENT_UNAVAILABLE: Playwright Chromium runtime is not installed. "
+                    "Run `python -m playwright install chromium` in the project environment."
+                ) from exc
+            browser = playwright.chromium.launch(
+                headless=not headed, executable_path=str(fallback)
+            )
         browser_version = browser.version
         try:
             if run_student:

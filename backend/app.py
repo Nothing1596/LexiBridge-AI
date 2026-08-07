@@ -226,6 +226,10 @@ from routes.provider_policy import ProviderPolicyModels, register_provider_polic
 from routes.provider_preflight import ProviderPreflightModels, register_provider_preflight_routes
 from routes.shared import RouteCoreDependencies
 from routes.student_concept_cards import StudentConceptCardModels, register_student_concept_card_routes
+from routes.student_concept_queries import (
+    StudentConceptQueryModels,
+    register_student_concept_query_routes,
+)
 from routes.teacher_learning_analytics import TeacherLearningAnalyticsModels, register_teacher_learning_analytics_routes
 
 
@@ -1853,6 +1857,80 @@ def before_insert_student_concept_card_state(mapper, connection, target):
 @event.listens_for(StudentConceptCardState, "before_update")
 def before_update_student_concept_card_state(mapper, connection, target):
     target.updated_at = current_time_text()
+
+
+class StudentConceptQuery(db.Model):
+    """Private student-owned query aggregate; never an official card."""
+    __tablename__ = "student_concept_query"
+
+    id = db.Column(db.Integer, primary_key=True)
+    query_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    result_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    student_id = db.Column(db.Integer, nullable=False)
+    workspace_scope = db.Column(db.String(40), nullable=False)
+    workspace_uid = db.Column(db.String(120), nullable=False)
+    course_id = db.Column(db.Integer, nullable=True)
+    source_uid = db.Column(db.String(64), nullable=False)
+    source_version = db.Column(db.String(80), nullable=False, default="1")
+    chunk_uid = db.Column(db.String(64), nullable=False)
+    selected_text = db.Column(db.String(220), nullable=False)
+    selection_start = db.Column(db.Integer, nullable=False)
+    selection_end = db.Column(db.Integer, nullable=False)
+    query_fingerprint = db.Column(db.String(64), nullable=False)
+    request_id = db.Column(db.String(120), default="")
+    evidence_scope_id = db.Column(db.String(64), default="")
+    allowed_source_uids_json = db.Column(db.Text, default="[]")
+    result_json = db.Column(db.Text, nullable=False, default="{}")
+    processing_status = db.Column(db.String(40), default="completed")
+    error_code = db.Column(db.String(120), default="")
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.String(40), default="")
+    updated_at = db.Column(db.String(40), default="")
+
+    __table_args__ = (
+        db.UniqueConstraint("student_id", "query_fingerprint", name="uq_student_concept_query_fingerprint"),
+    )
+
+
+class PersonalLearningRecord(db.Model):
+    """Private learning state linked to a StudentConceptQuery result."""
+    __tablename__ = "personal_learning_record"
+
+    id = db.Column(db.Integer, primary_key=True)
+    record_uid = db.Column(db.String(64), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    student_id = db.Column(db.Integer, nullable=False)
+    query_uid = db.Column(db.String(64), nullable=False)
+    result_uid = db.Column(db.String(64), nullable=False)
+    workspace_scope = db.Column(db.String(40), nullable=False)
+    workspace_uid = db.Column(db.String(120), nullable=False)
+    saved = db.Column(db.Boolean, default=False)
+    personal_note = db.Column(db.Text, default="")
+    understanding_state = db.Column(db.String(40), default="")
+    last_viewed_at = db.Column(db.String(40), default="")
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.String(40), default="")
+    updated_at = db.Column(db.String(40), default="")
+
+    __table_args__ = (
+        db.UniqueConstraint("student_id", "result_uid", name="uq_personal_learning_record_student_result"),
+    )
+
+
+@event.listens_for(StudentConceptQuery, "before_insert")
+def before_insert_student_concept_query(mapper, connection, target):
+    now = current_time_text()
+    target.query_uid = target.query_uid or str(uuid.uuid4())
+    target.result_uid = target.result_uid or str(uuid.uuid4())
+    target.created_at = target.created_at or now
+    target.updated_at = target.updated_at or now
+
+
+@event.listens_for(PersonalLearningRecord, "before_insert")
+def before_insert_personal_learning_record(mapper, connection, target):
+    now = current_time_text()
+    target.record_uid = target.record_uid or str(uuid.uuid4())
+    target.created_at = target.created_at or now
+    target.updated_at = target.updated_at or now
 
 
 class AlignmentRun(db.Model):
@@ -12368,6 +12446,19 @@ register_student_concept_card_routes(
     student_visible_course_names=student_visible_course_names,
     student_course_access_service=student_course_access_service,
     record_student_course_access_audit=record_student_course_access_audit,
+)
+
+register_student_concept_query_routes(
+    app,
+    core=route_core,
+    models=StudentConceptQueryModels(
+        StudentConceptQuery=StudentConceptQuery,
+        PersonalLearningRecord=PersonalLearningRecord,
+        KnowledgeSource=KnowledgeSource,
+        KnowledgeChunk=KnowledgeChunk,
+        Course=Course,
+        CourseMember=CourseMember,
+    ),
 )
 
 

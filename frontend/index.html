@@ -519,6 +519,16 @@
         page: 1,
         per_page: 20
       },
+      studentConceptQuery: {
+        sourceUid: "",
+        workspaceScope: "",
+        selectedText: "",
+        chunkUid: "",
+        selectionStart: 0,
+        selectionEnd: 0,
+        loading: false,
+        result: null
+      },
       teacherFeedbackFilters: {
         course: "",
         status: "",
@@ -577,6 +587,8 @@
         studentCourses: [],
         studentVisibilityError: "",
         studentProgress: null,
+        studentConceptMaterials: [],
+        studentConceptChunks: [],
         conceptCardFeedbackQueue: [],
         conceptCardFeedbackPagination: null,
         teacherLearningAnalytics: null,
@@ -611,6 +623,7 @@
 
     const rolePages = {
       student: [
+        ["conceptQuery", bilingual("概念查询", "Concept Query")],
         ["personal", bilingual("个人工作区", "Personal Workspace")],
         ["personalUpload", bilingual("上传个人资料", "Upload Personal Document")],
         ["learning", bilingual("收藏与学习", "Favorites & Learning")],
@@ -1316,6 +1329,58 @@
 	          ${["teacher", "admin"].includes(state.user.role) && doc.scope_type === "course" ? `<div class="row"><button type="button" class="small secondary" data-testid="formal-alignment-start" data-document-id="${Number(doc.id)}" onclick="Lexi.startFormalAlignmentForDocument(${Number(doc.id)})" ${state.formalAlignment.submitting || state.formalAlignment.polling ? "disabled" : ""}>${bilingual("开始正式术语对齐", "Start Formal Alignment")}</button></div>` : ""}
 	        </div>
       `}).join("");
+    }
+
+    function renderStudentConceptResult(result) {
+      if (!result) return `<div class="card" data-testid="student-concept-result-empty"><p class="muted">请先在英文资料中选择一个专业概念。</p></div>`;
+      const recommended = result.recommended_chinese_concept;
+      const evidence = items => (items || []).map(item => `<div class="quote"><p>${escapeHtml(item.snippet || "")}</p><small>${escapeHtml(item.source_uid || "")} · page ${escapeHtml(item.page_number || "-")}</small></div>`).join("") || `<p class="muted">暂无可用证据。</p>`;
+      const statusText = result.student_explanation || (result.alignment_status === "READY" ? "证据充分" : result.alignment_status === "REVIEW_REQUIRED" ? "存在多个可能对应" : "暂无可靠中文对应");
+      const alternatives = (result.chinese_candidates || []).filter(candidate => !recommended || candidate.candidate_uid !== recommended.candidate_uid);
+      const candidateList = alternatives.map(candidate => `<li><strong>${escapeHtml(candidate.text || "")}</strong> · 有独立中文证据支持的候选</li>`).join("");
+      const riskSummary = (result.student_risk_summary || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
+      return `<section class="card" data-testid="student-concept-result">
+        <div class="between"><h2>概念学习结果</h2><span class="badge ${result.alignment_status === "READY" ? "good" : "warn"}" data-testid="student-alignment-status">${escapeHtml(result.alignment_status)}</span></div>
+        <div class="notice">个人学习结果 · 非课程官方答案 · PRIVATE · NON_OFFICIAL</div>
+        <div class="grid two">
+          <div><h3>English Concept</h3><p data-testid="student-result-english-term"><strong>${escapeHtml(result.english_term || result.selected_text || "")}</strong></p><h4>What It Means Here</h4><p>${escapeHtml(result.bounded_context || "")}</p></div>
+          <div><h3>${result.alignment_status === "REVIEW_REQUIRED" ? "可能对应" : "推荐中文概念"}</h3><p data-testid="student-result-chinese-term"><strong>${escapeHtml((recommended && recommended.text) || "尚无可靠对应")}</strong></p><p>${escapeHtml(statusText)}</p></div>
+        </div>
+        <div class="grid two"><div><h3>English Evidence</h3><div data-testid="student-query-english-evidence">${evidence(result.english_evidence)}</div></div><div><h3>中文证据</h3><div data-testid="student-query-chinese-evidence">${evidence(result.chinese_evidence)}</div></div></div>
+        <div class="grid two">
+          <div><h3>Why They Align</h3><p>${escapeHtml(statusText)}</p></div>
+          <div><h3>Alternatives</h3>${candidateList ? `<ul>${candidateList}</ul>` : `<p class="muted">当前没有其他有证据支持的候选。</p>`}</div>
+          <div><h3>Do Not Confuse With</h3>${riskSummary ? `<ul>${riskSummary}</ul>` : `<p class="muted">当前证据未标记需要特别区分的相近概念。</p>`}</div>
+          <div><h3>Confidence / Uncertainty</h3><p>${escapeHtml(statusText)}</p></div>
+        </div>
+        ${result.uncertain ? `<div class="notice" data-testid="student-result-uncertain">当前证据不能唯一确认；你仍可查看和保存这些有证据的候选。</div>` : ""}
+        <div class="row">
+          <button data-testid="student-query-save" onclick="Lexi.updatePersonalConceptState({saved:true})">保存</button>
+          <button class="secondary" data-testid="student-query-understood" onclick="Lexi.updatePersonalConceptState({understanding_state:'UNDERSTOOD'})">理解了</button>
+          <button class="secondary" data-testid="student-query-confused" onclick="Lexi.updatePersonalConceptState({understanding_state:'STILL_CONFUSED'})">仍然困惑</button>
+        </div>
+        <form class="form-grid" onsubmit="Lexi.savePersonalConceptNote(event)"><div class="full"><label>个人笔记</label><textarea name="note" data-testid="student-query-note">${escapeHtml((result.personal_state && result.personal_state.note) || "")}</textarea></div><button data-testid="student-query-note-save">保存笔记</button></form>
+      </section>`;
+    }
+
+    function renderStudentConceptQuery() {
+      const active = state.studentConceptQuery;
+      const materials = state.cache.studentConceptMaterials || [];
+      const chunks = state.cache.studentConceptChunks || [];
+      return pageShell("概念查询", "在有权限访问的英文资料中选择一个专业术语，获得有证据且明确表达不确定性的私人学习结果。", `
+        <div class="card" data-testid="student-concept-query-page">
+          <label>英文学习资料</label>
+          <select data-testid="student-concept-material-select" onchange="Lexi.selectConceptMaterial(this.value)">
+            <option value="">请选择资料</option>
+            ${materials.map(item => `<option value="${escapeHtml(item.source_uid)}" ${active.sourceUid === item.source_uid ? "selected" : ""}>${escapeHtml(item.title)} · ${item.workspace_scope === "PERSONAL" ? "我的资料" : escapeHtml(item.course_name || "课程资料")}</option>`).join("")}
+          </select>
+          <p class="muted">在下方英文原文中拖动选择术语或短语，然后点击“查看概念对应”。</p>
+          <div class="stack">${chunks.map(chunk => `<div class="quote" data-testid="student-material-chunk" data-chunk-uid="${escapeHtml(chunk.chunk_uid)}" onmouseup="Lexi.captureConceptSelection(event, '${escapeHtml(chunk.chunk_uid)}')">${escapeHtml(chunk.text)}</div>`).join("") || `<p class="muted">请选择一份已有治理和解析的英文资料。</p>`}</div>
+          <div class="notice" data-testid="student-selection-summary">${active.selectedText ? `已选择：${escapeHtml(active.selectedText)}` : "尚未选择概念"}</div>
+          <button data-testid="student-concept-align-action" onclick="Lexi.submitStudentConceptQuery()" ${!active.selectedText || active.loading ? "disabled" : ""}>${active.loading ? "正在检索证据…" : "查看概念对应"}</button>
+        </div>
+        ${renderStudentConceptResult(active.result)}
+      `);
     }
 
 	    function renderSubscription() {
@@ -2361,6 +2426,7 @@
       else if (page === "personal" || page === "personalUpload") app.innerHTML = renderUpload("personal");
       else if (page === "learning") app.innerHTML = renderLearning();
       else if (page === "studentConceptCards") app.innerHTML = renderStudentConceptCards();
+      else if (page === "conceptQuery") app.innerHTML = renderStudentConceptQuery();
       else if (page === "subscription") app.innerHTML = renderSubscription();
       else if (page === "teacher") app.innerHTML = renderTeacher();
       else if (page === "courseUpload") app.innerHTML = renderUpload("course");
@@ -2592,6 +2658,27 @@
         if (value !== undefined && value !== null && String(value).trim() !== "") params.set(key, value);
       });
       return params.toString();
+    }
+
+    async function loadStudentConceptMaterials() {
+      const payload = await api("/api/student/concept-materials");
+      state.cache.studentConceptMaterials = (payload.data && payload.data.items) || [];
+      if (!state.studentConceptQuery.sourceUid && state.cache.studentConceptMaterials.length) {
+        state.studentConceptQuery.sourceUid = state.cache.studentConceptMaterials[0].source_uid;
+        state.studentConceptQuery.workspaceScope = state.cache.studentConceptMaterials[0].workspace_scope;
+      }
+      if (state.studentConceptQuery.sourceUid) await loadStudentConceptChunks(state.studentConceptQuery.sourceUid);
+    }
+
+    async function loadStudentConceptChunks(sourceUid) {
+      const payload = await api(`/api/student/concept-materials/${encodeURIComponent(sourceUid)}/chunks`);
+      state.cache.studentConceptChunks = (payload.data && payload.data.items) || [];
+      const source = payload.data && payload.data.source;
+      state.studentConceptQuery.sourceUid = sourceUid;
+      state.studentConceptQuery.workspaceScope = (source && source.workspace_scope) || "";
+      state.studentConceptQuery.selectedText = "";
+      state.studentConceptQuery.chunkUid = "";
+      state.studentConceptQuery.result = null;
     }
 
     async function loadStudentCourses() {
@@ -3208,6 +3295,7 @@
 	          if (["courses", "adminCourses", "courseUpload", "personalUpload"].includes(page)) await loadCourses();
 	          if (["search", "learning"].includes(page)) await loadCards();
 	          if (["studentConceptCards"].includes(page)) { await loadStudentCourses(); await loadStudentConceptCards(); }
+	          if (["conceptQuery"].includes(page)) await loadStudentConceptMaterials();
 	          if (["jobs"].includes(page)) await loadJobs();
 	          if (["alignmentRuns"].includes(page)) await loadAlignmentRuns();
 	          if (["evaluationRuns"].includes(page)) await loadEvaluationRuns();
@@ -3231,6 +3319,78 @@
           if (["admin", "users", "logs"].includes(page)) { await loadAdmin(); await loadKnowledge(); await loadCourses(); }
         }
         render();
+      },
+      async selectConceptMaterial(sourceUid) {
+        const material = (state.cache.studentConceptMaterials || []).find(item => item.source_uid === sourceUid);
+        state.studentConceptQuery.workspaceScope = material ? material.workspace_scope : "";
+        await loadStudentConceptChunks(sourceUid);
+        render();
+      },
+      captureConceptSelection(event, chunkUid) {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return;
+        const range = selection.getRangeAt(0);
+        const container = event.currentTarget;
+        if (!container.contains(range.commonAncestorContainer)) return;
+        const prefix = document.createRange();
+        prefix.selectNodeContents(container);
+        prefix.setEnd(range.startContainer, range.startOffset);
+        const selectedText = selection.toString();
+        state.studentConceptQuery.selectedText = selectedText;
+        state.studentConceptQuery.chunkUid = chunkUid;
+        state.studentConceptQuery.selectionStart = prefix.toString().length;
+        state.studentConceptQuery.selectionEnd = prefix.toString().length + selectedText.length;
+        render();
+      },
+      async submitStudentConceptQuery() {
+        const active = state.studentConceptQuery;
+        if (!active.selectedText || !active.chunkUid || !active.sourceUid) {
+          setMessage("请先在英文资料中选择一个术语或短语。", "notice error");
+          return;
+        }
+        active.loading = true;
+        render();
+        try {
+          const response = await api("/api/student/concept-queries", {
+            method: "POST",
+            headers: {"Idempotency-Key": `student-ui:${active.sourceUid}:${active.chunkUid}:${active.selectionStart}:${active.selectionEnd}`},
+            body: JSON.stringify({
+              workspace_scope: active.workspaceScope,
+              source_uid: active.sourceUid,
+              chunk_uid: active.chunkUid,
+              selected_text: active.selectedText,
+              selection_start: active.selectionStart,
+              selection_end: active.selectionEnd
+            })
+          });
+          active.result = response.data.query;
+          setMessage("概念证据检索完成。", "success");
+        } catch (error) {
+          setMessage(formatApiError(error, "概念查询失败。"), "notice error");
+        } finally {
+          active.loading = false;
+          render();
+        }
+      },
+      async updatePersonalConceptState(changes) {
+        const result = state.studentConceptQuery.result;
+        if (!result) return;
+        const expectedVersion = Number((result.personal_state && result.personal_state.version) || 0);
+        try {
+          const response = await api(`/api/student/concept-queries/${encodeURIComponent(result.query_uid)}/personal-record`, {
+            method: "PUT",
+            body: JSON.stringify({...changes, expected_version: expectedVersion})
+          });
+          state.studentConceptQuery.result = response.data.query;
+          setMessage("私人学习状态已保存。", "success");
+        } catch (error) {
+          setMessage(formatApiError(error, "保存失败，结果可能已在其他页面更新。"), "notice error");
+        }
+      },
+      async savePersonalConceptNote(event) {
+        event.preventDefault();
+        const note = new FormData(event.target).get("note") || "";
+        await this.updatePersonalConceptState({note});
       },
       async login(event) {
         event.preventDefault();
