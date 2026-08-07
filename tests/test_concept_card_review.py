@@ -421,7 +421,15 @@ def test_review_history_and_assignment_service(app_module):
 def test_review_service_role_restrictions(app_module):
     with app_module.app.app_context():
         card = create_card(app_module)
-        with pytest.raises(concept_card_review.ConceptCardReviewError, match="teacher or admin"):
+        validated = concept_card_review.validate_review_action(
+            card,
+            "add_review_note",
+            {"review_comment": "Reviewer role remains governed by course permission."},
+            reviewer(role="reviewer"),
+        )
+        assert validated["reviewer_role"] == "reviewer"
+
+        with pytest.raises(concept_card_review.ConceptCardReviewError, match="authorized reviewer"):
             concept_card_review.approve_concept_card(
                 app_module.db.session,
                 app_module.ConceptAlignmentCard,

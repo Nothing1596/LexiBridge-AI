@@ -32,6 +32,7 @@ DEMO_CHAPTER = "Frequency Domain"
 DEMO_CREATED_BY = "demo_seed"
 DEMO_PASSWORDS = {
     "teacher": "Teacher1234",
+    "reviewer": "Reviewer1234",
     "admin": "Admin1234",
     "student": "Student1234",
     "student2": "Student2234",
@@ -41,6 +42,12 @@ DEMO_USERS = {
         "username": "demo_review_teacher",
         "email": "review.teacher@lexibridge.local",
         "display_name": "Demo Review Teacher",
+    },
+    "reviewer": {
+        "username": "demo_bilingual_reviewer",
+        "email": "review.reviewer@lexibridge.local",
+        "display_name": "Demo Bilingual Reviewer",
+        "role": "reviewer",
     },
     "admin": {
         "username": "demo_review_admin",
@@ -196,7 +203,7 @@ def upsert_course_member(app_module: Any, course: Any, user: Any, role: str) -> 
     return member
 
 
-def upsert_review_policy_and_permissions(app_module: Any, users: dict[str, Any]) -> tuple[Any, Any, Any]:
+def upsert_review_policy_and_permissions(app_module: Any, users: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
     policy, _ = course_review_policy.create_or_update_course_review_policy(
         app_module.db.session,
         app_module.CourseReviewPolicy,
@@ -239,6 +246,20 @@ def upsert_review_policy_and_permissions(app_module: Any, users: dict[str, Any])
         actor=users["admin"],
         now_fn=app_module.current_time_text,
     )
+    reviewer_permission, _ = course_review_policy.grant_course_review_permission(
+        app_module.db.session,
+        app_module.CourseReviewPermission,
+        DEMO_COURSE,
+        users["reviewer"].id,
+        {
+            "reviewer_id": users["reviewer"].id,
+            "reviewer_role": "reviewer",
+            "permission_level": "approve",
+            "status": "active",
+        },
+        actor=users["admin"],
+        now_fn=app_module.current_time_text,
+    )
     admin_permission, _ = course_review_policy.grant_course_review_permission(
         app_module.db.session,
         app_module.CourseReviewPermission,
@@ -253,7 +274,7 @@ def upsert_review_policy_and_permissions(app_module: Any, users: dict[str, Any])
         actor=users["admin"],
         now_fn=app_module.current_time_text,
     )
-    return policy, teacher_permission, admin_permission
+    return policy, teacher_permission, reviewer_permission, admin_permission
 
 
 def upsert_student_visibility_demo(app_module: Any, users: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
@@ -1102,12 +1123,13 @@ def seed_review_demo(app_module: Any, *, reset_demo: bool = False) -> dict[str, 
         course = upsert_demo_course(app_module, users["teacher"])
         hidden_course = upsert_demo_course(app_module, users["teacher"], course_name=DEMO_HIDDEN_COURSE, course_code="DEMO-HIDDEN")
         upsert_course_member(app_module, course, users["teacher"], "teacher")
+        upsert_course_member(app_module, course, users["reviewer"], "reviewer")
         upsert_course_member(app_module, course, users["admin"], "teacher")
         upsert_course_member(app_module, course, users["student"], "student")
         upsert_course_member(app_module, course, users["student2"], "student")
         upsert_course_member(app_module, hidden_course, users["teacher"], "teacher")
         upsert_course_member(app_module, hidden_course, users["admin"], "teacher")
-        policy, teacher_permission, admin_permission = upsert_review_policy_and_permissions(app_module, users)
+        policy, teacher_permission, reviewer_permission, admin_permission = upsert_review_policy_and_permissions(app_module, users)
         visible_policy, hidden_policy, student_membership, student2_membership = upsert_student_visibility_demo(app_module, users)
         knowledge = upsert_demo_knowledge(app_module)
         cards = upsert_demo_cards(app_module, knowledge, users)
@@ -1133,6 +1155,7 @@ def seed_review_demo(app_module: Any, *, reset_demo: bool = False) -> dict[str, 
             "student_membership_uid": student_membership.membership_uid,
             "student2_membership_uid": student2_membership.membership_uid,
             "teacher_permission_uid": teacher_permission.permission_uid,
+            "reviewer_permission_uid": reviewer_permission.permission_uid,
             "admin_permission_uid": admin_permission.permission_uid,
             "card_uids": {key: card.card_uid for key, card in cards.items()},
             "source_uids": {key: source.source_uid for key, source in knowledge["sources"].items()},

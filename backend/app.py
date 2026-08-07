@@ -7793,7 +7793,7 @@ def parse_time_text(value):
 
 def normalize_role(role):
     value = str(role or "student").strip().lower()
-    if value not in {"student", "teacher", "admin"}:
+    if value not in {"student", "teacher", "reviewer", "admin"}:
         return "student"
     return value
 
@@ -12672,7 +12672,7 @@ register_concept_card_review_routes(
 @app.route("/api/concept-cards/<card_uid>", methods=["GET"])
 def get_concept_card_api(card_uid):
     audit_context = get_route_audit_context()
-    user, error_response = require_current_user({"student", "teacher", "admin"})
+    user, error_response = require_current_user({"student", "teacher", "reviewer", "admin"})
     if error_response:
         return attach_request_id_to_response(error_response, audit_context)
     audit_context = get_route_audit_context(user)
@@ -12695,6 +12695,21 @@ def get_concept_card_api(card_uid):
             audit_context,
             {"audit_error_code": "student_unpublished_concept_card_forbidden"},
         )
+    if user.role == "reviewer":
+        can_review, _, reason = course_review_policy_service.can_reviewer_review_card(
+            db.session,
+            CourseReviewPermission,
+            card,
+            user,
+        )
+        if not can_review:
+            return api_error_with_audit_context(
+                "FORBIDDEN",
+                "Reviewer is not permitted to view this course card.",
+                403,
+                audit_context,
+                {"audit_error_code": reason or "course_review_permission_denied"},
+            )
     return api_success_with_audit_context(
         {
             "card": concept_card_publication_service.enrich_card_payload(
