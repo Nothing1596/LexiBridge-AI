@@ -470,17 +470,69 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     # Task 13C: exercise the real student upload route and the existing
     # layout-aware ingestion worker with a synthetic, repository-independent PDF.
     from reportlab.lib.pagesizes import letter
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.pdfgen import canvas
 
-    personal_pdf = artifact_dir / "synthetic-personal-physics.pdf"
-    personal_pdf.parent.mkdir(parents=True, exist_ok=True)
-    pdf = canvas.Canvas(str(personal_pdf), pagesize=letter)
+    english_pdf = artifact_dir / "synthetic-personal-physics.pdf"
+    chinese_pdf = artifact_dir / "synthetic-personal-chinese-evidence.pdf"
+    english_pdf.parent.mkdir(parents=True, exist_ok=True)
+    pdf = canvas.Canvas(str(english_pdf), pagesize=letter)
     pdf.drawString(72, 720, "Electric potential")
     pdf.drawString(72, 690, "Electric potential is potential energy per unit charge.")
     pdf.save()
+    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    pdf = canvas.Canvas(str(chinese_pdf), pagesize=letter)
+    pdf.setFont("STSong-Light", 12)
+    pdf.drawString(72, 720, "电势")
+    pdf.drawString(72, 690, "电势表示单位电荷在电场中的电势能。")
+    pdf.save()
     page.locator('[data-testid="my-workspace-nav"]').first.click()
     expect_visible(page, '[data-testid="student-personal-workspace"]', "My Workspace visible", flow)
-    page.locator('[data-testid="personal-material-upload-form"] input[type="file"]').set_input_files(str(personal_pdf))
+
+    upload_form = page.locator('[data-testid="personal-material-upload-form"]')
+    upload_form.locator('select[name="personal_material_role"]').select_option(
+        "CHINESE_REFERENCE_EVIDENCE"
+    )
+    upload_form.locator('input[name="usage_rights_confirmed"]').check()
+    upload_form.locator('input[type="file"]').set_input_files(str(chinese_pdf))
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url.endswith("/api/documents/upload"),
+        timeout=10000,
+    ) as upload_info:
+        page.locator('[data-testid="personal-material-upload"]').click()
+    chinese_upload_payload = upload_info.value.json()["data"]
+    with app_module.app.app_context():
+        app_module.run_background_job(
+            chinese_upload_payload["job_id"], worker_id="browser-13c2-zh"
+        )
+        chinese_source = app_module.KnowledgeSource.query.filter_by(
+            document_id=chinese_upload_payload["document_id"]
+        ).one()
+        assert chinese_source.source_role == "chinese_reference_material"
+        assert chinese_source.visibility == "private"
+        assert chinese_source.allow_student_search is True
+    page.locator('[data-testid="my-workspace-nav"]').first.click()
+    corpus_status = expect_visible(
+        page,
+        '[data-testid="personal-evidence-corpus-status"]',
+        "personal Chinese evidence corpus visible",
+        flow,
+    )
+    assert "1 份可检索" in corpus_status.inner_text()
+    chinese_row = page.locator('[data-testid="personal-material-item"]').filter(
+        has_text="synthetic-personal-chinese-evidence.pdf"
+    )
+    assert "READY" in chinese_row.inner_text()
+    assert "中文参考证据" in chinese_row.inner_text()
+    add_step(flow, "private Chinese PDF admitted to the personal evidence corpus")
+
+    upload_form = page.locator('[data-testid="personal-material-upload-form"]')
+    upload_form.locator('select[name="personal_material_role"]').select_option(
+        "ENGLISH_COURSE_MATERIAL"
+    )
+    upload_form.locator('input[name="usage_rights_confirmed"]').check()
+    upload_form.locator('input[type="file"]').set_input_files(str(english_pdf))
     with page.expect_response(
         lambda response: response.request.method == "POST" and response.url.endswith("/api/documents/upload"),
         timeout=10000,
@@ -488,16 +540,18 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         page.locator('[data-testid="personal-material-upload"]').click()
     upload_payload = upload_info.value.json()["data"]
     with app_module.app.app_context():
-        app_module.run_background_job(upload_payload["job_id"], worker_id="browser-13c")
+        app_module.run_background_job(upload_payload["job_id"], worker_id="browser-13c2-en")
         uploaded_source = app_module.KnowledgeSource.query.filter_by(
             document_id=upload_payload["document_id"]
         ).one()
+        assert uploaded_source.source_role == "english_course_material"
         uploaded_source_uid = uploaded_source.source_uid
     page.locator('[data-testid="my-workspace-nav"]').first.click()
-    ready_material = expect_visible(
-        page, '[data-testid="personal-material-item"]',
-        "personal PDF parsed into private evidence material", flow,
+    ready_material = page.locator('[data-testid="personal-material-item"]').filter(
+        has_text="synthetic-personal-physics.pdf"
     )
+    ready_material.wait_for(state="visible", timeout=10000)
+    add_step(flow, "personal PDF parsed into private evidence material")
     assert "READY" in ready_material.inner_text()
     add_step(flow, "personal PDF upload, parse, chunk, and private index completed")
 

@@ -360,6 +360,14 @@ def register_student_concept_query_routes(
                 selection=selection,
                 created_at=now,
             )
+            raw["evidence_scope"] = {
+                "scope_id": evidence_scope.scope_id,
+                "tier": evidence_scope.evidence_tier,
+                "platform_governed_included": (
+                    evidence_scope.platform_governed_included
+                ),
+                "source_count": len(evidence_scope.allowed_source_uids),
+            }
             status = "completed"
             error_code = ""
         except Exception as exc:
@@ -384,6 +392,14 @@ def register_student_concept_query_routes(
                 "chinese_evidence": [], "chinese_candidates": [],
                 "selected_candidate": None, "qualification": None,
                 "risk_labels": [failure_code.lower()], "generated_hints": [],
+                "evidence_scope": {
+                    "scope_id": evidence_scope.scope_id,
+                    "tier": evidence_scope.evidence_tier,
+                    "platform_governed_included": (
+                        evidence_scope.platform_governed_included
+                    ),
+                    "source_count": len(evidence_scope.allowed_source_uids),
+                },
                 "created_at": now, "updated_at": now,
             }
             status = "failed_closed"
