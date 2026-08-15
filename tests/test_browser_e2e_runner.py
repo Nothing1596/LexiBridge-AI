@@ -130,6 +130,25 @@ def test_expected_probe_failed_request_does_not_fail_flow():
     assert module.flow_has_failures(flow, []) is False
 
 
+def test_pdf_blob_navigation_abort_is_expected_browser_lifecycle_event():
+    module = load_runner_module()
+    flow = passing_flow(module, "student")
+    capture = module.FlowCapture(flow, [], 5000)
+
+    class FakeRequest:
+        url = "blob:http://127.0.0.1:5000/private-pdf"
+        failure = "net::ERR_ABORTED"
+
+    capture.on_request_failed(FakeRequest())
+
+    assert flow["failed_requests"] == [{
+        "url": FakeRequest.url,
+        "failure": "net::ERR_ABORTED",
+        "expected": True,
+    }]
+    assert module.flow_has_failures(flow, []) is False
+
+
 def test_runtime_detection_reports_missing_playwright(monkeypatch):
     module = load_runner_module()
     original_import = builtins.__import__

@@ -18,9 +18,11 @@ from services import bilingual_evidence_qualification, student_first_boundaries
 CONTRACT_VERSION = "student-concept-query@1.0.0"
 ALIGNMENT_RESULT_CONTRACT_VERSION = "student-alignment-result@1.1.0"
 ALIGNMENT_POLICY_VERSION = "governed-bilingual-evidence-qualification@1.1.0"
+MATERIAL_READER_CONTRACT_VERSION = "student-material-reader@1.0.0"
 MAX_SELECTION_CHARS = 180
 MAX_CONTEXT_CHARS = 800
 CONTEXT_WINDOW_CHARS = 360
+MAX_READER_CHUNK_CHARS = 8000
 
 
 class StudentConceptQueryError(ValueError):
@@ -145,6 +147,41 @@ def source_search_eligible(source: Any, *, expected_language: Any = "") -> bool:
         "allowed_for_course_use",
     } and license_status not in {
         "", "unknown", "blocked", "rejected",
+    }
+
+
+def serialize_material_reader_item(chunk: Any) -> dict[str, Any]:
+    """Serialize one governed, selectable chunk without exposing storage data."""
+    text = str(_field(chunk, "content", "") or "")
+    if len(text) > MAX_READER_CHUNK_CHARS:
+        raise StudentConceptQueryError(
+            "STUDENT_MATERIAL_READER_CONTENT_UNBOUNDED",
+            "A parsed material block exceeds the student reader boundary.",
+        )
+    page_number = _field(chunk, "page_number")
+    block_uid = _text(_field(chunk, "parse_block_uid"))
+    if page_number is None or not block_uid:
+        raise StudentConceptQueryError(
+            "STUDENT_MATERIAL_READER_PROVENANCE_INCOMPLETE",
+            "A parsed material block is missing page or block provenance.",
+        )
+    return {
+        "chunk_uid": _text(_field(chunk, "chunk_uid")) or str(_field(chunk, "id", "")),
+        "text": text,
+        "page_number": int(page_number),
+        "block_uid": block_uid,
+        "heading_path": _text(
+            _field(chunk, "source_section") or _field(chunk, "chapter")
+        ),
+        "block_type": _text(_field(chunk, "block_type")) or "text",
+        "chunk_index": int(_field(chunk, "chunk_index", 0) or 0),
+        "content_hash": (
+            _text(_field(chunk, "content_hash"))
+            or hashlib.sha256(text.encode()).hexdigest()
+        ),
+        "span_start": 0,
+        "span_end": len(text),
+        "selectable": bool(text.strip()),
     }
 
 

@@ -3228,6 +3228,27 @@ def resolve_document_local_path(document):
     return os.path.join(UPLOAD_FOLDER, document.saved_filename)
 
 
+def student_material_file_exists(document):
+    if getattr(document, "storage_key", ""):
+        return storage_service().exists(document.storage_key)
+    fallback = os.path.join(UPLOAD_FOLDER, str(document.saved_filename or ""))
+    return bool(document.saved_filename and os.path.isfile(fallback))
+
+
+def student_material_file_response(document):
+    return send_file(
+        resolve_document_local_path(document),
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=(
+            secure_filename(document.original_filename or document.filename)
+            or "course-material.pdf"
+        ),
+        conditional=True,
+        max_age=0,
+    )
+
+
 def ensure_schema_columns():
     """
     Minimal SQLite-compatible schema upgrade for the local demo database.
@@ -12732,7 +12753,11 @@ register_student_concept_query_routes(
         KnowledgeChunk=KnowledgeChunk,
         Course=Course,
         CourseMember=CourseMember,
+        Document=Document,
+        DocumentParseRecord=DocumentParseRecord,
     ),
+    material_file_exists=student_material_file_exists,
+    material_file_response=student_material_file_response,
 )
 
 

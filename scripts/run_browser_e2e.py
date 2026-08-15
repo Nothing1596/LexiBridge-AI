@@ -377,11 +377,15 @@ class FlowCapture:
 
     def on_request_failed(self, request) -> None:
         url = request.url
+        failure = request.failure or ""
+        expected_browser_lifecycle = (
+            url.startswith("blob:") and "ERR_ABORTED" in failure
+        )
         self.flow["failed_requests"].append(
             {
                 "url": url,
-                "failure": request.failure or "",
-                "expected": url in self.probe_urls,
+                "failure": failure,
+                "expected": url in self.probe_urls or expected_browser_lifecycle,
             }
         )
 
@@ -493,6 +497,9 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     pdf = canvas.Canvas(str(english_pdf), pagesize=letter)
     pdf.drawString(72, 720, "Electric potential")
     pdf.drawString(72, 690, "Electric potential is potential energy per unit charge.")
+    pdf.showPage()
+    pdf.drawString(72, 720, "Electric field")
+    pdf.drawString(72, 690, "Electric field is force per unit charge.")
     pdf.save()
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     pdf = canvas.Canvas(str(chinese_pdf), pagesize=letter)
@@ -621,16 +628,36 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     page.locator('[data-testid="my-workspace-nav"]').first.click()
     page.locator('[data-testid="personal-material-query"]').first.click()
     expect_visible(page, '[data-testid="student-concept-query-page"]', "student ConceptQuery page visible", flow)
+    expect_visible(page, '[data-testid="student-material-reader"]', "shared Student material reader visible", flow)
+    expect_visible(page, '[data-testid="student-pdf-preview"]', "authorized Personal PDF preview visible", flow)
+    expect_visible(page, '[data-testid="student-reader-page"]', "page-aware reader navigation visible", flow)
+    add_step(flow, "Personal PDF opened through authenticated Blob reader")
+    with page.expect_response(
+        lambda response: response.url.endswith(f"/api/student/concept-materials/{uploaded_source_uid}/reader?page=2"),
+        timeout=10000,
+    ):
+        page.locator('[data-testid="student-reader-next"]').click()
+    assert "electric field" in page.locator('[data-testid="student-material-chunk"]').first.inner_text().lower()
+    with page.expect_response(
+        lambda response: response.url.endswith(f"/api/student/concept-materials/{uploaded_source_uid}/reader?page=1"),
+        timeout=10000,
+    ):
+        page.locator('[data-testid="student-reader-prev"]').click()
+    add_step(flow, "page navigation kept PDF and governed selectable text synchronized")
     for source_uid, expected_scope, step_prefix in (
         (uploaded_source_uid, "PERSONAL", "Personal Workspace uploaded source"),
         ("e2e-course-en", "MANAGED_COURSE", "Managed Course"),
     ):
         if source_uid != uploaded_source_uid:
             with page.expect_response(
-                lambda response: response.url.endswith(f"/api/student/concept-materials/{source_uid}/chunks"),
+                lambda response: response.url.endswith(f"/api/student/concept-materials/{source_uid}/reader?page=1"),
                 timeout=10000,
             ):
                 page.locator('[data-testid="student-concept-material-select"]').select_option(source_uid)
+        assert page.evaluate(
+            "() => state.cache.studentMaterialReader?.source?.workspace_scope"
+        ) == expected_scope
+        add_step(flow, f"{step_prefix} entered the shared page-aware reader")
         chunk = expect_visible(
             page, '[data-testid="student-material-chunk"]',
             f"{step_prefix} English material visible", flow,
