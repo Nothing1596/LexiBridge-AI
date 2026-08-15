@@ -723,7 +723,74 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
                 timeout=10000,
             )
             add_step(flow, "Personal learning record saved with note and understanding")
+        else:
+            with page.expect_response(
+                lambda response: response.request.method == "PUT" and response.url.endswith("/personal-record"),
+                timeout=10000,
+            ):
+                page.locator('[data-testid="student-query-save"]').click()
+            add_step(flow, "Managed Course result saved to the same private notebook")
         add_step(flow, f"{step_prefix} remained private and non-official")
+
+    page.locator('[data-testid="personal-concept-notebook-nav"]').first.click()
+    expect_visible(
+        page,
+        '[data-testid="personal-concept-notebook-page"]',
+        "private concept notebook visible",
+        flow,
+    )
+    expect_visible(page, '[data-testid="notebook-summary"]', "notebook summary visible", flow)
+    assert page.locator('[data-testid="notebook-result-row"]').count() == 2
+    add_step(flow, "Personal and Managed Course results shared one private notebook")
+
+    notebook_form = page.locator('form').filter(
+        has=page.locator('[data-testid="notebook-workspace-filter"]')
+    )
+    notebook_form.locator('[data-testid="notebook-search"]').fill("electric potential")
+    notebook_form.locator('[data-testid="notebook-workspace-filter"]').select_option("PERSONAL")
+    with page.expect_response(
+        lambda response: "/api/student/personal-concept-notebook?" in response.url,
+        timeout=10000,
+    ):
+        notebook_form.locator("button").click()
+    personal_rows = page.locator('[data-testid="notebook-result-row"]')
+    assert personal_rows.count() == 1
+    assert "我的资料" in personal_rows.first.inner_text()
+    add_step(flow, "notebook search and Personal Workspace filter applied")
+
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url.endswith("/revisit"),
+        timeout=10000,
+    ):
+        personal_rows.first.click()
+    expect_visible(
+        page,
+        '[data-testid="student-concept-result"]',
+        "saved private alignment reopened",
+        flow,
+    )
+    page.wait_for_function(
+        """() => document.querySelector('[data-testid="student-query-note"]')?.value === 'Browser private learning note.'""",
+        timeout=10000,
+    )
+    assert page.evaluate(
+        "() => state.studentConceptQuery.result.personal_state.understanding_state"
+    ) == "UNDERSTOOD"
+    add_step(flow, "notebook revisit preserved note and understanding state")
+
+    notebook_form = page.locator('form').filter(
+        has=page.locator('[data-testid="notebook-workspace-filter"]')
+    )
+    notebook_form.locator('[data-testid="notebook-workspace-filter"]').select_option("MANAGED_COURSE")
+    with page.expect_response(
+        lambda response: "/api/student/personal-concept-notebook?" in response.url,
+        timeout=10000,
+    ):
+        notebook_form.locator("button").click()
+    managed_rows = page.locator('[data-testid="notebook-result-row"]')
+    assert managed_rows.count() == 1
+    assert "DEMO Signals and Systems" in managed_rows.first.inner_text()
+    add_step(flow, "notebook Managed Course filter retained private non-official result")
 
     page.evaluate("() => window.Lexi.logout()")
     page.wait_for_function("() => !document.querySelector('#userChip')?.innerText.includes('@')")
