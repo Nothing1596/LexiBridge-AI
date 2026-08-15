@@ -259,10 +259,19 @@ def retrieve_cross_language_chinese_evidence(
     source_map = evidence_retrieval._sources_for_chunks(session, source_model, chunks)
     passages = []
     allowed = []
+    evidence_filters = {
+        "language": "zh",
+        "include_needs_review": _as_bool(
+            input_data.get("filters", {}).get("include_needs_review")
+        ),
+        "include_low_quality": _as_bool(
+            input_data.get("filters", {}).get("include_low_quality")
+        ),
+    }
     for chunk in chunks:
         source = evidence_retrieval._source_for_chunk(chunk, source_map)
         if not evidence_retrieval.should_include_chunk_as_evidence(
-            chunk, {"language": "zh"}, source=source
+            chunk, evidence_filters, source=source
         ):
             continue
         source_uid = evidence_retrieval._source_uid(chunk, source)
@@ -491,8 +500,13 @@ def retrieve_bilingual_evidence(
     english_filters = dict(input_data["filters"])
     english_filters.pop("source_uids", None)
     english_source_uid = _text(english_filters.pop("english_source_uid", ""))
+    english_include_needs_review = _as_bool(
+        english_filters.pop("english_include_needs_review", False)
+    )
     if english_source_uid:
         english_filters["source_uid"] = english_source_uid
+    if english_include_needs_review:
+        english_filters["include_needs_review"] = True
     english_candidates = retrieve_english_evidence(
         session,
         chunk_model,
@@ -560,6 +574,12 @@ def retrieve_bilingual_evidence(
             candidate_risk_labels = _merge_labels(
                 candidate_risk_labels, identified.risk_labels
             )
+            if generated_candidates:
+                candidate_risk_labels = [
+                    label
+                    for label in candidate_risk_labels
+                    if label != "no_chinese_candidate_found"
+                ]
     pair_candidates: list[dict[str, Any]] = []
     qualification_result = None
     if generated_candidates and input_data["english_context"]:

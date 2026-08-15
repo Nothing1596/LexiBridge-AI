@@ -117,8 +117,12 @@ result contract and never require Instructor or Reviewer approval.
 The route calls the evidence/alignment chain directly. Provider execution is not
 part of query success. If local alignment execution is unavailable, the result
 fails closed as NOT_READY while retaining the validated English selection and
-bounded English evidence. Tests and Browser E2E use deterministic injected Task
-12 outputs and issue zero Provider or external application requests.
+bounded English evidence. Unit tests may inject a complete Task 12 result at
+the explicit server-side test seam. The main Browser E2E instead runs the
+production retrieval/candidate/pairing/qualification orchestration with
+deterministic fixed-contract model-scoring backends; it does not replace the
+alignment runner. Both modes issue zero Provider or external application
+requests.
 
 ## Migration decision
 

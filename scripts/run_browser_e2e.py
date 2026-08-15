@@ -22,7 +22,6 @@ import tempfile
 import threading
 import time
 import uuid
-from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -60,6 +59,7 @@ def build_env(database: Path, uploads: Path) -> dict[str, str]:
     env["ALLOW_MOCK_AI"] = "True"
     env["OCR_PROVIDER"] = "none"
     env["FORMULA_OCR_PROVIDER"] = "none"
+    env["FORMULA_DETECTION_MODE"] = "off"
     env.pop("DEEPSEEK_API_KEY", None)
     env.pop("OPENAI_API_KEY", None)
     env.pop("ANTHROPIC_API_KEY", None)
@@ -89,34 +89,45 @@ def run_setup(database: Path, uploads: Path, flow_name: str) -> dict[str, Any]:
     with app_module.app.app_context():
         summary = seed.seed_review_demo(app_module, reset_demo=False)
         seed_student_concept_query_demo(app_module)
-    app_module.app.config["STUDENT_ALIGNMENT_RUNNER"] = browser_fake_alignment_runner
+    app_module.app.config["STUDENT_CROSS_LANGUAGE_EMBEDDING_BACKEND"] = (
+        BrowserWorkflowEmbeddingBackend()
+    )
+    app_module.app.config["STUDENT_BILINGUAL_RERANKER_BACKEND"] = (
+        BrowserWorkflowRerankerBackend()
+    )
     return {"app_module": app_module, "summary": summary}
 
 
-def browser_fake_alignment_runner(**kwargs):
-    allowed = tuple(kwargs.get("allowed_source_uids") or ())
-    chinese_source = allowed[0] if allowed else ""
-    return SimpleNamespace(
-        english_term=kwargs["english_term"],
-        english_evidence_candidates=[{
-            "source_uid": kwargs["english_source_uid"], "chunk_uid": "browser-en-evidence",
-            "snippet": kwargs["english_context"], "page_number": 1,
-        }],
-        chinese_evidence_candidates=[{
-            "source_uid": chinese_source, "chunk_uid": "browser-zh-evidence",
-            "snippet": "电势表示单位电荷在电场中的电势能。", "page_number": 2,
-        }] if chinese_source else [],
-        chinese_term_candidates=[{
-            "candidate_uid": "browser-candidate-potential", "chinese_term": "电势",
-            "source_uid": chinese_source, "chunk_uid": "browser-zh-evidence",
-        }] if chinese_source else [],
-        selected_chinese_candidate={
-            "candidate_uid": "browser-candidate-potential", "chinese_term": "电势",
-            "source_uid": chinese_source, "chunk_uid": "browser-zh-evidence",
-        } if chinese_source else None,
-        evidence_qualification={"decision": "QUALIFIED"} if chinese_source else None,
-        risk_labels=[] if chinese_source else ["no_chinese_evidence"],
-    )
+class BrowserWorkflowEmbeddingBackend:
+    """Deterministic CI backend for the complete production alignment workflow."""
+
+    backend_id = "local_multilingual_e5_pytorch_cpu_v1"
+    model_id = "intfloat/multilingual-e5-small"
+    model_revision = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+
+    def readiness(self):
+        return type("Readiness", (), {"ready": True, "reason_code": "READY"})()
+
+    def embed_queries(self, texts):
+        return [[1.0, 0.0] for _ in texts]
+
+    def embed_passages(self, texts):
+        return [
+            [1.0, 0.0] if "电势" in text else [0.0, 1.0]
+            for text in texts
+        ]
+
+
+class BrowserWorkflowRerankerBackend:
+    backend_id = "local_bge_reranker_v2_m3_cpu_v1"
+    model_id = "BAAI/bge-reranker-v2-m3"
+    model_revision = "79c481748842b7efa0a12db59915db91731f0b93"
+
+    def readiness(self):
+        return type("Readiness", (), {"ready": True, "reason_code": "READY"})()
+
+    def score_pairs(self, pairs):
+        return [5.0 for _ in pairs]
 
 
 def seed_student_concept_query_demo(app_module: Any) -> None:
@@ -134,8 +145,6 @@ def seed_student_concept_query_demo(app_module: Any) -> None:
             created_at=app_module.current_time_text(), joined_at=app_module.current_time_text(),
         ))
     sources = [
-        dict(uid="e2e-personal-en", title="My Physics Notes", language="en", scope="personal",
-             owner=student.id, course_id=None, visibility="private", role="english_course_material"),
         dict(uid="e2e-personal-zh", title="我的中文物理参考", language="zh", scope="personal",
              owner=student.id, course_id=None, visibility="private", role="chinese_reference_material"),
         dict(uid="e2e-course-en", title="Course Electrostatics", language="en", scope="course",
@@ -156,15 +165,24 @@ def seed_student_concept_query_demo(app_module: Any) -> None:
             )
             app_module.db.session.add(source)
     app_module.db.session.flush()
-    for uid, source_uid, scope, course_id, owner in (
-        ("e2e-personal-en-chunk", "e2e-personal-en", "personal", None, student.id),
-        ("e2e-course-en-chunk", "e2e-course-en", "course", course.id, None),
+    for uid, source_uid, scope, course_id, owner, language, text in (
+        (
+            "e2e-personal-zh-chunk", "e2e-personal-zh", "personal", None,
+            student.id, "zh", "电势表示单位电荷在电场中的电势能。",
+        ),
+        (
+            "e2e-course-en-chunk", "e2e-course-en", "course", course.id,
+            None, "en", "The electric potential at a point equals potential energy per unit charge.",
+        ),
+        (
+            "e2e-course-zh-chunk", "e2e-course-zh", "course", course.id,
+            None, "zh", "电势表示单位电荷在电场中的电势能。",
+        ),
     ):
         if app_module.KnowledgeChunk.query.filter_by(chunk_uid=uid).first() is None:
-            text = "The electric potential at a point equals potential energy per unit charge."
             app_module.db.session.add(app_module.KnowledgeChunk(
                 chunk_uid=uid, source_uid=source_uid, document_id=910000 + len(uid),
-                content=text, normalized_text=text.lower(), language="en",
+                content=text, normalized_text=text.lower(), language=language,
                 scope_type=scope, course_id=course_id, course=course.name if course_id else "",
                 owner_user_id=str(owner or ""), visibility="course" if course_id else "private",
                 status="active", quality_status="qualified", page_number=1,
@@ -471,6 +489,10 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     upload_payload = upload_info.value.json()["data"]
     with app_module.app.app_context():
         app_module.run_background_job(upload_payload["job_id"], worker_id="browser-13c")
+        uploaded_source = app_module.KnowledgeSource.query.filter_by(
+            document_id=upload_payload["document_id"]
+        ).one()
+        uploaded_source_uid = uploaded_source.source_uid
     page.locator('[data-testid="my-workspace-nav"]').first.click()
     ready_material = expect_visible(
         page, '[data-testid="personal-material-item"]',
@@ -525,17 +547,19 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     assert page.locator('[data-testid="review-action-approve"]').count() == 0
     add_step(flow, "student cannot trigger review action")
 
-    page.get_by_role("button", name="概念查询 Concept Query").first.click()
+    page.locator('[data-testid="my-workspace-nav"]').first.click()
+    page.locator('[data-testid="personal-material-query"]').first.click()
     expect_visible(page, '[data-testid="student-concept-query-page"]', "student ConceptQuery page visible", flow)
     for source_uid, expected_scope, step_prefix in (
-        ("e2e-personal-en", "PERSONAL", "Personal Workspace"),
+        (uploaded_source_uid, "PERSONAL", "Personal Workspace uploaded source"),
         ("e2e-course-en", "MANAGED_COURSE", "Managed Course"),
     ):
-        with page.expect_response(
-            lambda response: response.url.endswith(f"/api/student/concept-materials/{source_uid}/chunks"),
-            timeout=10000,
-        ):
-            page.locator('[data-testid="student-concept-material-select"]').select_option(source_uid)
+        if source_uid != uploaded_source_uid:
+            with page.expect_response(
+                lambda response: response.url.endswith(f"/api/student/concept-materials/{source_uid}/chunks"),
+                timeout=10000,
+            ):
+                page.locator('[data-testid="student-concept-material-select"]').select_option(source_uid)
         chunk = expect_visible(
             page, '[data-testid="student-material-chunk"]',
             f"{step_prefix} English material visible", flow,
@@ -543,7 +567,8 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         chunk.evaluate(
             """(el, chunkUid) => {
                 const text = el.textContent;
-                const start = text.indexOf('electric potential');
+                const start = text.toLowerCase().indexOf('electric potential');
+                if (start < 0) throw new Error('fixture concept is missing');
                 const range = document.createRange();
                 range.setStart(el.firstChild, start);
                 range.setEnd(el.firstChild, start + 'electric potential'.length);
@@ -560,7 +585,7 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
             f"{step_prefix} selection captured",
             flow,
         )
-        assert "electric potential" in selection_summary.inner_text()
+        assert "electric potential" in selection_summary.inner_text().lower()
         page.locator('[data-testid="student-concept-align-action"]').click()
         result = expect_visible(
             page, '[data-testid="student-concept-result"]',
@@ -569,6 +594,10 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         assert "PRIVATE" in result.inner_text()
         assert "NON_OFFICIAL" in result.inner_text()
         assert "电势" in result.inner_text()
+        assert page.evaluate(
+            "() => window.Lexi && state.studentConceptQuery.result.source_uid"
+        ) == source_uid
+        add_step(flow, f"{step_prefix} query retained the selected source UID")
         expect_visible(page, '[data-testid="student-query-english-evidence"] .quote', f"{step_prefix} English evidence visible", flow)
         expect_visible(page, '[data-testid="student-query-chinese-evidence"] .quote', f"{step_prefix} Chinese evidence visible", flow)
         if expected_scope == "PERSONAL":
@@ -809,9 +838,10 @@ def run_reviewer_flow(
         "Reviewer queue filtered",
         flow,
     )
-    row = page.locator('[data-testid="review-card-row"]').filter(
-        has_text="Fourier transform"
-    ).first
+    fourier_uid = summary["card_uids"]["fourier"]
+    row = page.locator(
+        f'[data-testid="review-card-row"][data-card-uid="{fourier_uid}"]'
+    )
     with page.expect_response(
         lambda response: response.url.endswith("/review-case"),
         timeout=10000,
