@@ -838,9 +838,10 @@ def run_reviewer_flow(
         "Reviewer queue filtered",
         flow,
     )
-    row = page.locator('[data-testid="review-card-row"]').filter(
-        has_text="Fourier transform"
-    ).first
+    fourier_uid = summary["card_uids"]["fourier"]
+    row = page.locator(
+        f'[data-testid="review-card-row"][data-card-uid="{fourier_uid}"]'
+    )
     with page.expect_response(
         lambda response: response.url.endswith("/review-case"),
         timeout=10000,

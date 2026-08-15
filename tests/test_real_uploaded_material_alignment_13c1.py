@@ -232,6 +232,7 @@ def test_clean_native_parse_quality_adapter_does_not_hide_review_flags():
 
 def test_browser_contract_uses_uploaded_source_without_fake_alignment_runner():
     source = Path("scripts/run_browser_e2e.py").read_text(encoding="utf-8")
+    frontend = Path("frontend/index.html").read_text(encoding="utf-8")
     assert 'app_module.app.config["STUDENT_ALIGNMENT_RUNNER"]' not in source
     assert "def browser_fake_alignment_runner" not in source
     assert "STUDENT_CROSS_LANGUAGE_EMBEDDING_BACKEND" in source
@@ -239,6 +240,8 @@ def test_browser_contract_uses_uploaded_source_without_fake_alignment_runner():
     assert "uploaded_source_uid" in source
     assert "personal-material-query" in source
     assert '("e2e-personal-en", "PERSONAL"' not in source
+    assert 'summary["card_uids"]["fourier"]' in source
+    assert 'data-card-uid="${escapeHtml(card.card_uid)}"' in frontend
 
 
 def test_real_model_acceptance_runner_is_offline_sanitized_and_has_no_provider():

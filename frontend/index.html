@@ -1955,7 +1955,7 @@
       const summary = card.evidence_summary || {};
       const active = state.selectedReviewCardUid === card.card_uid ? "active" : "";
       return `
-        <button class="review-item ${active}" data-testid="review-card-row" onclick="Lexi.selectReviewCard('${escapeHtml(card.card_uid)}')">
+        <button class="review-item ${active}" data-testid="review-card-row" data-card-uid="${escapeHtml(card.card_uid)}" onclick="Lexi.selectReviewCard('${escapeHtml(card.card_uid)}')">
           <div class="between"><strong>${escapeHtml(card.english_term || "-")}</strong>${statusBadge(card.status || "needs_review")}</div>
           <div>${escapeHtml(card.chinese_term || "中文术语未填")}</div>
           <div class="muted">${escapeHtml(card.course || "-")} · ${escapeHtml(card.chapter || "-")}</div>
