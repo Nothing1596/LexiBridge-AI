@@ -550,8 +550,15 @@ def _workflow_quality_status(evidence: dict[str, Any]) -> str:
         if _text(value)
     }
     benign = {"native_text_ok", "layout_aware_chunk", "layout_applied"}
+    benign_prefixes = (
+        "layout_provider_",
+        "layout_type_",
+        "parser_backend_",
+        "parser_version_",
+    )
     has_non_benign_label = any(
-        label not in benign and not label.startswith("layout_provider_")
+        label not in benign
+        and not any(label.startswith(prefix) for prefix in benign_prefixes)
         for label in labels
     )
     if _norm(raw) == "native_text_ok" and not has_non_benign_label:

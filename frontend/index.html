@@ -1340,25 +1340,31 @@
             <strong>${escapeHtml(material.filename)}</strong>
             <span class="badge ${material.processing_status === "READY" ? "good" : material.processing_status === "FAILED" ? "bad" : "warn"}" data-testid="personal-material-status">${escapeHtml(material.processing_status)}</span>
           </div>
-          <p class="muted">PRIVATE · ${Number(material.page_count || 0)} 页 · ${Number(material.chunk_count || 0)} 个证据块</p>
+          <p class="muted">PRIVATE · ${material.material_role === "CHINESE_REFERENCE_EVIDENCE" ? "中文参考证据" : "英文课程资料"} · ${Number(material.page_count || 0)} 页 · ${Number(material.chunk_count || 0)} 个证据块</p>
+          <p class="muted">${escapeHtml(material.evidence_tier || "PERSONAL_PRIVATE")} · ${material.search_eligible ? "可检索" : "暂不可检索"} · qualification quality: ${escapeHtml(material.qualification_quality_status || "unknown")}</p>
           <p class="muted">${escapeHtml(material.parser_id || "pending")} ${escapeHtml(material.parser_version || "")}</p>
           <div class="row">
-            ${material.processing_status === "READY" && material.source_uid ? `<button class="small" data-testid="personal-material-query" onclick="Lexi.openPersonalMaterialQuery('${escapeHtml(material.source_uid)}')">选词学习</button>` : ""}
+            ${material.processing_status === "READY" && material.source_uid && material.material_role === "ENGLISH_COURSE_MATERIAL" ? `<button class="small" data-testid="personal-material-query" onclick="Lexi.openPersonalMaterialQuery('${escapeHtml(material.source_uid)}')">选词学习</button>` : ""}
             <button class="small danger" data-testid="personal-material-delete" onclick="Lexi.deletePersonalMaterial(${Number(material.material_id)})">删除资料</button>
           </div>
         </article>
       `).join("") || `<div class="card" data-testid="personal-material-empty"><p class="muted">还没有个人资料。上传一份英文课程 PDF 开始学习。</p></div>`;
+      const chineseEvidence = materials.filter(material => material.material_role === "CHINESE_REFERENCE_EVIDENCE");
+      const eligibleChineseEvidence = chineseEvidence.filter(material => material.processing_status === "READY" && material.search_eligible);
       return pageShell("我的学习空间", "你上传的资料仅供本人使用，不进入课程知识库或 Reviewer 队列。", `
         <section data-testid="student-personal-workspace">
           <form class="card form-grid" data-testid="personal-material-upload-form" onsubmit="Lexi.uploadDocument(event, 'personal')">
             <input type="hidden" name="language" value="en" />
             <input type="hidden" name="source_type" value="student_upload" />
-            <input type="hidden" name="personal_workspace_contract" value="13C" />
-            <div class="full"><label>英文课程 PDF</label><input name="file" type="file" accept=".pdf,application/pdf" required /></div>
+            <input type="hidden" name="personal_workspace_contract" value="13C2" />
+            <div><label>资料用途</label><select name="personal_material_role" required><option value="ENGLISH_COURSE_MATERIAL">英文课程资料</option><option value="CHINESE_REFERENCE_EVIDENCE">中文参考证据</option></select></div>
+            <div class="full"><label>PDF 资料</label><input name="file" type="file" accept=".pdf,application/pdf" required /></div>
             <div><label>学科（可选）</label><input name="discipline" maxlength="120" /></div>
             <div><label>章节（可选）</label><input name="chapter" maxlength="160" /></div>
+            <label class="full"><input name="usage_rights_confirmed" type="checkbox" value="true" required /> 我确认有权在自己的私人学习空间中使用此资料。</label>
             <button data-testid="personal-material-upload">上传并建立私人证据空间</button>
           </form>
+          <div class="notice" data-testid="personal-evidence-corpus-status">个人中文证据：${eligibleChineseEvidence.length} 份可检索 / ${chineseEvidence.length} 份已上传。检索不会访问其他学生或其他课程的私人资料。</div>
           <div class="notice">仅支持 PDF。系统保留页码、区块和文本跨度来源；不会翻译整篇资料，也不会把资料分享给教师或 Reviewer。</div>
           <div class="stack" data-testid="personal-material-list">${rows}</div>
         </section>
@@ -3608,6 +3614,12 @@
 	        event.preventDefault();
 	        const form = new FormData(event.target);
 	        form.set("scope_type", scopeType);
+	        if (scopeType === "personal") {
+	          const role = String(form.get("personal_material_role") || "ENGLISH_COURSE_MATERIAL");
+	          form.set("language", role === "CHINESE_REFERENCE_EVIDENCE" ? "zh" : "en");
+	          form.set("source_type", "student_upload");
+	          form.set("personal_workspace_contract", "13C2");
+	        }
 	        if (scopeType === "course") {
 	          const language = String(form.get("language") || "en").toLowerCase();
 	          form.set("source_type", form.get("source_type") || "teacher_courseware");

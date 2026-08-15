@@ -77,24 +77,49 @@ def _login(client, summary: dict) -> str:
     return str(response.get_json()["token"])
 
 
-def _upload(client, app_module, token: str, filename: str, language: str, lines: tuple[str, ...]):
+def _upload(
+    client,
+    app_module,
+    token: str,
+    filename: str,
+    language: str,
+    lines: tuple[str, ...],
+    *,
+    personal_workspace_contract: str = "13C",
+):
+    material_role = (
+        "CHINESE_REFERENCE_EVIDENCE"
+        if language == "zh"
+        else "ENGLISH_COURSE_MATERIAL"
+    )
+    upload_data = {
+        "scope_type": "personal",
+        "language": language,
+        "source_type": "student_upload",
+        "personal_workspace_contract": personal_workspace_contract,
+        "file": (io.BytesIO(_pdf_bytes(lines)), filename),
+    }
+    if personal_workspace_contract == "13C2":
+        upload_data.update(
+            {
+                "personal_material_role": material_role,
+                "usage_rights_confirmed": "true",
+            }
+        )
     response = client.post(
         "/api/documents/upload",
         headers={"Authorization": f"Bearer {token}"},
-        data={
-            "scope_type": "personal",
-            "language": language,
-            "source_type": "student_upload",
-            "personal_workspace_contract": "13C",
-            "file": (io.BytesIO(_pdf_bytes(lines)), filename),
-        },
+        data=upload_data,
         content_type="multipart/form-data",
     )
     if response.status_code != 200:
         raise RuntimeError(f"upload failed safely: {response.status_code}")
     payload = response.get_json()["data"]
     with app_module.app.app_context():
-        app_module.run_background_job(payload["job_id"], worker_id="acceptance-13c1")
+        app_module.run_background_job(
+            payload["job_id"],
+            worker_id=f"acceptance-{personal_workspace_contract.lower()}",
+        )
         source = app_module.KnowledgeSource.query.filter_by(
             document_id=payload["document_id"]
         ).one()
@@ -107,10 +132,33 @@ def _upload(client, app_module, token: str, filename: str, language: str, lines:
             "document_id": payload["document_id"],
             "source_uid": source.source_uid,
             "chunks": [(chunk.chunk_uid, chunk.content) for chunk in chunks],
+            "admission": {
+                "material_role": material_role,
+                "source_role": source.source_role,
+                "language": source.language,
+                "scope_type": source.scope_type,
+                "visibility": source.visibility,
+                "trust_level": source.trust_level,
+                "authorization_status": source.authorization_status,
+                "license_status": source.license_status,
+                "license_attestation_recorded": bool(source.license_note),
+                "allow_student_search": bool(source.allow_student_search),
+                "allow_derivative_cards": bool(source.allow_derivative_cards),
+                "quality_status": source.quality_status,
+                "qualification_quality_status": (
+                    app_module.student_concept_query_service.qualification_quality_status(
+                        source
+                    )
+                ),
+            },
         }
 
 
-def run(model_cache_dir: Path) -> dict:
+def run(
+    model_cache_dir: Path, *, personal_workspace_contract: str = "13C"
+) -> dict:
+    if personal_workspace_contract not in {"13C", "13C2"}:
+        raise RuntimeError("unsupported personal workspace contract")
     model_cache_dir = model_cache_dir.expanduser().resolve()
     if ROOT == model_cache_dir or ROOT in model_cache_dir.parents:
         raise RuntimeError("model cache must remain outside the repository")
@@ -171,6 +219,7 @@ def run(model_cache_dir: Path) -> dict:
             "synthetic-governed-chinese.pdf",
             "zh",
             ("电势", "电势表示单位电荷在电场中的电势能。"),
+            personal_workspace_contract=personal_workspace_contract,
         )
         english = _upload(
             client,
@@ -182,6 +231,7 @@ def run(model_cache_dir: Path) -> dict:
                 "Electric potential",
                 "Electric potential is potential energy per unit charge.",
             ),
+            personal_workspace_contract=personal_workspace_contract,
         )
         chunk_uid, content = next(
             item for item in english["chunks"] if "electric potential" in item[1].casefold()
@@ -193,7 +243,9 @@ def run(model_cache_dir: Path) -> dict:
             "/api/student/concept-queries",
             headers={
                 "Authorization": f"Bearer {token}",
-                "Idempotency-Key": "real-model-uploaded-source-13c1",
+                "Idempotency-Key": (
+                    f"real-model-uploaded-source-{personal_workspace_contract.lower()}"
+                ),
             },
             json={
                 "workspace_scope": "PERSONAL",
@@ -234,8 +286,13 @@ def run(model_cache_dir: Path) -> dict:
             ).one()
             raw_result = json.loads(query_record.result_json or "{}")
         qualification = dict(raw_result.get("qualification") or {})
+        contract_id = (
+            "personal-chinese-evidence-corpus-13c2@1.0.0"
+            if personal_workspace_contract == "13C2"
+            else "real-uploaded-student-alignment-13c1@1.0.0"
+        )
         return {
-            "contract_id": "real-uploaded-student-alignment-13c1@1.0.0",
+            "contract_id": contract_id,
             "status": "PASS",
             "environment": "synthetic-local-offline-real-model",
             "model": {
@@ -256,6 +313,9 @@ def run(model_cache_dir: Path) -> dict:
                 for value in qualification.get("reason_codes", [])
                 if str(value).strip()
             ),
+            "evidence_scope": dict(result.get("evidence_scope") or {}),
+            "english_source_admission": english["admission"],
+            "chinese_source_admission": chinese["admission"],
             "risk_labels": sorted(
                 str(value)
                 for value in raw_result.get("risk_labels", [])
@@ -281,9 +341,17 @@ def run(model_cache_dir: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-cache-dir", required=True)
+    parser.add_argument(
+        "--personal-workspace-contract",
+        choices=("13C", "13C2"),
+        default="13C",
+    )
     parser.add_argument("--output")
     args = parser.parse_args(argv)
-    result = run(Path(args.model_cache_dir))
+    result = run(
+        Path(args.model_cache_dir),
+        personal_workspace_contract=args.personal_workspace_contract,
+    )
     rendered = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.output:
         Path(args.output).write_text(rendered, encoding="utf-8")

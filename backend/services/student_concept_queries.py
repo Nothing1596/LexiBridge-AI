@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from services import student_first_boundaries
+from services import bilingual_evidence_qualification, student_first_boundaries
 
 
 CONTRACT_VERSION = "student-concept-query@1.0.0"
@@ -44,6 +44,72 @@ class EvidenceScope:
     workspace_scope: str
     allowed_source_uids: tuple[str, ...]
     platform_governed_included: bool
+    evidence_tier: str = "NONE"
+
+
+PERSONAL_MATERIAL_ROLES = {
+    "ENGLISH_COURSE_MATERIAL": "en",
+    "CHINESE_REFERENCE_EVIDENCE": "zh",
+}
+
+
+def validate_personal_material_upload(
+    *, material_role: Any, language: Any, rights_confirmed: Any
+) -> dict[str, str]:
+    role = _text(material_role).upper()
+    if role not in PERSONAL_MATERIAL_ROLES:
+        raise StudentConceptQueryError(
+            "PERSONAL_MATERIAL_ROLE_INVALID",
+            "Personal material role is invalid.",
+        )
+    expected_language = PERSONAL_MATERIAL_ROLES[role]
+    submitted_language = _text(language).lower()
+    if submitted_language and submitted_language != expected_language:
+        raise StudentConceptQueryError(
+            "PERSONAL_MATERIAL_LANGUAGE_ROLE_MISMATCH",
+            "Personal material language does not match its evidence role.",
+        )
+    confirmed = rights_confirmed is True or _text(rights_confirmed).lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not confirmed:
+        raise StudentConceptQueryError(
+            "PERSONAL_MATERIAL_RIGHTS_ATTESTATION_REQUIRED",
+            "Confirm that you may use this material in your private workspace.",
+        )
+    return {
+        "material_role": role,
+        "language": expected_language,
+        "license_note": "student_attested_private_use",
+    }
+
+
+def personal_material_role(source: Any = None, *, language: Any = "") -> str:
+    normalized_language = _text(_field(source, "language", language)).lower()
+    source_role = _text(_field(source, "source_role")).lower()
+    if normalized_language == "zh" or source_role == "chinese_reference_material":
+        return "CHINESE_REFERENCE_EVIDENCE"
+    return "ENGLISH_COURSE_MATERIAL"
+
+
+def qualification_quality_status(source: Any) -> str:
+    raw = _text(_field(source, "quality_status")).lower()
+    flags_value = _field(source, "quality_flags", [])
+    if isinstance(flags_value, str):
+        try:
+            flags_value = json.loads(flags_value)
+        except (TypeError, ValueError):
+            flags_value = []
+    adapted = bilingual_evidence_qualification._workflow_quality_status(
+        {
+            "quality_status": raw,
+            "quality_flags": list(flags_value or []),
+        }
+    )
+    return adapted or "unknown"
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -56,8 +122,14 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _source_is_governed(source: Any) -> bool:
-    if _text(_field(source, "language")).lower() not in {"zh", "chinese"}:
+def source_search_eligible(source: Any, *, expected_language: Any = "") -> bool:
+    expected = _text(expected_language).lower()
+    language = _text(_field(source, "language")).lower()
+    expected_languages = {
+        "en": {"en", "english"},
+        "zh": {"zh", "chinese"},
+    }.get(expected, {expected})
+    if expected and language not in expected_languages:
         return False
     if _text(_field(source, "status", "active")).lower() != "active":
         return False
@@ -74,6 +146,12 @@ def _source_is_governed(source: Any) -> bool:
     } and license_status not in {
         "", "unknown", "blocked", "rejected",
     }
+
+
+def _source_is_governed(source: Any) -> bool:
+    if _text(_field(source, "language")).lower() not in {"zh", "chinese"}:
+        return False
+    return source_search_eligible(source, expected_language="zh")
 
 
 def validate_selection(
@@ -164,6 +242,8 @@ def resolve_evidence_scope(
             "STUDENT_CONCEPT_WORKSPACE_INVALID", "Workspace scope is invalid."
         )
     allowed: list[str] = []
+    personal_or_course_count = 0
+    platform_count = 0
     platform_included = False
     for source in sources:
         if not _source_is_governed(source):
@@ -192,13 +272,34 @@ def resolve_evidence_scope(
             uid = _text(_field(source, "source_uid"))
             if uid:
                 allowed.append(uid)
+                if is_platform:
+                    platform_count += 1
+                else:
+                    personal_or_course_count += 1
     allowed_uids = tuple(sorted(set(allowed)))
     scope_material = f"{scope}:{student_id}:{course_id or ''}:{','.join(allowed_uids)}"
+    if scope == "PERSONAL" and personal_or_course_count:
+        evidence_tier = (
+            "PERSONAL_PRIVATE_WITH_PLATFORM_FALLBACK"
+            if platform_count
+            else "PERSONAL_PRIVATE"
+        )
+    elif scope == "MANAGED_COURSE" and personal_or_course_count:
+        evidence_tier = (
+            "MANAGED_COURSE_WITH_PLATFORM_FALLBACK"
+            if platform_count
+            else "MANAGED_COURSE"
+        )
+    elif platform_count:
+        evidence_tier = "PLATFORM_GOVERNED"
+    else:
+        evidence_tier = "NONE"
     return EvidenceScope(
         scope_id=hashlib.sha256(scope_material.encode()).hexdigest()[:24],
         workspace_scope=scope,
         allowed_source_uids=allowed_uids,
         platform_governed_included=platform_included,
+        evidence_tier=evidence_tier,
     )
 
 
@@ -211,6 +312,31 @@ def alignment_status_from_qualification(qualification: Any) -> str:
     if decision == "REVIEW_REQUIRED":
         return "REVIEW_REQUIRED"
     return "NOT_READY"
+
+
+def finalize_student_alignment_risks(
+    risks: Any, *, qualification: Any, selected_candidate: Any
+) -> list[str]:
+    """Remove stale pre-pairing labels only in the Student read model."""
+    labels = list(dict.fromkeys(_text(value) for value in risks or [] if _text(value)))
+    selected_text = _text(
+        _field(selected_candidate, "text")
+        or _field(selected_candidate, "chinese_term")
+    )
+    if selected_text:
+        labels = [label for label in labels if label != "missing_chinese_term"]
+    decision = _text(
+        qualification.get("decision")
+        if isinstance(qualification, dict)
+        else qualification
+    ).upper()
+    if decision == "QUALIFIED":
+        stale = {
+            "bilingual_alignment_not_verified",
+            "candidate_not_alignment_verified",
+        }
+        labels = [label for label in labels if label not in stale]
+    return labels
 
 
 def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -226,6 +352,7 @@ def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
         "chinese_evidence": result.get("chinese_evidence", []),
         "chinese_candidates": result.get("chinese_candidates", []),
         "generated_hints": result.get("generated_hints", []),
+        "evidence_scope": result.get("evidence_scope", {}),
     }
     base = student_first_boundaries.serialize_student_alignment_result(raw)
     recommended = None
@@ -261,6 +388,7 @@ def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
         "student_risk_summary": student_risk_summaries[status],
         "evidence_complete": bool(base["english_evidence"] and base["chinese_evidence"]),
         "generated_hint_present": bool(base["generated_hints"]),
+        "evidence_scope": dict(result.get("evidence_scope") or {}),
         "personal_state": dict(result.get("personal_state") or {}),
         "created_at": _text(result.get("created_at")),
         "updated_at": _text(result.get("updated_at")),
@@ -317,6 +445,11 @@ def build_raw_alignment_result(
     chinese_evidence = [
         dict(item) for item in getattr(workflow_result, "chinese_evidence_candidates", []) or []
     ]
+    risk_labels = finalize_student_alignment_risks(
+        getattr(workflow_result, "risk_labels", []) or [],
+        qualification=qualification,
+        selected_candidate=selected,
+    )
     return {
         "query_uid": query_uid,
         "result_uid": result_uid,
@@ -333,7 +466,7 @@ def build_raw_alignment_result(
         "chinese_candidates": candidates,
         "selected_candidate": selected,
         "qualification": qualification,
-        "risk_labels": list(getattr(workflow_result, "risk_labels", []) or []),
+        "risk_labels": risk_labels,
         "generated_hints": [],
         "created_at": created_at,
         "updated_at": created_at,

@@ -16,15 +16,20 @@ FORMULA_SYMBOLS = (
     "[", "]"
 )
 
+# Page/slide markers are parser provenance, not source mathematics.  The old
+# detector treated the brackets in ``[Page 1]`` as a formula signal, which
+# marked every otherwise clean PDF as requiring formula OCR.
+_PARSER_LOCATION_LINE = re.compile(
+    r"^\s*\[(?:page|slide)\s+\d+\]\s*$", re.IGNORECASE | re.MULTILINE
+)
 FORMULA_WORDS = {
     "frac", "sqrt", "int", "sum", "lim", "sin", "cos", "tan", "log", "ln",
     "exp", "theta", "lambda", "omega", "alpha", "beta", "gamma", "sigma",
     "pi", "mu", "delta"
 }
 
-
 def contains_formula_text(text):
-    text = str(text or "")
+    text = _PARSER_LOCATION_LINE.sub("", str(text or ""))
     if any(symbol in text for symbol in FORMULA_SYMBOLS):
         return True
     tokens = re.findall(r"[A-Za-z]+", text.lower())

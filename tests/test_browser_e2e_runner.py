@@ -149,6 +149,39 @@ def test_artifact_path_fixture_is_outside_git_workspace(tmp_path):
     assert not str(artifact_dir.resolve()).startswith(str(ROOT.resolve()))
 
 
+def test_wait_text_contains_synchronizes_async_browser_content():
+    module = load_runner_module()
+
+    class FakeLocator:
+        def inner_text(self):
+            return "个人中文证据：1 份可检索 / 1 份已上传。"
+
+    class FakePage:
+        def __init__(self):
+            self.wait_call = None
+
+        def wait_for_function(self, script, *, arg, timeout):
+            self.wait_call = {"script": script, "arg": arg, "timeout": timeout}
+
+        def locator(self, selector):
+            assert selector == '[data-testid="personal-evidence-corpus-status"]'
+            return FakeLocator()
+
+    page = FakePage()
+    locator = module.wait_text_contains(
+        page,
+        '[data-testid="personal-evidence-corpus-status"]',
+        "1 份可检索",
+    )
+
+    assert locator.inner_text().startswith("个人中文证据")
+    assert page.wait_call["arg"] == [
+        '[data-testid="personal-evidence-corpus-status"]',
+        "1 份可检索",
+    ]
+    assert page.wait_call["timeout"] == 10000
+
+
 def test_readiness_e2e_summary_maps_json_fields():
     readiness = load_readiness_module()
     summary = readiness.summarize_browser_e2e_result(

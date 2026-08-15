@@ -188,6 +188,7 @@ from services import bilingual_evidence_workflow as bilingual_evidence_service
 from services import cross_language_retrieval as cross_language_retrieval_service
 from services import bilingual_semantic_pairing as bilingual_semantic_pairing_service
 from services import local_bilingual_reranker as bilingual_reranker_service
+from services import student_concept_queries as student_concept_query_service
 from services import concept_card_drafts as concept_card_draft_service
 from services import chinese_term_candidates as chinese_term_candidate_service
 from services import alignment_verification as alignment_verification_service
@@ -7239,6 +7240,7 @@ def process_document_ingestion_job(job):
         knowledge_base_type="student_personal_kb" if document.scope_type == "personal" else ("en_course_kb" if document.language == "en" else "zh_course_kb"),
         visibility=visibility_for_scope(document.scope_type),
         content_hash=getattr(document, "sha256", "") or getattr(document, "file_sha256", ""),
+        license_note=str(data.get("license_note", "")).strip(),
         extra_quality_flags=document_flags,
     )
     governed_ingestion = knowledge_ingestion_service.ingest_parse_record_to_governed_knowledge(
@@ -9301,7 +9303,7 @@ def create_or_update_knowledge_source_for_version(document, kb_version, creator=
     quality_status = getattr(parse_record, "quality_status", "") if parse_record else ""
     quality_flags = safe_json_loads(getattr(parse_record, "quality_flags", "[]") if parse_record else getattr(document, "quality_flags_json", "[]"), [])
     course_obj = db.session.get(Course, document.course_id) if document.course_id else None
-    source_role = "student_private_material" if scope_type == "personal" else ("english_course_material" if document.language == "en" else "chinese_reference_material")
+    source_role = governed_source_role(document.language, scope_type)
     trust_level = "low_quality" if quality_status in (knowledge_governance_service.REVIEW_PARSE_STATUSES | knowledge_governance_service.BLOCKED_PARSE_STATUSES) else ("student_uploaded" if scope_type == "personal" else "teacher_verified")
     governance_status = "blocked" if quality_status in knowledge_governance_service.BLOCKED_PARSE_STATUSES else ("needs_review" if quality_status in knowledge_governance_service.REVIEW_PARSE_STATUSES else "active")
     if source is None:
@@ -9840,7 +9842,7 @@ def create_knowledge_source_for_document(document, creator, discipline="", sourc
     quality_status = getattr(parse_record, "quality_status", "") if parse_record else ""
     quality_flags = safe_json_loads(getattr(parse_record, "quality_flags", "[]") if parse_record else getattr(document, "quality_flags_json", "[]"), [])
     course_obj = db.session.get(Course, document.course_id) if document.course_id else None
-    source_role = "student_private_material" if document.scope_type == "personal" else ("english_course_material" if document.language == "en" else "chinese_reference_material")
+    source_role = governed_source_role(document.language, document.scope_type)
     trust_level = "low_quality" if quality_status in (knowledge_governance_service.REVIEW_PARSE_STATUSES | knowledge_governance_service.BLOCKED_PARSE_STATUSES) else ("student_uploaded" if document.scope_type == "personal" else "teacher_verified")
     governance_status = "blocked" if quality_status in knowledge_governance_service.BLOCKED_PARSE_STATUSES else ("needs_review" if quality_status in knowledge_governance_service.REVIEW_PARSE_STATUSES else "active")
     source = KnowledgeSource(
@@ -10622,10 +10624,11 @@ def upload_document():
     personal_workspace_contract = str(
         request.form.get("personal_workspace_contract", "")
     ).strip()
+    personal_material_contract = None
     if (
         user.role == "student"
         and scope_type == "personal"
-        and personal_workspace_contract == "13C"
+        and personal_workspace_contract in {"13C", "13C2"}
         and upload_extension != "pdf"
     ):
         return api_error_with_audit_context(
@@ -10635,6 +10638,28 @@ def upload_document():
             audit_context,
             {"supported_types": ["pdf"]},
         )
+    if (
+        user.role == "student"
+        and scope_type == "personal"
+        and personal_workspace_contract == "13C2"
+    ):
+        try:
+            personal_material_contract = (
+                student_concept_query_service.validate_personal_material_upload(
+                    material_role=request.form.get("personal_material_role", ""),
+                    language=request.form.get("language", ""),
+                    rights_confirmed=request.form.get(
+                        "usage_rights_confirmed", ""
+                    ),
+                )
+            )
+        except student_concept_query_service.StudentConceptQueryError as exc:
+            return api_error_with_audit_context(
+                exc.reason_code,
+                str(exc),
+                400,
+                audit_context,
+            )
 
     course = get_course_by_id_or_name(
         request.form.get("course_id", "").strip(),
@@ -10712,6 +10737,11 @@ def upload_document():
     file_hash = storage_meta["sha256"]
 
     now = current_time_text()
+    material_language = (
+        personal_material_contract["language"]
+        if personal_material_contract is not None
+        else str(request.form.get("language", "en")).strip() or "en"
+    )
     document = Document(
         owner_user_id=user.id,
         course_id=course.id if course else None,
@@ -10726,7 +10756,7 @@ def upload_document():
         size_bytes=storage_meta["size_bytes"],
         sha256=file_hash,
         file_type=ext,
-        language=str(request.form.get("language", "en")).strip() or "en",
+        language=material_language,
         upload_time=now,
         parsing_status="processing" if sync_requested else "queued",
         ocr_required=False,
@@ -10791,6 +10821,16 @@ def upload_document():
                 "discipline": str(request.form.get("discipline", "")).strip(),
                 "source_name": str(request.form.get("source_name", "")).strip(),
                 "chapter": str(request.form.get("chapter", "")).strip(),
+                "personal_material_role": (
+                    personal_material_contract["material_role"]
+                    if personal_material_contract is not None
+                    else ""
+                ),
+                "license_note": (
+                    personal_material_contract["license_note"]
+                    if personal_material_contract is not None
+                    else ""
+                ),
                 "ingestion_job_id": job.id,
             }
         )
@@ -10945,6 +10985,11 @@ def upload_document():
             knowledge_base_type="student_personal_kb" if scope_type == "personal" else ("en_course_kb" if document.language == "en" else "zh_course_kb"),
             visibility=visibility_for_scope(scope_type),
             content_hash=getattr(document, "sha256", "") or getattr(document, "file_sha256", ""),
+            license_note=(
+                personal_material_contract["license_note"]
+                if personal_material_contract is not None
+                else ""
+            ),
             extra_quality_flags=document_flags,
         )
         governed_ingestion = knowledge_ingestion_service.ingest_parse_record_to_governed_knowledge(
@@ -11121,6 +11166,9 @@ def serialize_personal_material(document):
         if source is not None
         else 0
     )
+    material_role = student_concept_query_service.personal_material_role(
+        source, language=document.language
+    )
     return {
         "material_id": document.id,
         "owner_id": document.owner_user_id,
@@ -11133,6 +11181,19 @@ def serialize_personal_material(document):
         "lifecycle_status": "DELETED" if document.deleted_at else "ACTIVE",
         "visibility": "PRIVATE",
         "language": document.language,
+        "material_role": material_role,
+        "evidence_tier": "PERSONAL_PRIVATE",
+        "search_eligible": bool(
+            source is not None
+            and student_concept_query_service.source_search_eligible(
+                source, expected_language=document.language
+            )
+        ),
+        "qualification_quality_status": (
+            student_concept_query_service.qualification_quality_status(source)
+            if source is not None
+            else "unknown"
+        ),
         "page_count": int(getattr(parse_record, "page_count", 0) or 0),
         "chunk_count": chunk_count,
         "source_uid": getattr(source, "source_uid", ""),
@@ -13801,8 +13862,6 @@ def normalize_governed_source_type(value, scope_type="course"):
 
 
 def governed_source_role(language, scope_type="course"):
-    if scope_type == "personal":
-        return "student_private_material"
     if language == "en":
         return "english_course_material"
     if language == "zh":
