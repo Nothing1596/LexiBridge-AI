@@ -459,6 +459,19 @@ def wait_text_change(page, selector: str, previous: str) -> None:
     )
 
 
+def wait_text_contains(page, selector: str, expected: str, timeout: int = 10000):
+    """Wait for async rendering to replace cached text before asserting it."""
+    page.wait_for_function(
+        """([selector, expected]) => {
+            const el = document.querySelector(selector);
+            return el && el.innerText.includes(expected);
+        }""",
+        arg=[selector, expected],
+        timeout=timeout,
+    )
+    return page.locator(selector)
+
+
 def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture, app_module: Any) -> None:
     student = summary["users"]["student"]
     open_frontend(page, capture.port, flow)
@@ -513,13 +526,17 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         assert chinese_source.visibility == "private"
         assert chinese_source.allow_student_search is True
     page.locator('[data-testid="my-workspace-nav"]').first.click()
-    corpus_status = expect_visible(
+    expect_visible(
         page,
         '[data-testid="personal-evidence-corpus-status"]',
         "personal Chinese evidence corpus visible",
         flow,
     )
-    assert "1 份可检索" in corpus_status.inner_text()
+    wait_text_contains(
+        page,
+        '[data-testid="personal-evidence-corpus-status"]',
+        "1 份可检索",
+    )
     chinese_row = page.locator('[data-testid="personal-material-item"]').filter(
         has_text="synthetic-personal-chinese-evidence.pdf"
     )
