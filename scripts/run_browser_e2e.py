@@ -60,9 +60,10 @@ def build_env(database: Path, uploads: Path) -> dict[str, str]:
     env["OCR_PROVIDER"] = "none"
     env["FORMULA_OCR_PROVIDER"] = "none"
     env["FORMULA_DETECTION_MODE"] = "off"
-    env.pop("DEEPSEEK_API_KEY", None)
-    env.pop("OPENAI_API_KEY", None)
-    env.pop("ANTHROPIC_API_KEY", None)
+    env["LEXIBRIDGE_SKIP_ENV_FILE"] = "true"
+    env["DEEPSEEK_API_KEY"] = ""
+    env["OPENAI_API_KEY"] = ""
+    env["ANTHROPIC_API_KEY"] = ""
     return env
 
 
@@ -95,6 +96,9 @@ def run_setup(database: Path, uploads: Path, flow_name: str) -> dict[str, Any]:
     app_module.app.config["STUDENT_BILINGUAL_RERANKER_BACKEND"] = (
         BrowserWorkflowRerankerBackend()
     )
+    # This validates the synthetic pilot contract only; it is not human-study
+    # evidence and must never be reported as real-participant validation.
+    app_module.app.config["STUDENT_REAL_PILOT_ENABLED"] = True
     return {"app_module": app_module, "summary": summary}
 
 
@@ -509,6 +513,26 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     pdf.save()
     page.locator('[data-testid="my-workspace-nav"]').first.click()
     expect_visible(page, '[data-testid="student-personal-workspace"]', "My Workspace visible", flow)
+    expect_visible(
+        page,
+        '[data-testid="student-pilot-panel"]',
+        "optional consent-first student pilot panel visible",
+        flow,
+    )
+    page.locator('[data-testid="student-pilot-consent"]').check()
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url.endswith("/api/student/pilot/enrollment"),
+        timeout=10000,
+    ):
+        page.locator('[data-testid="student-pilot-enroll"]').click()
+    expect_visible(page, '[data-testid="student-pilot-consented"]', "pilot consent recorded", flow)
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url.endswith("/api/student/pilot/sessions"),
+        timeout=10000,
+    ):
+        page.locator('[data-testid="student-pilot-start"]').click()
+    expect_visible(page, '[data-testid="student-pilot-active"]', "synthetic pilot session started", flow)
+    add_step(flow, "synthetic pilot contract recorded explicit optional consent")
 
     upload_form = page.locator('[data-testid="personal-material-upload-form"]')
     upload_form.locator('select[name="personal_material_role"]').select_option(
@@ -820,6 +844,34 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         "() => state.studentConceptQuery.result.personal_state.understanding_state"
     ) == "UNDERSTOOD"
     add_step(flow, "notebook revisit preserved note and understanding state")
+
+    with page.expect_response(
+        lambda response: response.request.method == "PUT" and response.url.endswith("/complete"),
+        timeout=10000,
+    ):
+        page.locator('[data-testid="student-pilot-complete"]').click()
+    expect_visible(page, '[data-testid="student-pilot-survey"]', "bounded pilot survey visible", flow)
+    survey = page.locator('[data-testid="student-pilot-survey"]')
+    survey.locator('input[name="helpfulness"]').fill("5")
+    survey.locator('input[name="evidence_helpfulness"]').fill("5")
+    survey.locator('input[name="uncertainty_understanding"]').fill("4")
+    survey.locator('input[name="task_difficulty"]').fill("2")
+    survey.locator('input[name="would_use_again"]').check()
+    with page.expect_response(
+        lambda response: response.request.method == "PUT" and response.url.endswith("/survey"),
+        timeout=10000,
+    ):
+        survey.locator('[data-testid="student-pilot-survey-submit"]').click()
+    expect_visible(
+        page,
+        '[data-testid="student-pilot-survey-complete"]',
+        "synthetic pilot survey recorded without content telemetry",
+        flow,
+    )
+    add_step(flow, "synthetic pilot contract completed without claiming real participants")
+
+    page.locator('[data-testid="personal-concept-notebook-nav"]').first.click()
+    expect_visible(page, '[data-testid="personal-concept-notebook-page"]', "notebook reopened after pilot survey", flow)
 
     notebook_form = page.locator('form').filter(
         has=page.locator('[data-testid="notebook-workspace-filter"]')

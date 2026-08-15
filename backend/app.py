@@ -231,6 +231,7 @@ from routes.student_concept_queries import (
     StudentConceptQueryModels,
     register_student_concept_query_routes,
 )
+from routes.student_pilot import StudentPilotModels, register_student_pilot_routes
 from routes.teacher_learning_analytics import TeacherLearningAnalyticsModels, register_teacher_learning_analytics_routes
 
 
@@ -273,8 +274,9 @@ def load_env_file(path):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
-load_env_file(os.path.join(PROJECT_ROOT, ".env"))
-load_env_file(os.path.join(BASE_DIR, ".env"))
+if os.environ.get("LEXIBRIDGE_SKIP_ENV_FILE", "false").strip().lower() != "true":
+    load_env_file(os.path.join(PROJECT_ROOT, ".env"))
+    load_env_file(os.path.join(BASE_DIR, ".env"))
 logging_config_service.configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
 
 app = Flask(__name__)
@@ -308,6 +310,9 @@ else:
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + DATABASE_PATH
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "lexibridge-local-dev-secret")
+app.config["STUDENT_REAL_PILOT_ENABLED"] = (
+    os.environ.get("STUDENT_REAL_PILOT_ENABLED", "false").strip().lower() == "true"
+)
 if not DATABASE_ENGINE:
     DATABASE_ENGINE = "sqlite" if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite") else "postgresql"
 
@@ -1915,6 +1920,84 @@ class PersonalLearningRecord(db.Model):
     __table_args__ = (
         db.UniqueConstraint("student_id", "result_uid", name="uq_personal_learning_record_student_result"),
     )
+
+
+class StudentPilotEnrollment(db.Model):
+    """Explicit, versioned opt-in for the optional Personal Workspace pilot."""
+    __tablename__ = "student_pilot_enrollment"
+
+    id = db.Column(db.Integer, primary_key=True)
+    enrollment_uid = db.Column(db.String(64), unique=True, nullable=False)
+    student_id = db.Column(db.Integer, nullable=False)
+    pilot_id = db.Column(db.String(120), nullable=False)
+    consent_version = db.Column(db.String(120), nullable=False)
+    consent_status = db.Column(db.String(40), nullable=False, default="CONSENTED")
+    eligibility_attested = db.Column(db.Boolean, nullable=False, default=False)
+    enrollment_request_id = db.Column(db.String(120), default="")
+    withdrawal_request_id = db.Column(db.String(120), default="")
+    consented_at = db.Column(db.String(40), default="")
+    withdrawn_at = db.Column(db.String(40), default="")
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.String(40), default="")
+    updated_at = db.Column(db.String(40), default="")
+
+    __table_args__ = (
+        db.UniqueConstraint("student_id", "pilot_id", name="uq_student_pilot_enrollment_student_pilot"),
+    )
+
+
+class StudentPilotSession(db.Model):
+    """Derived task metrics only; never stores a query UID or learning content."""
+    __tablename__ = "student_pilot_session"
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_uid = db.Column(db.String(64), unique=True, nullable=False)
+    enrollment_uid = db.Column(db.String(64), nullable=False)
+    student_id = db.Column(db.Integer, nullable=False)
+    pilot_id = db.Column(db.String(120), nullable=False)
+    status = db.Column(db.String(40), nullable=False, default="STARTED")
+    workspace_scope = db.Column(db.String(40), nullable=False, default="PERSONAL")
+    query_uid_hash = db.Column(db.String(64), default="")
+    alignment_status = db.Column(db.String(40), default="")
+    evidence_complete = db.Column(db.Boolean, default=False)
+    saved = db.Column(db.Boolean, default=False)
+    note_present = db.Column(db.Boolean, default=False)
+    understanding_state = db.Column(db.String(40), default="")
+    duration_ms = db.Column(db.Integer, default=0)
+    survey_submitted = db.Column(db.Boolean, default=False)
+    start_request_id = db.Column(db.String(120), default="")
+    complete_request_id = db.Column(db.String(120), default="")
+    started_at = db.Column(db.String(40), default="")
+    completed_at = db.Column(db.String(40), default="")
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.String(40), default="")
+    updated_at = db.Column(db.String(40), default="")
+
+    __table_args__ = (
+        db.UniqueConstraint("student_id", "start_request_id", name="uq_student_pilot_session_start_request"),
+    )
+
+
+class StudentPilotSurvey(db.Model):
+    """Student-owned post-task survey; free text never enters aggregates."""
+    __tablename__ = "student_pilot_survey"
+
+    id = db.Column(db.Integer, primary_key=True)
+    survey_uid = db.Column(db.String(64), unique=True, nullable=False)
+    session_uid = db.Column(db.String(64), unique=True, nullable=False)
+    student_id = db.Column(db.Integer, nullable=False)
+    pilot_id = db.Column(db.String(120), nullable=False)
+    helpfulness = db.Column(db.Integer, nullable=False)
+    evidence_helpfulness = db.Column(db.Integer, nullable=False)
+    uncertainty_understanding = db.Column(db.Integer, nullable=False)
+    task_difficulty = db.Column(db.Integer, nullable=False)
+    would_use_again = db.Column(db.Boolean, nullable=False)
+    comment = db.Column(db.Text, default="")
+    request_id = db.Column(db.String(120), default="")
+    submitted_at = db.Column(db.String(40), default="")
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.String(40), default="")
+    updated_at = db.Column(db.String(40), default="")
 
 
 @event.listens_for(StudentConceptQuery, "before_insert")
@@ -12758,6 +12841,18 @@ register_student_concept_query_routes(
     ),
     material_file_exists=student_material_file_exists,
     material_file_response=student_material_file_response,
+)
+
+register_student_pilot_routes(
+    app,
+    core=route_core,
+    models=StudentPilotModels(
+        StudentPilotEnrollment=StudentPilotEnrollment,
+        StudentPilotSession=StudentPilotSession,
+        StudentPilotSurvey=StudentPilotSurvey,
+        StudentConceptQuery=StudentConceptQuery,
+        PersonalLearningRecord=PersonalLearningRecord,
+    ),
 )
 
 

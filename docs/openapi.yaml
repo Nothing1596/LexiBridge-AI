@@ -1655,6 +1655,92 @@ paths:
         "401": {$ref: "#/components/responses/Error401"}
         "404": {$ref: "#/components/responses/Error404"}
         "409": {$ref: "#/components/responses/Error409"}
+  /api/student/pilot:
+    get:
+      summary: Read the optional Personal Workspace pilot contract and caller state
+      description: Participation is optional and never required for normal product use. No private learning content is returned.
+      responses:
+        "200": {description: Pilot contract and caller-owned status, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+  /api/student/pilot/enrollment:
+    post:
+      summary: Explicitly consent to the optional Personal Workspace pilot
+      parameters: [{name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 120}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pilot_id, consent_version, consent, eligibility_attested]
+              properties:
+                pilot_id: {type: string}
+                consent_version: {type: string}
+                consent: {type: boolean}
+                eligibility_attested: {type: boolean}
+      responses:
+        "200": {description: Versioned consent recorded, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+    delete:
+      summary: Withdraw consent and erase study sessions and surveys
+      description: Withdrawal preserves normal materials, queries and PersonalLearningRecord data.
+      parameters: [{name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 120}}]
+      responses:
+        "200": {description: Pilot records withdrawn and study sessions erased, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+  /api/student/pilot/sessions:
+    post:
+      summary: Start one consented Personal Workspace pilot session
+      parameters: [{name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 120}}]
+      responses:
+        "200": {description: Pilot session started, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
+        "409": {$ref: "#/components/responses/Error409"}
+  /api/student/pilot/sessions/{session_uid}/complete:
+    put:
+      summary: Derive content-free task metrics from an owned completed Personal query
+      parameters:
+        - {name: session_uid, in: path, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 120}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query_uid, expected_version]
+              properties:
+                query_uid: {type: string}
+                expected_version: {type: integer, minimum: 1}
+      responses:
+        "200": {description: Content-free pilot metrics recorded, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "404": {$ref: "#/components/responses/Error404"}
+        "409": {$ref: "#/components/responses/Error409"}
+  /api/student/pilot/sessions/{session_uid}/survey:
+    put:
+      summary: Submit the bounded caller-owned post-task survey
+      parameters:
+        - {name: session_uid, in: path, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, maxLength: 120}}
+      responses:
+        "200": {description: Survey recorded, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "400": {$ref: "#/components/responses/Error400"}
+        "401": {$ref: "#/components/responses/Error401"}
+        "409": {$ref: "#/components/responses/Error409"}
+  /api/admin/student-pilot/aggregate:
+    get:
+      summary: Read small-cell-suppressed deidentified Personal Workspace pilot metrics
+      responses:
+        "200": {description: Aggregate-only metrics, content: {application/json: {schema: {$ref: "#/components/schemas/ApiSuccess"}}}}
+        "401": {$ref: "#/components/responses/Error401"}
+        "403": {$ref: "#/components/responses/Error403"}
   /api/concept-cards:
     get:
       summary: List Concept Alignment Cards
