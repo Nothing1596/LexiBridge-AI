@@ -7,6 +7,7 @@ as query results.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from dataclasses import dataclass
@@ -19,10 +20,18 @@ CONTRACT_VERSION = "student-concept-query@1.0.0"
 ALIGNMENT_RESULT_CONTRACT_VERSION = "student-alignment-result@1.1.0"
 ALIGNMENT_POLICY_VERSION = "governed-bilingual-evidence-qualification@1.1.0"
 MATERIAL_READER_CONTRACT_VERSION = "student-material-reader@1.0.0"
+PERSONAL_NOTEBOOK_CONTRACT_VERSION = "personal-concept-notebook@1.0.0"
 MAX_SELECTION_CHARS = 180
 MAX_CONTEXT_CHARS = 800
 CONTEXT_WINDOW_CHARS = 360
 MAX_READER_CHUNK_CHARS = 8000
+MAX_NOTEBOOK_QUERY_CHARS = 120
+MAX_NOTEBOOK_NOTE_PREVIEW_CHARS = 240
+MAX_NOTEBOOK_PER_PAGE = 50
+
+NOTEBOOK_VIEWS = {"SAVED", "HISTORY", "UNDERSTOOD", "STILL_CONFUSED"}
+NOTEBOOK_WORKSPACE_SCOPES = {"", "PERSONAL", "MANAGED_COURSE"}
+NOTEBOOK_ALIGNMENT_STATUSES = {"", "READY", "REVIEW_REQUIRED", "NOT_READY"}
 
 
 class StudentConceptQueryError(ValueError):
@@ -122,6 +131,79 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def personal_record_mutation_fingerprint(
+    *, query_uid: Any, action: Any, changes: dict[str, Any], secret: Any
+) -> str:
+    """Key private mutations so audits can prove idempotency without storing notes."""
+    normalized = {
+        "query_uid": _text(query_uid),
+        "action": _text(action).upper(),
+        "saved": changes.get("saved") if "saved" in changes else None,
+        "note": str(changes.get("note") or "") if "note" in changes else None,
+        "understanding_state": (
+            _text(changes.get("understanding_state")).upper()
+            if "understanding_state" in changes
+            else None
+        ),
+    }
+    secret_bytes = str(secret or "").encode()
+    if not secret_bytes:
+        raise StudentConceptQueryError(
+            "STUDENT_PERSONAL_RECORD_IDEMPOTENCY_POLICY_UNAVAILABLE",
+            "Personal record idempotency policy is unavailable.",
+        )
+    return hmac.new(
+        secret_bytes,
+        json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def validate_notebook_filters(values: dict[str, Any]) -> dict[str, Any]:
+    view = _text(values.get("view") or "SAVED").upper()
+    workspace_scope = _text(values.get("workspace_scope")).upper()
+    alignment_status = _text(values.get("alignment_status")).upper()
+    query_text = _text(values.get("q"))
+    try:
+        page = int(values.get("page") or 1)
+        per_page = int(values.get("per_page") or 20)
+    except (TypeError, ValueError) as exc:
+        raise StudentConceptQueryError(
+            "STUDENT_NOTEBOOK_PAGINATION_INVALID",
+            "Notebook pagination is invalid.",
+        ) from exc
+    if view not in NOTEBOOK_VIEWS:
+        raise StudentConceptQueryError(
+            "STUDENT_NOTEBOOK_VIEW_INVALID", "Notebook view is invalid."
+        )
+    if workspace_scope not in NOTEBOOK_WORKSPACE_SCOPES:
+        raise StudentConceptQueryError(
+            "STUDENT_NOTEBOOK_WORKSPACE_INVALID", "Notebook workspace is invalid."
+        )
+    if alignment_status not in NOTEBOOK_ALIGNMENT_STATUSES:
+        raise StudentConceptQueryError(
+            "STUDENT_NOTEBOOK_ALIGNMENT_STATUS_INVALID",
+            "Notebook alignment status is invalid.",
+        )
+    if len(query_text) > MAX_NOTEBOOK_QUERY_CHARS:
+        raise StudentConceptQueryError(
+            "STUDENT_NOTEBOOK_QUERY_TOO_LONG", "Notebook search is too long."
+        )
+    if page < 1 or per_page < 1 or per_page > MAX_NOTEBOOK_PER_PAGE:
+        raise StudentConceptQueryError(
+            "STUDENT_NOTEBOOK_PAGINATION_INVALID",
+            "Notebook pagination is invalid.",
+        )
+    return {
+        "view": view,
+        "workspace_scope": workspace_scope,
+        "alignment_status": alignment_status,
+        "q": query_text,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 def source_search_eligible(source: Any, *, expected_language: Any = "") -> bool:

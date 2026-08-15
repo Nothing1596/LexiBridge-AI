@@ -164,6 +164,8 @@ def register_student_concept_query_routes(
             return {
                 "saved": False, "note": "", "understanding_state": "",
                 "last_viewed_at": "", "version": 0,
+                "visibility": "PRIVATE", "authority": "NON_OFFICIAL",
+                "publication_status": "NOT_APPLICABLE",
             }
         return {
             "record_uid": record.record_uid,
@@ -172,6 +174,9 @@ def register_student_concept_query_routes(
             "understanding_state": record.understanding_state,
             "last_viewed_at": record.last_viewed_at,
             "version": record.version,
+            "visibility": "PRIVATE",
+            "authority": "NON_OFFICIAL",
+            "publication_status": "NOT_APPLICABLE",
         }
 
     def serialize_query(query):
@@ -189,7 +194,16 @@ def register_student_concept_query_routes(
             serialized["source_unavailable_reason"] = ""
         return serialized
 
-    def audit(event_type, *, user, query, request_id, action="", result="success"):
+    def audit(
+        event_type,
+        *,
+        user,
+        query,
+        request_id,
+        action="",
+        result="success",
+        mutation_fingerprint="",
+    ):
         core.audit_record_service.create_audit_record(
             db.session,
             core.audit_record_model,
@@ -204,6 +218,7 @@ def register_student_concept_query_routes(
                     "workspace_uid": query.workspace_uid,
                     "source_uid": query.source_uid,
                     "action": action,
+                    "mutation_fingerprint": mutation_fingerprint,
                 },
                 "output_payload": {"status": query.processing_status},
                 "changed_fields": [action] if action else [],
@@ -212,6 +227,86 @@ def register_student_concept_query_routes(
             now_fn=core.current_time_text,
             commit=False,
         )
+
+    def mutation_audit(*, event_type, user, query, request_id):
+        if not request_id:
+            return None, ""
+        existing = core.audit_record_model.query.filter_by(
+            event_type=event_type,
+            target_uid=query.query_uid,
+            actor_id=user.id,
+            request_id=request_id,
+        ).order_by(core.audit_record_model.id.desc()).first()
+        if existing is None:
+            return None, ""
+        try:
+            payload = json.loads(existing.input_payload or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        return existing, str(payload.get("mutation_fingerprint") or "")
+
+    def idempotency_key(*, required=False):
+        value = str(request.headers.get("Idempotency-Key") or "").strip()
+        if (required and not value) or len(value) > 120 or any(ord(char) < 32 for char in value):
+            raise student_concept_queries.StudentConceptQueryError(
+                "STUDENT_PERSONAL_RECORD_IDEMPOTENCY_KEY_INVALID",
+                "A bounded Idempotency-Key is required.",
+            )
+        return value
+
+    def notebook_item(query, serialized=None):
+        result = dict(serialized or serialize_query(query))
+        state = dict(result.get("personal_state") or {})
+        source = models.KnowledgeSource.query.filter_by(
+            source_uid=query.source_uid
+        ).first()
+        course = (
+            db.session.get(models.Course, query.course_id)
+            if query.course_id is not None
+            else None
+        )
+        recommended = result.get("recommended_chinese_concept")
+        note = str(state.get("note") or "")
+        return {
+            "contract_id": student_concept_queries.PERSONAL_NOTEBOOK_CONTRACT_VERSION,
+            "query_uid": query.query_uid,
+            "result_uid": query.result_uid,
+            "workspace_scope": query.workspace_scope,
+            "workspace_uid": query.workspace_uid,
+            "visibility": "PRIVATE",
+            "authority": "NON_OFFICIAL",
+            "publication_status": "NOT_APPLICABLE",
+            "alignment_status": result.get("alignment_status"),
+            "display_mode": result.get("display_mode"),
+            "uncertain": bool(result.get("uncertain")),
+            "english_concept": str(result.get("english_term") or query.selected_text or "")[:220],
+            "recommended_chinese_concept": recommended,
+            "candidate_count": len(result.get("chinese_candidates") or []),
+            "source_uid": query.source_uid,
+            "source_title": str(
+                getattr(source, "title", "") or getattr(source, "name", "") or ""
+            )[:220],
+            "course_name": str(getattr(course, "name", "") or "")[:220],
+            "source_availability": result.get("source_availability"),
+            "evidence_availability": result.get("evidence_availability"),
+            "evidence_complete": bool(result.get("evidence_complete")),
+            "saved": bool(state.get("saved")),
+            "understanding_state": str(state.get("understanding_state") or ""),
+            "last_viewed_at": str(state.get("last_viewed_at") or ""),
+            "note_preview": note[:student_concept_queries.MAX_NOTEBOOK_NOTE_PREVIEW_CHARS],
+            "personal_state": {
+                "record_uid": str(state.get("record_uid") or ""),
+                "saved": bool(state.get("saved")),
+                "understanding_state": str(state.get("understanding_state") or ""),
+                "last_viewed_at": str(state.get("last_viewed_at") or ""),
+                "version": int(state.get("version") or 0),
+                "visibility": "PRIVATE",
+                "authority": "NON_OFFICIAL",
+                "publication_status": "NOT_APPLICABLE",
+            },
+            "created_at": str(query.created_at or ""),
+            "updated_at": str(state.get("last_viewed_at") or query.updated_at or query.created_at or ""),
+        }
 
     def create_query():
         context = core.get_route_audit_context()
@@ -689,6 +784,213 @@ def register_student_concept_query_routes(
             return error("STUDENT_CONCEPT_QUERY_NOT_FOUND", "Query is not available.", 404, context)
         return core.api_success_with_audit_context({"query": serialize_query(query)}, audit_context=context)
 
+    def list_notebook():
+        context = core.get_route_audit_context()
+        user, response = student(context)
+        if response:
+            return core.attach_request_id_to_response(response, context)
+        context = core.get_route_audit_context(user)
+        try:
+            filters = student_concept_queries.validate_notebook_filters(request.args)
+        except student_concept_queries.StudentConceptQueryError as exc:
+            return error(exc.reason_code, str(exc), 400, context)
+
+        accessible = []
+        for query in models.StudentConceptQuery.query.filter_by(
+            student_id=user.id
+        ).order_by(
+            models.StudentConceptQuery.updated_at.desc(),
+            models.StudentConceptQuery.id.desc(),
+        ).all():
+            if query.workspace_scope == "MANAGED_COURSE" and not membership_active(
+                user.id, query.course_id
+            ):
+                continue
+            serialized = serialize_query(query)
+            accessible.append((query, serialized, notebook_item(query, serialized)))
+
+        summary = {
+            "history_total": len(accessible),
+            "saved_total": sum(bool(item[2]["saved"]) for item in accessible),
+            "understood_total": sum(
+                item[2]["understanding_state"] == "UNDERSTOOD" for item in accessible
+            ),
+            "still_confused_total": sum(
+                item[2]["understanding_state"] == "STILL_CONFUSED" for item in accessible
+            ),
+            "personal_total": sum(
+                item[0].workspace_scope == "PERSONAL" for item in accessible
+            ),
+            "managed_course_total": sum(
+                item[0].workspace_scope == "MANAGED_COURSE" for item in accessible
+            ),
+        }
+        selected = []
+        query_text = filters["q"].casefold()
+        for query, serialized, item in accessible:
+            state = serialized.get("personal_state") or {}
+            if filters["view"] == "SAVED" and not bool(state.get("saved")):
+                continue
+            if (
+                filters["view"] == "UNDERSTOOD"
+                and str(state.get("understanding_state") or "") != "UNDERSTOOD"
+            ):
+                continue
+            if (
+                filters["view"] == "STILL_CONFUSED"
+                and str(state.get("understanding_state") or "") != "STILL_CONFUSED"
+            ):
+                continue
+            if filters["workspace_scope"] and query.workspace_scope != filters["workspace_scope"]:
+                continue
+            if (
+                filters["alignment_status"]
+                and serialized.get("alignment_status") != filters["alignment_status"]
+            ):
+                continue
+            if query_text:
+                searchable = "\n".join((
+                    item["english_concept"],
+                    str((item.get("recommended_chinese_concept") or {}).get("text") or ""),
+                    str(state.get("note") or ""),
+                    item["source_title"],
+                    item["course_name"],
+                )).casefold()
+                if query_text not in searchable:
+                    continue
+            selected.append(item)
+        selected.sort(
+            key=lambda item: (item["updated_at"], item["query_uid"]), reverse=True
+        )
+        total = len(selected)
+        offset = (filters["page"] - 1) * filters["per_page"]
+        page_items = selected[offset:offset + filters["per_page"]]
+        return core.api_success_with_audit_context(
+            {
+                "contract_id": student_concept_queries.PERSONAL_NOTEBOOK_CONTRACT_VERSION,
+                "items": page_items,
+                "summary": summary,
+                "filters": filters,
+                "pagination": {
+                    "page": filters["page"],
+                    "per_page": filters["per_page"],
+                    "total": total,
+                    "has_next": offset + filters["per_page"] < total,
+                },
+            },
+            audit_context=context,
+        )
+
+    def notebook_detail(query_uid):
+        context = core.get_route_audit_context()
+        user, response = student(context)
+        if response:
+            return core.attach_request_id_to_response(response, context)
+        context = core.get_route_audit_context(user)
+        query = get_owned_query(user, query_uid)
+        if query is None:
+            return error("STUDENT_CONCEPT_QUERY_NOT_FOUND", "Query is not available.", 404, context)
+        serialized = serialize_query(query)
+        return core.api_success_with_audit_context(
+            {
+                "contract_id": student_concept_queries.PERSONAL_NOTEBOOK_CONTRACT_VERSION,
+                "notebook_item": notebook_item(query, serialized),
+                "query": serialized,
+            },
+            audit_context=context,
+        )
+
+    def revisit_notebook_item(query_uid):
+        context = core.get_route_audit_context()
+        user, response = student(context)
+        if response:
+            return core.attach_request_id_to_response(response, context)
+        context = core.get_route_audit_context(user)
+        query = get_owned_query(user, query_uid)
+        if query is None:
+            return error("STUDENT_CONCEPT_QUERY_NOT_FOUND", "Query is not available.", 404, context)
+        data = request.get_json(silent=True) or {}
+        if set(data) - {"expected_version"}:
+            return error(
+                "STUDENT_PERSONAL_RECORD_FIELDS_INVALID",
+                "Personal state fields are invalid.",
+                400,
+                context,
+            )
+        try:
+            key = idempotency_key(required=True)
+        except student_concept_queries.StudentConceptQueryError as exc:
+            return error(exc.reason_code, str(exc), 400, context)
+        try:
+            fingerprint = student_concept_queries.personal_record_mutation_fingerprint(
+                query_uid=query.query_uid,
+                action="REVISIT",
+                changes={},
+                secret=current_app.secret_key,
+            )
+        except student_concept_queries.StudentConceptQueryError as exc:
+            return error(exc.reason_code, str(exc), 503, context)
+        previous, previous_fingerprint = mutation_audit(
+            event_type="personal_learning_record_revisited",
+            user=user,
+            query=query,
+            request_id=key,
+        )
+        if previous is not None:
+            if previous_fingerprint != fingerprint:
+                return error(
+                    "STUDENT_PERSONAL_RECORD_IDEMPOTENCY_CONFLICT",
+                    "Idempotency key was already used for another personal-state mutation.",
+                    409,
+                    context,
+                )
+            return core.api_success_with_audit_context(
+                {"query": serialize_query(query), "idempotent_replay": True},
+                audit_context=context,
+            )
+        record = models.PersonalLearningRecord.query.filter_by(
+            student_id=user.id, result_uid=query.result_uid
+        ).first()
+        current_version = int(record.version or 0) if record else 0
+        try:
+            expected_version = int(data.get("expected_version"))
+        except (TypeError, ValueError):
+            expected_version = -1
+        if expected_version != current_version:
+            return error(
+                "STUDENT_PERSONAL_RECORD_VERSION_CONFLICT",
+                "Personal record version is stale.",
+                409,
+                context,
+            )
+        now = core.current_time_text()
+        if record is None:
+            record = models.PersonalLearningRecord(
+                student_id=user.id,
+                query_uid=query.query_uid,
+                result_uid=query.result_uid,
+                workspace_scope=query.workspace_scope,
+                workspace_uid=query.workspace_uid,
+                created_at=now,
+            )
+            db.session.add(record)
+        record.last_viewed_at = now
+        record.version = current_version + 1
+        record.updated_at = now
+        audit(
+            "personal_learning_record_revisited",
+            user=user,
+            query=query,
+            request_id=key,
+            action="revisit",
+            mutation_fingerprint=fingerprint,
+        )
+        db.session.commit()
+        return core.api_success_with_audit_context(
+            {"query": serialize_query(query), "idempotent_replay": False},
+            audit_context=context,
+        )
+
     def personal_record(query_uid):
         context = core.get_route_audit_context()
         user, response = student(context)
@@ -713,6 +1015,42 @@ def register_student_concept_query_routes(
         record = models.PersonalLearningRecord.query.filter_by(
             student_id=user.id, result_uid=query.result_uid
         ).first()
+        try:
+            key = idempotency_key(required=False)
+        except student_concept_queries.StudentConceptQueryError as exc:
+            return error(exc.reason_code, str(exc), 400, context)
+        changes = {name: data[name] for name in ("saved", "note", "understanding_state") if name in data}
+        try:
+            fingerprint = student_concept_queries.personal_record_mutation_fingerprint(
+                query_uid=query.query_uid,
+                action="UPDATE",
+                changes=changes,
+                secret=current_app.secret_key,
+            )
+        except student_concept_queries.StudentConceptQueryError as exc:
+            return error(exc.reason_code, str(exc), 503, context)
+        previous, previous_fingerprint = mutation_audit(
+            event_type="personal_learning_record_updated",
+            user=user,
+            query=query,
+            request_id=key,
+        )
+        if previous is not None:
+            if previous_fingerprint != fingerprint:
+                return error(
+                    "STUDENT_PERSONAL_RECORD_IDEMPOTENCY_CONFLICT",
+                    "Idempotency key was already used for another personal-state mutation.",
+                    409,
+                    context,
+                )
+            return core.api_success_with_audit_context(
+                {
+                    "query": serialize_query(query),
+                    "personal_state": personal_state(query),
+                    "idempotent_replay": True,
+                },
+                audit_context=context,
+            )
         expected = data.get("expected_version")
         current_version = record.version if record else 0
         try:
@@ -740,12 +1078,17 @@ def register_student_concept_query_routes(
         record.updated_at = now
         audit(
             "personal_learning_record_updated", user=user, query=query,
-            request_id=str(request.headers.get("Idempotency-Key") or "")[:120],
+            request_id=key,
             action="personal_state",
+            mutation_fingerprint=fingerprint,
         )
         db.session.commit()
         return core.api_success_with_audit_context(
-            {"query": serialize_query(query), "personal_state": personal_state(query)},
+            {
+                "query": serialize_query(query),
+                "personal_state": personal_state(query),
+                "idempotent_replay": False,
+            },
             audit_context=context,
         )
 
@@ -767,6 +1110,21 @@ def register_student_concept_query_routes(
         methods=["GET"],
     )
     app.add_url_rule("/api/student/concept-queries/<query_uid>", view_func=get_query, methods=["GET"])
+    app.add_url_rule(
+        "/api/student/personal-concept-notebook",
+        view_func=list_notebook,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/student/personal-concept-notebook/<query_uid>",
+        view_func=notebook_detail,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/student/personal-concept-notebook/<query_uid>/revisit",
+        view_func=revisit_notebook_item,
+        methods=["POST"],
+    )
     app.add_url_rule(
         "/api/student/concept-queries/<query_uid>/personal-record",
         view_func=personal_record,

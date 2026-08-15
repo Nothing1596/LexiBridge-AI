@@ -553,6 +553,15 @@
         loading: false,
         result: null
       },
+      personalNotebookFilters: {
+        view: "SAVED",
+        workspace_scope: "",
+        alignment_status: "",
+        q: "",
+        page: 1,
+        per_page: 20
+      },
+      selectedNotebookQueryUid: "",
       teacherFeedbackFilters: {
         course: "",
         status: "",
@@ -618,6 +627,9 @@
         studentMaterialPdfUrl: "",
         studentMaterialPdfSourceUid: "",
         studentMaterialFileError: "",
+        personalNotebookItems: [],
+        personalNotebookSummary: null,
+        personalNotebookPagination: null,
         conceptCardFeedbackQueue: [],
         conceptCardFeedbackPagination: null,
         teacherLearningAnalytics: null,
@@ -653,6 +665,7 @@
     const rolePages = {
       student: [
         ["conceptQuery", bilingual("概念查询", "Concept Query")],
+        ["conceptNotebook", bilingual("个人概念本", "My Concept Notebook")],
         ["personal", bilingual("我的学习空间", "My Workspace")],
         ["personalUpload", bilingual("上传个人资料", "Upload Personal Document")],
         ["learning", bilingual("收藏与学习", "Favorites & Learning")],
@@ -827,7 +840,7 @@
     function renderTopNav() {
       const nav = document.getElementById("topNav");
       nav.innerHTML = navItems().map(([id, label]) =>
-        `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : id === "personal" ? 'data-testid="my-workspace-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
+        `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : id === "conceptNotebook" ? 'data-testid="personal-concept-notebook-nav"' : id === "personal" ? 'data-testid="my-workspace-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
       ).join("");
       const chip = document.getElementById("userChip");
       if (!state.user) {
@@ -888,7 +901,7 @@
       return `
         <div class="app-layout">
           <aside class="sidebar">${navItems().filter(([id]) => !publicPages.some(([pid]) => pid === id)).map(([id, label]) =>
-            `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : id === "personal" ? 'data-testid="my-workspace-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
+            `<button class="${state.page === id ? "active" : ""}" ${id === "conceptReview" ? 'data-testid="concept-review-nav"' : id === "studentConceptCards" ? 'data-testid="student-concept-card-nav"' : id === "conceptNotebook" ? 'data-testid="personal-concept-notebook-nav"' : id === "personal" ? 'data-testid="my-workspace-nav"' : ""} onclick="Lexi.goto('${id}')">${label}</button>`
           ).join("")}</aside>
           <section class="section"><h2>${title}</h2><p class="muted">${subtitle || ""}</p>${message}${body}</section>
         </div>
@@ -1037,7 +1050,7 @@
 	          <div class="card"><h3>${bilingual("课程术语搜索", "Course Terminology Search")}</h3><p class="muted">${bilingual("查看证据、置信度、风险和 AI provider 状态。", "Inspect evidence, confidence, risk, and AI provider status.")}</p><button onclick="Lexi.goto('search')">${bilingual("搜索术语", "Search Terms")}</button></div>
 	          <div class="card"><h3>${bilingual("课程概念卡", "Course Concept Cards")}</h3><p class="muted">${bilingual("学习教师审核通过的双语 Concept Card、证据来源和掌握状态。", "Study teacher-approved bilingual Concept Cards, evidence sources, and mastery state.")}</p><button onclick="Lexi.goto('studentConceptCards')">${bilingual("查看概念卡", "View Concept Cards")}</button></div>
 	          <div class="card"><h3>${bilingual("个人资料上传", "Personal Upload")}</h3><p class="muted">${bilingual("受会员额度控制，默认私有。", "Quota-controlled and private by default.")}</p><button onclick="Lexi.goto('personalUpload')">${bilingual("上传个人资料", "Upload Personal Document")}</button></div>
-	          <div class="card"><h3>${bilingual("学习记录", "Learning Records")}</h3><p class="muted">${bilingual("查看收藏、未掌握和已掌握术语。", "View favorites, unmastered, and mastered terms.")}</p><button onclick="Lexi.goto('learning')">${bilingual("查看记录", "View Records")}</button></div>
+	          <div class="card"><h3>${bilingual("个人概念本", "My Concept Notebook")}</h3><p class="muted">${bilingual("重访自己保存的私人、非官方对齐结果、笔记和理解状态。", "Revisit your private, non-official alignment results, notes, and learning state.")}</p><button onclick="Lexi.goto('conceptNotebook')">${bilingual("打开概念本", "Open Notebook")}</button></div>
 	        </div>
 	      `);
 	    }
@@ -1409,6 +1422,7 @@
       const alternatives = (result.chinese_candidates || []).filter(candidate => !recommended || candidate.candidate_uid !== recommended.candidate_uid);
       const candidateList = alternatives.map(candidate => `<li><strong>${escapeHtml(candidate.text || "")}</strong> · 有独立中文证据支持的候选</li>`).join("");
       const riskSummary = (result.student_risk_summary || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
+      const saved = Boolean(result.personal_state && result.personal_state.saved);
       return `<section class="card" data-testid="student-concept-result">
         <div class="between"><h2>概念学习结果</h2><span class="badge ${result.alignment_status === "READY" ? "good" : "warn"}" data-testid="student-alignment-status">${escapeHtml(result.alignment_status)}</span></div>
         <div class="notice">个人学习结果 · 非课程官方答案 · PRIVATE · NON_OFFICIAL</div>
@@ -1424,8 +1438,9 @@
           <div><h3>Confidence / Uncertainty</h3><p>${escapeHtml(statusText)}</p></div>
         </div>
         ${result.uncertain ? `<div class="notice" data-testid="student-result-uncertain">当前证据不能唯一确认；你仍可查看和保存这些有证据的候选。</div>` : ""}
+        ${result.source_availability === "SOURCE_UNAVAILABLE" ? `<div class="notice error" data-testid="student-result-source-unavailable">原资料已删除、失效或当前不可访问。历史结果和个人笔记仍保留，但证据不可重新核验。</div>` : ""}
         <div class="row">
-          <button data-testid="student-query-save" onclick="Lexi.updatePersonalConceptState({saved:true})">保存</button>
+          <button data-testid="student-query-save" onclick="Lexi.updatePersonalConceptState({saved:${saved ? "false" : "true"}})">${saved ? "移出概念本" : "保存到概念本"}</button>
           <button class="secondary" data-testid="student-query-understood" onclick="Lexi.updatePersonalConceptState({understanding_state:'UNDERSTOOD'})">理解了</button>
           <button class="secondary" data-testid="student-query-confused" onclick="Lexi.updatePersonalConceptState({understanding_state:'STILL_CONFUSED'})">仍然困惑</button>
         </div>
@@ -1484,6 +1499,49 @@
         </div>
         ${renderStudentMaterialReader()}
         ${renderStudentConceptResult(active.result)}
+      `);
+    }
+
+    function renderPersonalConceptNotebook() {
+      const items = state.cache.personalNotebookItems || [];
+      const summary = state.cache.personalNotebookSummary || {};
+      const filters = state.personalNotebookFilters;
+      const pagination = state.cache.personalNotebookPagination || {};
+      const rows = items.map(item => {
+        const recommended = item.recommended_chinese_concept;
+        const workspace = item.workspace_scope === "PERSONAL"
+          ? "我的资料"
+          : (item.course_name || "机构托管课程");
+        return `<button class="card notebook-row" data-testid="notebook-result-row" data-query-uid="${escapeHtml(item.query_uid)}" onclick="Lexi.openNotebookItem('${escapeHtml(item.query_uid)}')">
+          <div class="between"><strong>${escapeHtml(item.english_concept || "")}</strong><span class="badge ${item.alignment_status === "READY" ? "good" : "warn"}">${escapeHtml(item.alignment_status || "")}</span></div>
+          <p>${escapeHtml((recommended && recommended.text) || "暂无可靠中文对应")}</p>
+          <p class="muted">${escapeHtml(workspace)} · PRIVATE · NON_OFFICIAL · ${escapeHtml(item.understanding_state || "未标记")}</p>
+          ${item.note_preview ? `<p class="muted">${escapeHtml(item.note_preview)}</p>` : ""}
+          ${item.source_availability === "SOURCE_UNAVAILABLE" ? `<span class="badge bad">原资料不可用</span>` : ""}
+        </button>`;
+      }).join("");
+      return pageShell("个人概念本", "Personal 与 Managed Course 的普通查询共用同一个私人学习记录；不会进入 Reviewer 队列，也不会变成官方课程内容。", `
+        <section data-testid="personal-concept-notebook-page">
+          <div class="grid four" data-testid="notebook-summary">
+            <div class="card metric"><strong>${Number(summary.saved_total || 0)}</strong><span class="muted">已保存</span></div>
+            <div class="card metric"><strong>${Number(summary.understood_total || 0)}</strong><span class="muted">理解了</span></div>
+            <div class="card metric"><strong>${Number(summary.still_confused_total || 0)}</strong><span class="muted">仍然困惑</span></div>
+            <div class="card metric"><strong>${Number(summary.history_total || 0)}</strong><span class="muted">查询历史</span></div>
+          </div>
+          <form class="card form-grid" onsubmit="Lexi.applyNotebookFilters(event)">
+            <div class="full"><label>搜索英文概念、中文候选、资料或个人笔记</label><input data-testid="notebook-search" name="q" maxlength="120" value="${escapeHtml(filters.q)}" /></div>
+            <div><label>学习视图</label><select data-testid="notebook-view-filter" name="view"><option value="SAVED" ${filters.view === "SAVED" ? "selected" : ""}>已保存</option><option value="HISTORY" ${filters.view === "HISTORY" ? "selected" : ""}>全部历史</option><option value="UNDERSTOOD" ${filters.view === "UNDERSTOOD" ? "selected" : ""}>理解了</option><option value="STILL_CONFUSED" ${filters.view === "STILL_CONFUSED" ? "selected" : ""}>仍然困惑</option></select></div>
+            <div><label>学习空间</label><select data-testid="notebook-workspace-filter" name="workspace_scope"><option value="">全部</option><option value="PERSONAL" ${filters.workspace_scope === "PERSONAL" ? "selected" : ""}>PERSONAL</option><option value="MANAGED_COURSE" ${filters.workspace_scope === "MANAGED_COURSE" ? "selected" : ""}>MANAGED_COURSE</option></select></div>
+            <div><label>机器状态</label><select data-testid="notebook-alignment-filter" name="alignment_status"><option value="">全部</option><option value="READY" ${filters.alignment_status === "READY" ? "selected" : ""}>READY</option><option value="REVIEW_REQUIRED" ${filters.alignment_status === "REVIEW_REQUIRED" ? "selected" : ""}>REVIEW_REQUIRED</option><option value="NOT_READY" ${filters.alignment_status === "NOT_READY" ? "selected" : ""}>NOT_READY</option></select></div>
+            <button>筛选</button>
+          </form>
+          <div class="grid two">
+            <div class="stack">${rows || `<div class="card" data-testid="notebook-empty"><p class="muted">当前筛选条件下还没有私人学习记录。</p></div>`}
+              <div class="row"><button class="secondary small" onclick="Lexi.changeNotebookPage(${Number(pagination.page || 1) - 1})" ${Number(pagination.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span class="badge neutral">${Number(pagination.total || 0)} 条</span><button class="secondary small" onclick="Lexi.changeNotebookPage(${Number(pagination.page || 1) + 1})" ${pagination.has_next ? "" : "disabled"}>下一页</button></div>
+            </div>
+            <div>${state.studentConceptQuery.result ? renderStudentConceptResult(state.studentConceptQuery.result) : `<div class="card"><p class="muted">选择一个记录以重访证据、笔记和理解状态。</p></div>`}</div>
+          </div>
+        </section>
       `);
     }
 
@@ -2532,6 +2590,7 @@
       else if (page === "learning") app.innerHTML = renderLearning();
       else if (page === "studentConceptCards") app.innerHTML = renderStudentConceptCards();
       else if (page === "conceptQuery") app.innerHTML = renderStudentConceptQuery();
+      else if (page === "conceptNotebook") app.innerHTML = renderPersonalConceptNotebook();
       else if (page === "subscription") app.innerHTML = renderSubscription();
       else if (page === "teacher") app.innerHTML = renderTeacher();
       else if (page === "courseUpload") app.innerHTML = renderUpload("course");
@@ -2768,6 +2827,30 @@
         if (value !== undefined && value !== null && String(value).trim() !== "") params.set(key, value);
       });
       return params.toString();
+    }
+
+    function personalNotebookQueryString(extra = {}) {
+      const params = new URLSearchParams();
+      Object.entries({ ...(state.personalNotebookFilters || {}), ...extra }).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value).trim() !== "") params.set(key, value);
+      });
+      return params.toString();
+    }
+
+    async function loadPersonalConceptNotebook() {
+      const query = personalNotebookQueryString();
+      const payload = await api(`/api/student/personal-concept-notebook${query ? `?${query}` : ""}`);
+      const data = payload.data || {};
+      state.cache.personalNotebookItems = data.items || [];
+      state.cache.personalNotebookSummary = data.summary || null;
+      state.cache.personalNotebookPagination = data.pagination || null;
+      if (
+        state.selectedNotebookQueryUid
+        && !state.cache.personalNotebookItems.some(item => item.query_uid === state.selectedNotebookQueryUid)
+      ) {
+        state.selectedNotebookQueryUid = "";
+        state.studentConceptQuery.result = null;
+      }
     }
 
     async function loadStudentConceptMaterials() {
@@ -3449,6 +3532,7 @@
 	          if (["search", "learning"].includes(page)) await loadCards();
 	          if (["studentConceptCards"].includes(page)) { await loadStudentCourses(); await loadStudentConceptCards(); }
 	          if (["conceptQuery"].includes(page)) await loadStudentConceptMaterials();
+              if (["conceptNotebook"].includes(page)) await loadPersonalConceptNotebook();
 	          if (["jobs"].includes(page)) await loadJobs();
 	          if (["alignmentRuns"].includes(page)) await loadAlignmentRuns();
 	          if (["evaluationRuns"].includes(page)) await loadEvaluationRuns();
@@ -3545,12 +3629,15 @@
         const result = state.studentConceptQuery.result;
         if (!result) return;
         const expectedVersion = Number((result.personal_state && result.personal_state.version) || 0);
+        const mutationFields = Object.keys(changes || {}).sort().join("-") || "state";
         try {
           const response = await api(`/api/student/concept-queries/${encodeURIComponent(result.query_uid)}/personal-record`, {
             method: "PUT",
+            headers: {"Idempotency-Key": `student-state:${result.result_uid}:${expectedVersion}:${mutationFields}`},
             body: JSON.stringify({...changes, expected_version: expectedVersion})
           });
           state.studentConceptQuery.result = response.data.query;
+          if (state.page === "conceptNotebook") await loadPersonalConceptNotebook();
           setMessage("私人学习状态已保存。", "success");
         } catch (error) {
           setMessage(formatApiError(error, "保存失败，结果可能已在其他页面更新。"), "notice error");
@@ -3560,6 +3647,45 @@
         event.preventDefault();
         const note = new FormData(event.target).get("note") || "";
         await this.updatePersonalConceptState({note});
+      },
+      async applyNotebookFilters(event) {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        state.personalNotebookFilters = {
+          ...state.personalNotebookFilters,
+          q: String(form.get("q") || "").trim(),
+          view: String(form.get("view") || "SAVED"),
+          workspace_scope: String(form.get("workspace_scope") || ""),
+          alignment_status: String(form.get("alignment_status") || ""),
+          page: 1
+        };
+        await loadPersonalConceptNotebook();
+        render();
+      },
+      async changeNotebookPage(pageNumber) {
+        if (Number(pageNumber) < 1) return;
+        state.personalNotebookFilters.page = Number(pageNumber);
+        await loadPersonalConceptNotebook();
+        render();
+      },
+      async openNotebookItem(queryUid) {
+        try {
+          const detail = await api(`/api/student/personal-concept-notebook/${encodeURIComponent(queryUid)}`);
+          let result = detail.data && detail.data.query;
+          const expectedVersion = Number((result && result.personal_state && result.personal_state.version) || 0);
+          const revisit = await api(`/api/student/personal-concept-notebook/${encodeURIComponent(queryUid)}/revisit`, {
+            method: "POST",
+            headers: {"Idempotency-Key": `notebook-revisit:${queryUid}:${expectedVersion}`},
+            body: JSON.stringify({expected_version: expectedVersion})
+          });
+          result = revisit.data && revisit.data.query;
+          state.selectedNotebookQueryUid = queryUid;
+          state.studentConceptQuery.result = result;
+          await loadPersonalConceptNotebook();
+          setMessage("已打开私人学习记录。", "success");
+        } catch (error) {
+          setMessage(formatApiError(error, "无法打开该私人学习记录。"), "notice error");
+        }
       },
       async login(event) {
         event.preventDefault();
