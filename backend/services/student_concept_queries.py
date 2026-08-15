@@ -17,10 +17,11 @@ from services import bilingual_evidence_qualification, student_first_boundaries
 
 
 CONTRACT_VERSION = "student-concept-query@1.0.0"
-ALIGNMENT_RESULT_CONTRACT_VERSION = "student-alignment-result@1.1.0"
+ALIGNMENT_RESULT_CONTRACT_VERSION = "student-alignment-result@1.2.0"
 ALIGNMENT_POLICY_VERSION = "governed-bilingual-evidence-qualification@1.1.0"
 MATERIAL_READER_CONTRACT_VERSION = "student-material-reader@1.0.0"
 PERSONAL_NOTEBOOK_CONTRACT_VERSION = "personal-concept-notebook@1.0.0"
+LEARNING_SUPPORT_CONTRACT_VERSION = "student-learning-support@1.0.0"
 MAX_SELECTION_CHARS = 180
 MAX_CONTEXT_CHARS = 800
 CONTEXT_WINDOW_CHARS = 360
@@ -28,6 +29,9 @@ MAX_READER_CHUNK_CHARS = 8000
 MAX_NOTEBOOK_QUERY_CHARS = 120
 MAX_NOTEBOOK_NOTE_PREVIEW_CHARS = 240
 MAX_NOTEBOOK_PER_PAGE = 50
+MAX_LEARNING_EVIDENCE_ITEMS = 4
+MAX_LEARNING_SNIPPET_CHARS = 360
+MAX_LEARNING_SUMMARY_CHARS = 720
 
 NOTEBOOK_VIEWS = {"SAVED", "HISTORY", "UNDERSTOOD", "STILL_CONFUSED"}
 NOTEBOOK_WORKSPACE_SCOPES = {"", "PERSONAL", "MANAGED_COURSE"}
@@ -458,6 +462,231 @@ def finalize_student_alignment_risks(
     return labels
 
 
+def _learning_citation(evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_uid": _text(evidence.get("source_uid")),
+        "chunk_uid": _text(evidence.get("chunk_uid")),
+        "page_number": evidence.get("page_number"),
+        "block_uid": _text(
+            evidence.get("block_uid") or evidence.get("parse_block_uid")
+        ),
+    }
+
+
+def _learning_evidence(
+    evidence: dict[str, Any], *, language: str = ""
+) -> dict[str, Any]:
+    item = {
+        **_learning_citation(evidence),
+        "snippet": str(
+            evidence.get("snippet") or evidence.get("text") or ""
+        )[:MAX_LEARNING_SNIPPET_CHARS],
+    }
+    if language:
+        item["language"] = language
+    return item
+
+
+def _learning_evidence_map(values: Any) -> dict[tuple[str, str], dict[str, Any]]:
+    output: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw in values if isinstance(values, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        item = _learning_evidence(raw)
+        key = (item["source_uid"], item["chunk_uid"])
+        if all(key) and item["snippet"] and key not in output:
+            output[key] = item
+        if len(output) >= MAX_LEARNING_EVIDENCE_ITEMS:
+            break
+    return output
+
+
+def _learning_candidates(
+    raw_candidates: Any,
+    chinese_evidence: dict[tuple[str, str], dict[str, Any]],
+    *,
+    selected_uid: str,
+) -> list[dict[str, Any]]:
+    output = []
+    seen = set()
+    for raw in raw_candidates if isinstance(raw_candidates, list) else []:
+        if not isinstance(raw, dict) or bool(raw.get("generated")):
+            continue
+        source_uid = _text(raw.get("source_uid"))
+        chunk_uid = _text(raw.get("chunk_uid"))
+        evidence = chinese_evidence.get((source_uid, chunk_uid))
+        term = _text(raw.get("text") or raw.get("chinese_term"))[:160]
+        candidate_uid = _text(raw.get("candidate_uid"))
+        if (
+            not bool(raw.get("evidence_backed"))
+            or evidence is None
+            or not term
+            or not candidate_uid
+            or candidate_uid in seen
+        ):
+            continue
+        seen.add(candidate_uid)
+        output.append(
+            {
+                "candidate_uid": candidate_uid,
+                "term": term,
+                "evidence_backed": True,
+                "selected": candidate_uid == selected_uid,
+                "evidence": dict(evidence),
+            }
+        )
+        if len(output) >= MAX_LEARNING_EVIDENCE_ITEMS:
+            break
+    return output
+
+
+def build_student_learning_support(
+    result: dict[str, Any],
+    *,
+    alignment_status: str,
+    recommended_chinese_concept: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a no-network, evidence-only learning aid from the frozen result.
+
+    The adapter explains the machine decision and places candidate evidence
+    side by side. It deliberately does not infer a semantic distinction that
+    is absent from the governed evidence.
+    """
+    english_map = _learning_evidence_map(result.get("english_evidence"))
+    chinese_map = _learning_evidence_map(result.get("chinese_evidence"))
+    english_evidence = list(english_map.values())
+    selected = (
+        result.get("selected_candidate")
+        if isinstance(result.get("selected_candidate"), dict)
+        else {}
+    )
+    selected_uid = _text(selected.get("candidate_uid"))
+    candidates = _learning_candidates(
+        result.get("chinese_candidates"),
+        chinese_map,
+        selected_uid=selected_uid,
+    )
+    selected_candidate = next(
+        (item for item in candidates if item["selected"]), None
+    )
+    alternatives = [item for item in candidates if not item["selected"]]
+    meaning = str(
+        result.get("bounded_context")
+        or (english_evidence[0]["snippet"] if english_evidence else "")
+    )[:MAX_CONTEXT_CHARS]
+    meaning_citations = (
+        [_learning_citation(english_evidence[0])] if english_evidence else []
+    )
+
+    support_status = "NO_RELIABLE_ALIGNMENT"
+    recommendation_claim = "NONE"
+    why_status = "UNAVAILABLE"
+    why_summary = "当前没有足够可靠的中文证据支持双语概念对应。"
+    why_evidence: list[dict[str, Any]] = []
+    limitations = ["未形成可靠双语对应，因此不生成候选差异结论。"]
+
+    grounding_complete = bool(
+        meaning
+        and english_evidence
+        and selected_candidate
+        and recommended_chinese_concept
+    )
+    if alignment_status == "READY" and grounding_complete:
+        support_status = "EVIDENCE_GROUNDED"
+        recommendation_claim = "EVIDENCE_BACKED_RECOMMENDATION"
+        why_status = "EVIDENCE_BACKED"
+        why_summary = (
+            f"当前推荐“{selected_candidate['term']}”绑定到独立中文证据，"
+            "并通过既有双侧证据资格门。下面只呈现输入证据及流程结论，"
+            "仍是个人非官方学习结果。"
+        )[:MAX_LEARNING_SUMMARY_CHARS]
+        why_evidence = [
+            {**english_evidence[0], "language": "en"},
+            {**selected_candidate["evidence"], "language": "zh"},
+        ]
+        limitations = [
+            "该说明解释证据与机器推荐的关系，不替代课程正式定义。",
+            "候选间的概念边界仅在证据中并列展示，不由系统补写。",
+        ]
+    elif alignment_status == "REVIEW_REQUIRED" and english_evidence and candidates:
+        support_status = "ALTERNATIVES_UNRESOLVED"
+        recommendation_claim = "TENTATIVE"
+        why_status = "UNRESOLVED"
+        why_summary = (
+            "多个候选具有独立中文证据，但现有证据无法唯一确认对应关系。"
+            "请比较每个候选的有界证据，不要把第一项当作唯一答案。"
+        )[:MAX_LEARNING_SUMMARY_CHARS]
+        why_evidence = [{**english_evidence[0], "language": "en"}] + [
+            {**item["evidence"], "language": "zh"}
+            for item in candidates
+        ]
+        limitations = [
+            "候选关系尚未解决，所有候选均保持非官方和不确定状态。"
+        ]
+    elif alignment_status in {"READY", "REVIEW_REQUIRED"}:
+        support_status = "GROUNDING_INCOMPLETE"
+        why_summary = "当前结果缺少可绑定到候选的双侧证据，学习说明已关闭。"
+        limitations = ["候选或证据 provenance 不完整。"]
+
+    alternative_items = []
+    comparisons = []
+    if alignment_status in {"READY", "REVIEW_REQUIRED"}:
+        for alternative in alternatives:
+            alternative_items.append(
+                {
+                    **alternative,
+                    "student_message": (
+                        f"“{alternative['term']}”有独立中文证据，但当前流程"
+                        "没有把它确认为唯一对应；保留为可比较候选，不代表已证明错误。"
+                    )[:MAX_LEARNING_SUMMARY_CHARS],
+                }
+            )
+            if selected_candidate is not None:
+                comparisons.append(
+                    {
+                        "recommended_term": selected_candidate["term"],
+                        "alternative_term": alternative["term"],
+                        "comparison_mode": "EVIDENCE_SIDE_BY_SIDE",
+                        "boundary_conclusion": "UNRESOLVED",
+                        "recommended_evidence": dict(
+                            selected_candidate["evidence"]
+                        ),
+                        "alternative_evidence": dict(alternative["evidence"]),
+                        "student_message": (
+                            f"当前证据不足以安全概括“{selected_candidate['term']}”"
+                            f"与“{alternative['term']}”的概念边界；下面并列有界证据，"
+                            "避免编造差异。"
+                        )[:MAX_LEARNING_SUMMARY_CHARS],
+                    }
+                )
+
+    return {
+        "contract_id": LEARNING_SUPPORT_CONTRACT_VERSION,
+        "status": support_status,
+        "workspace_behavior": "SHARED_STUDENT_EXPERIENCE",
+        "authority": "NON_OFFICIAL",
+        "visibility": "PRIVATE",
+        "grounding_mode": "DETERMINISTIC_EVIDENCE_TEMPLATE",
+        "provider_used": False,
+        "generated_claims": False,
+        "recommendation_claim": recommendation_claim,
+        "what_it_means_here": {
+            "mode": "EXTRACTIVE_COURSE_CONTEXT",
+            "text": meaning,
+            "citations": meaning_citations,
+        },
+        "why_they_align": {
+            "status": why_status,
+            "summary": why_summary,
+            "evidence": why_evidence[: MAX_LEARNING_EVIDENCE_ITEMS + 1],
+        },
+        "candidate_evidence": candidates if alignment_status != "NOT_READY" else [],
+        "alternatives": alternative_items,
+        "do_not_confuse_with": comparisons,
+        "limitations": limitations,
+    }
+
+
 def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
     status = alignment_status_from_qualification(result.get("qualification"))
     selected = result.get("selected_candidate") if isinstance(result.get("selected_candidate"), dict) else {}
@@ -491,6 +720,11 @@ def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
         "REVIEW_REQUIRED": ["存在多个可能对应或概念范围不确定。"],
         "NOT_READY": ["请补充受治理的中文资料，或重新选择更明确的英文概念。"],
     }
+    learning_support = build_student_learning_support(
+        result,
+        alignment_status=status,
+        recommended_chinese_concept=recommended,
+    )
     return {
         **base,
         "contract_id": ALIGNMENT_RESULT_CONTRACT_VERSION,
@@ -505,6 +739,7 @@ def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
         "recommended_chinese_concept": recommended,
         "student_explanation": student_explanations[status],
         "student_risk_summary": student_risk_summaries[status],
+        "learning_support": learning_support,
         "evidence_complete": bool(base["english_evidence"] and base["chinese_evidence"]),
         "generated_hint_present": bool(base["generated_hints"]),
         "evidence_scope": dict(result.get("evidence_scope") or {}),
@@ -512,6 +747,58 @@ def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
         "created_at": _text(result.get("created_at")),
         "updated_at": _text(result.get("updated_at")),
     }
+
+
+def redact_unavailable_source_result(
+    serialized: dict[str, Any],
+) -> dict[str, Any]:
+    """Retain the historical decision while closing access to deleted evidence.
+
+    A PersonalLearningRecord may outlive its source material, but deletion must
+    make the bounded source text and derived learning explanation inaccessible.
+    The original machine status and selected term remain historical facts; they
+    are no longer presented as currently verifiable evidence.
+    """
+    redacted = dict(serialized)
+    redacted.update(
+        {
+            "bounded_context": "",
+            "english_evidence": [],
+            "chinese_evidence": [],
+            "chinese_candidates": [],
+            "evidence_complete": False,
+            "student_explanation": (
+                "历史对齐结果仍保留，但原资料已不可用，当前无法重新核验证据。"
+            ),
+            "student_risk_summary": ["原资料已删除或当前不可访问。"],
+        }
+    )
+    support = dict(redacted.get("learning_support") or {})
+    support.update(
+        {
+            "status": "SOURCE_UNAVAILABLE",
+            "grounding_mode": "SOURCE_UNAVAILABLE",
+            "recommendation_claim": "HISTORICAL_RESULT_ONLY",
+            "what_it_means_here": {
+                "mode": "SOURCE_UNAVAILABLE",
+                "text": "",
+                "citations": [],
+            },
+            "why_they_align": {
+                "status": "UNAVAILABLE",
+                "summary": (
+                    "原资料已不可用，系统不再展示或重新解释其历史证据。"
+                ),
+                "evidence": [],
+            },
+            "candidate_evidence": [],
+            "alternatives": [],
+            "do_not_confuse_with": [],
+            "limitations": ["历史结果不可作为当前可核验的证据型推荐。"],
+        }
+    )
+    redacted["learning_support"] = support
+    return redacted
 
 
 def build_raw_alignment_result(

@@ -1419,24 +1419,35 @@
       const recommended = result.recommended_chinese_concept;
       const evidence = items => (items || []).map(item => `<div class="quote"><p>${escapeHtml(item.snippet || "")}</p><small>${escapeHtml(item.source_uid || "")} · page ${escapeHtml(item.page_number || "-")}</small></div>`).join("") || `<p class="muted">暂无可用证据。</p>`;
       const statusText = result.student_explanation || (result.alignment_status === "READY" ? "证据充分" : result.alignment_status === "REVIEW_REQUIRED" ? "存在多个可能对应" : "暂无可靠中文对应");
-      const alternatives = (result.chinese_candidates || []).filter(candidate => !recommended || candidate.candidate_uid !== recommended.candidate_uid);
-      const candidateList = alternatives.map(candidate => `<li><strong>${escapeHtml(candidate.text || "")}</strong> · 有独立中文证据支持的候选</li>`).join("");
+      const support = result.learning_support || {};
+      const sourceUnavailable = support.status === "SOURCE_UNAVAILABLE" || result.source_availability === "SOURCE_UNAVAILABLE";
+      const groundingNotice = sourceUnavailable
+        ? "原资料已不可用；仅保留历史对齐结论和个人记录，不再展示或解释旧证据。"
+        : "以下学习说明只根据当前双侧证据整理；不会补写证据中不存在的概念差异。";
+      const meaning = support.what_it_means_here || {};
+      const rationale = support.why_they_align || {};
+      const alternatives = support.alternatives || [];
+      const candidateList = alternatives.map(alternative => `<div class="quote" data-testid="student-alternative-evidence"><p><strong>${escapeHtml(alternative.term || "")}</strong></p><p>${escapeHtml((alternative.evidence && alternative.evidence.snippet) || "")}</p><small>${escapeHtml((alternative.evidence && alternative.evidence.source_uid) || "")} · page ${escapeHtml((alternative.evidence && alternative.evidence.page_number) || "-")}</small><p class="muted">${escapeHtml(alternative.student_message || "")}</p></div>`).join("");
+      const conceptComparisonList = comparisons => (comparisons || []).map(comparison => `<div class="card" data-testid="student-concept-comparison"><h4>${escapeHtml(comparison.recommended_term || "")} / ${escapeHtml(comparison.alternative_term || "")}</h4><div class="grid two"><div class="quote"><p>${escapeHtml((comparison.recommended_evidence && comparison.recommended_evidence.snippet) || "")}</p></div><div class="quote"><p>${escapeHtml((comparison.alternative_evidence && comparison.alternative_evidence.snippet) || "")}</p></div></div><p class="muted">${escapeHtml(comparison.student_message || "")}</p></div>`).join("") || `<p class="muted">当前没有可安全并列比较的 evidence-backed 候选。</p>`;
+      const hints = (result.generated_hints || []).map(hint => `<div class="notice" data-testid="student-generated-hint-warning"><strong>机器提示（非证据）</strong><p>${escapeHtml(hint.text || "")}</p><small>generated=true · evidence_backed=false</small></div>`).join("");
       const riskSummary = (result.student_risk_summary || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
       const saved = Boolean(result.personal_state && result.personal_state.saved);
       return `<section class="card" data-testid="student-concept-result">
         <div class="between"><h2>概念学习结果</h2><span class="badge ${result.alignment_status === "READY" ? "good" : "warn"}" data-testid="student-alignment-status">${escapeHtml(result.alignment_status)}</span></div>
         <div class="notice">个人学习结果 · 非课程官方答案 · PRIVATE · NON_OFFICIAL</div>
+        <div class="notice" data-testid="student-learning-support-grounding">${groundingNotice}</div>
         <div class="grid two">
-          <div><h3>English Concept</h3><p data-testid="student-result-english-term"><strong>${escapeHtml(result.english_term || result.selected_text || "")}</strong></p><h4>What It Means Here</h4><p>${escapeHtml(result.bounded_context || "")}</p></div>
-          <div><h3>${result.alignment_status === "REVIEW_REQUIRED" ? "可能对应" : "推荐中文概念"}</h3><p data-testid="student-result-chinese-term"><strong>${escapeHtml((recommended && recommended.text) || "尚无可靠对应")}</strong></p><p>${escapeHtml(statusText)}</p></div>
+          <div><h3>English Concept</h3><p data-testid="student-result-english-term"><strong>${escapeHtml(result.english_term || result.selected_text || "")}</strong></p><h4>What It Means Here</h4><p data-testid="student-meaning-here">${escapeHtml(meaning.text || result.bounded_context || "")}</p></div>
+          <div><h3>${sourceUnavailable ? "历史对齐中文概念" : result.alignment_status === "REVIEW_REQUIRED" ? "可能对应" : "推荐中文概念"}</h3><p data-testid="student-result-chinese-term"><strong>${escapeHtml((recommended && recommended.text) || "尚无可靠对应")}</strong></p><p>${escapeHtml(statusText)}</p></div>
         </div>
         <div class="grid two"><div><h3>English Evidence</h3><div data-testid="student-query-english-evidence">${evidence(result.english_evidence)}</div></div><div><h3>中文证据</h3><div data-testid="student-query-chinese-evidence">${evidence(result.chinese_evidence)}</div></div></div>
         <div class="grid two">
-          <div><h3>Why They Align</h3><p>${escapeHtml(statusText)}</p></div>
-          <div><h3>Alternatives</h3>${candidateList ? `<ul>${candidateList}</ul>` : `<p class="muted">当前没有其他有证据支持的候选。</p>`}</div>
-          <div><h3>Do Not Confuse With</h3>${riskSummary ? `<ul>${riskSummary}</ul>` : `<p class="muted">当前证据未标记需要特别区分的相近概念。</p>`}</div>
-          <div><h3>Confidence / Uncertainty</h3><p>${escapeHtml(statusText)}</p></div>
+          <div><h3>Why They Align</h3><p data-testid="student-alignment-rationale">${escapeHtml(rationale.summary || statusText)}</p></div>
+          <div><h3>Alternatives</h3>${candidateList || `<p class="muted">当前没有其他有证据支持的候选。</p>`}</div>
+          <div><h3>Do Not Confuse With</h3>${conceptComparisonList(support.do_not_confuse_with)}</div>
+          <div><h3>Confidence / Uncertainty</h3><p>${escapeHtml(statusText)}</p>${riskSummary ? `<ul>${riskSummary}</ul>` : ""}</div>
         </div>
+        ${hints}
         ${result.uncertain ? `<div class="notice" data-testid="student-result-uncertain">当前证据不能唯一确认；你仍可查看和保存这些有证据的候选。</div>` : ""}
         ${result.source_availability === "SOURCE_UNAVAILABLE" ? `<div class="notice error" data-testid="student-result-source-unavailable">原资料已删除、失效或当前不可访问。历史结果和个人笔记仍保留，但证据不可重新核验。</div>` : ""}
         <div class="row">

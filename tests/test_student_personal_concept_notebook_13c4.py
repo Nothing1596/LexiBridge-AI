@@ -357,6 +357,21 @@ def test_notebook_preserves_deleted_source_history_and_revoked_course_privacy(
     assert by_uid[personal["query_uid"]]["evidence_availability"] == "UNAVAILABLE"
     assert managed["query_uid"] not in by_uid
 
+    detail = client.get(
+        f"/api/student/concept-queries/{personal['query_uid']}",
+        headers=auth(student_token),
+    )
+    assert detail.status_code == 200
+    unavailable = detail.get_json()["data"]["query"]
+    assert unavailable["bounded_context"] == ""
+    assert unavailable["english_evidence"] == []
+    assert unavailable["chinese_evidence"] == []
+    assert unavailable["evidence_complete"] is False
+    assert unavailable["learning_support"]["status"] == "SOURCE_UNAVAILABLE"
+    assert unavailable["learning_support"]["why_they_align"]["status"] == "UNAVAILABLE"
+    assert unavailable["learning_support"]["candidate_evidence"] == []
+    assert unavailable["learning_support"]["do_not_confuse_with"] == []
+
 
 def test_notebook_rejects_invalid_filters_and_non_student_roles(
     app_module, client, student_token, teacher_token, admin_token
