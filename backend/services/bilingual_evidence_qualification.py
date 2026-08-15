@@ -534,6 +534,31 @@ def _pair_consistency_inputs(
     )
 
 
+def _workflow_quality_status(evidence: dict[str, Any]) -> str:
+    """Translate parser vocabulary into the frozen qualification vocabulary.
+
+    The raw evidence metadata is preserved. Only clean native-text evidence is
+    adapted to ``ready``; review or blocked parse flags remain fail-closed.
+    """
+    raw = _text(evidence.get("quality_status"))
+    labels = {
+        _norm(value)
+        for value in (
+            list(evidence.get("quality_flags") or [])
+            + list(evidence.get("risk_labels") or [])
+        )
+        if _text(value)
+    }
+    benign = {"native_text_ok", "layout_aware_chunk", "layout_applied"}
+    has_non_benign_label = any(
+        label not in benign and not label.startswith("layout_provider_")
+        for label in labels
+    )
+    if _norm(raw) == "native_text_ok" and not has_non_benign_label:
+        return "ready"
+    return raw
+
+
 def qualify_workflow_top1(
     input_data: dict[str, Any],
     english_evidence: list[dict[str, Any]],
@@ -612,7 +637,9 @@ def qualify_workflow_top1(
         english_evidence_span=_text(english.get("snippet") or input_data.get("english_context")),
         english_source_language=_text(english.get("language") or "en"),
         english_source_status=_text(english.get("status") or "active"),
-        english_quality_status=_text(english.get("quality_status") or "ready"),
+        english_quality_status=(
+            _workflow_quality_status(english) or "ready"
+        ),
         chinese_candidate_uid=_text(candidate.get("candidate_uid")),
         chinese_term=_text(candidate.get("chinese_term")),
         normalized_chinese_term=_text(candidate.get("normalized_text") or candidate.get("chinese_term")),
@@ -622,7 +649,9 @@ def qualify_workflow_top1(
         chinese_evidence_span=_text(candidate.get("original_span") or candidate.get("evidence_snippet") or candidate.get("snippet")),
         chinese_source_language=_text(chinese.get("language") or "zh"),
         chinese_source_status=_text(chinese.get("status") or "active"),
-        chinese_quality_status=_text(chinese.get("quality_status") or "ready"),
+        chinese_quality_status=(
+            _workflow_quality_status(chinese) or "ready"
+        ),
         retrieval_score=float(chinese.get("score") or candidate.get("retrieval_score") or 0.0),
         retrieval_rank=int(top.get("retrieval_rank") or candidate.get("retrieval_rank") or 999),
         extraction_score=float(candidate.get("score") or 0.0),

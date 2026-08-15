@@ -174,6 +174,8 @@ def register_student_concept_query_routes(
         raw = json.loads(query.result_json or "{}")
         raw["personal_state"] = personal_state(query)
         serialized = student_concept_queries.serialize_alignment_result(raw)
+        serialized["processing_status"] = str(query.processing_status or "")
+        serialized["error_code"] = str(query.error_code or "")
         serialized["source_availability"] = source_availability(query)
         if serialized["source_availability"] == "SOURCE_UNAVAILABLE":
             serialized["evidence_availability"] = "UNAVAILABLE"
@@ -313,6 +315,12 @@ def register_student_concept_query_routes(
                     english_source_uid=source.source_uid,
                 )
             else:
+                embedding_backend = current_app.config.get(
+                    "STUDENT_CROSS_LANGUAGE_EMBEDDING_BACKEND"
+                )
+                reranker_backend = current_app.config.get(
+                    "STUDENT_BILINGUAL_RERANKER_BACKEND"
+                )
                 workflow = bilingual_evidence_workflow.retrieve_bilingual_evidence(
                     db.session,
                     models.KnowledgeChunk,
@@ -323,12 +331,23 @@ def register_student_concept_query_routes(
                     filters={
                         "source_uids": evidence_scope.allowed_source_uids,
                         "english_source_uid": source.source_uid,
+                        # Active, governed sources may carry review-grade parse
+                        # labels. Keep that evidence visible and let the frozen
+                        # qualification policy propagate uncertainty.
+                        "include_needs_review": True,
+                        # The student selected this exact governed English
+                        # chunk. Review-grade parser risks must propagate into
+                        # qualification instead of silently erasing the
+                        # English evidence side.
+                        "english_include_needs_review": True,
                     },
                     auto_generate_chinese_candidates=True,
                     english_candidate_uid=f"student:{query_uid}",
                     normalized_english_term=selection.selected_text.casefold(),
                     english_context=selection.bounded_context,
                     discipline=source.discipline,
+                    cross_language_embedding_backend=embedding_backend,
+                    bilingual_reranker_backend=reranker_backend,
                 )
             raw = student_concept_queries.build_raw_alignment_result(
                 workflow,
