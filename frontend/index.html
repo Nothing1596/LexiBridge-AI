@@ -2831,6 +2831,8 @@
       return params.toString();
     }
 
+    let reviewCardLoadSequence = 0;
+
     async function loadReviewQueue() {
       if (!state.user || !["reviewer", "admin"].includes(state.user.role)) return;
       const query = reviewQueryString();
@@ -2846,6 +2848,7 @@
         if (!stillVisible && state.cache.reviewQueue.length) state.selectedReviewCardUid = state.cache.reviewQueue[0].card_uid;
         await loadReviewCard(state.selectedReviewCardUid);
       } else {
+        reviewCardLoadSequence += 1;
         state.cache.reviewCard = null;
         state.cache.reviewHistory = [];
       }
@@ -2853,23 +2856,30 @@
 
     async function loadReviewCard(cardUid) {
       if (!cardUid) return;
+      const loadSequence = ++reviewCardLoadSequence;
       const [cardPayload, reviewsPayload, reviewCasePayload] = await Promise.all([
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}`),
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}/reviews?per_page=50`),
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}/review-case`)
       ]);
+      if (loadSequence !== reviewCardLoadSequence || state.selectedReviewCardUid !== cardUid) return;
       const card = (cardPayload.data && cardPayload.data.card) || cardPayload.card || {};
       const queueItem = (state.cache.reviewQueue || []).find(item => item.card_uid === cardUid) || {};
-      state.cache.reviewCard = { ...queueItem, ...card };
-      state.cache.reviewHistory = (reviewsPayload.data && reviewsPayload.data.items) || [];
-      state.cache.reviewCase = (reviewCasePayload.data && reviewCasePayload.data.case) || null;
-      state.cache.reviewDraft = null;
-      if (state.cache.reviewCase && state.cache.reviewCase.draft && state.cache.reviewCase.draft.draft_status === "DRAFT") {
+      const reviewCard = { ...queueItem, ...card };
+      const reviewHistory = (reviewsPayload.data && reviewsPayload.data.items) || [];
+      const reviewCase = (reviewCasePayload.data && reviewCasePayload.data.case) || null;
+      let reviewDraft = null;
+      if (reviewCase && reviewCase.draft && reviewCase.draft.draft_status === "DRAFT") {
         const draftPayload = await api(`/api/concept-cards/${encodeURIComponent(cardUid)}/draft`);
-        state.cache.reviewDraft = draftPayload.data && draftPayload.data.draft;
+        if (loadSequence !== reviewCardLoadSequence || state.selectedReviewCardUid !== cardUid) return;
+        reviewDraft = draftPayload.data && draftPayload.data.draft;
       }
       const verification = (queueItem && queueItem.verification_summary) || null;
-      if (verification) state.cache.reviewCard.verification_summary = verification;
+      if (verification) reviewCard.verification_summary = verification;
+      state.cache.reviewCard = reviewCard;
+      state.cache.reviewHistory = reviewHistory;
+      state.cache.reviewCase = reviewCase;
+      state.cache.reviewDraft = reviewDraft;
     }
 
     function studentConceptQueryString(extra = {}) {

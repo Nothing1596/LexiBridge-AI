@@ -79,11 +79,11 @@ qualification or readiness policy is changed by this task.
 
 - targeted Student/pilot/13B–13C.5/OpenAPI/migration regression: `69 passed`;
 - full pytest with `.env` loading disabled and credential variables empty:
-  `1688 passed, 5 skipped`;
+  `1689 passed, 5 skipped`;
 - Browser E2E: Student PASS (`71` steps), Instructor PASS (`7` steps),
   Reviewer PASS (`15` steps), console/page errors `0`, external dependencies
   `0`;
-- `scripts/dev_check.py`: passed, including its independent `1688 passed,
+- `scripts/dev_check.py`: passed, including its independent `1689 passed,
   5 skipped` pytest, migration, release safety and backend smoke;
 - `scripts/check_release_safety.py`: passed;
 - `git diff --check`: passed;
