@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from flask import current_app, request
 
@@ -21,6 +21,8 @@ class StudentConceptQueryModels:
     KnowledgeChunk: Any
     Course: Any
     CourseMember: Any
+    Document: Any
+    DocumentParseRecord: Any
 
 
 def register_student_concept_query_routes(
@@ -28,6 +30,8 @@ def register_student_concept_query_routes(
     *,
     core: RouteCoreDependencies,
     models: StudentConceptQueryModels,
+    material_file_exists: Callable[[Any], bool],
+    material_file_response: Callable[[Any], Any],
 ) -> None:
     marker = "student_concept_query_routes"
     registered = app.extensions.setdefault("lexibridge_route_modules", set())
@@ -491,6 +495,189 @@ def register_student_concept_query_routes(
             audit_context=context,
         )
 
+    def reader_source(user, source_uid, context):
+        source = models.KnowledgeSource.query.filter_by(
+            source_uid=source_uid, language="en", status="active"
+        ).first()
+        scope = (
+            "PERSONAL"
+            if source is not None and str(source.scope_type or "").lower() == "personal"
+            else "MANAGED_COURSE"
+        )
+        if source is None or not source_access(user, source, scope):
+            return None, None, error(
+                "STUDENT_CONCEPT_SOURCE_NOT_ACCESSIBLE",
+                "Source is not available.",
+                404,
+                context,
+            )
+        return source, scope, None
+
+    def material_reader(source_uid):
+        context = core.get_route_audit_context()
+        user, response = student(context)
+        if response:
+            return core.attach_request_id_to_response(response, context)
+        context = core.get_route_audit_context(user)
+        source, scope, failure = reader_source(user, source_uid, context)
+        if failure:
+            return failure
+        raw_page = str(request.args.get("page") or "1").strip()
+        try:
+            page_number = int(raw_page)
+        except (TypeError, ValueError):
+            page_number = 0
+        if page_number < 1:
+            return error(
+                "STUDENT_MATERIAL_READER_PAGE_INVALID",
+                "Reader page is invalid.",
+                400,
+                context,
+            )
+        chunk_query = models.KnowledgeChunk.query.filter_by(
+            source_uid=source.source_uid, language="en", status="active"
+        )
+        provenance_rows = db.session.query(
+            models.KnowledgeChunk.page_number,
+            models.KnowledgeChunk.parse_block_uid,
+        ).filter_by(
+            source_uid=source.source_uid, language="en", status="active"
+        ).all()
+        if any(page is None or not str(block or "").strip() for page, block in provenance_rows):
+            return error(
+                "STUDENT_MATERIAL_READER_PROVENANCE_INCOMPLETE",
+                "A parsed material block is missing page or block provenance.",
+                409,
+                context,
+            )
+        available_pages = sorted({int(page) for page, _ in provenance_rows})
+        if page_number not in available_pages:
+            return error(
+                "STUDENT_MATERIAL_READER_PAGE_INVALID",
+                "Reader page is not available.",
+                400,
+                context,
+            )
+        chunks = chunk_query.filter_by(page_number=page_number).order_by(
+            models.KnowledgeChunk.page_number.asc(),
+            models.KnowledgeChunk.chunk_index.asc(),
+            models.KnowledgeChunk.id.asc(),
+        ).all()
+        try:
+            serialized_items = [
+                student_concept_queries.serialize_material_reader_item(chunk)
+                for chunk in chunks
+            ]
+        except student_concept_queries.StudentConceptQueryError as exc:
+            return error(exc.reason_code, str(exc), 409, context)
+        page_items = serialized_items
+        document = (
+            db.session.get(models.Document, source.document_id)
+            if source.document_id is not None
+            else None
+        )
+        parse_record = (
+            models.DocumentParseRecord.query.filter_by(parse_uid=source.parse_uid).first()
+            if str(source.parse_uid or "").strip()
+            else None
+        )
+        course = db.session.get(models.Course, source.course_id) if source.course_id else None
+        parsed_page_count = int(getattr(parse_record, "page_count", 0) or 0)
+        page_count = max(parsed_page_count, max(available_pages, default=0))
+        try:
+            file_available = bool(
+                document is not None
+                and not str(document.deleted_at or "").strip()
+                and str(document.file_type or source.file_type or "").lower() == "pdf"
+                and material_file_exists(document)
+            )
+        except (FileNotFoundError, NotImplementedError, OSError, ValueError):
+            file_available = False
+        return core.api_success_with_audit_context(
+            {
+                "reader": {
+                    "contract_id": student_concept_queries.MATERIAL_READER_CONTRACT_VERSION,
+                    "source": {
+                        "source_uid": source.source_uid,
+                        "source_version": str(source.version or 1),
+                        "title": str(source.title or source.name or "")[:220],
+                        "workspace_scope": scope,
+                        "workspace_uid": (
+                            f"personal:{user.id}"
+                            if scope == "PERSONAL"
+                            else f"course:{source.course_id}"
+                        ),
+                        "course_name": getattr(course, "name", "") if course else "",
+                        "file_type": str(
+                            getattr(document, "file_type", "") or source.file_type or ""
+                        ).lower(),
+                        "file_available": file_available,
+                        "parser_id": str(getattr(parse_record, "parser_name", "") or ""),
+                        "parser_version": str(
+                            getattr(parse_record, "parser_version", "") or ""
+                        ),
+                    },
+                    "page": {
+                        "number": page_number,
+                        "page_count": page_count,
+                        "available_pages": available_pages,
+                        "previous_page": next(
+                            (value for value in reversed(available_pages) if value < page_number),
+                            None,
+                        ),
+                        "next_page": next(
+                            (value for value in available_pages if value > page_number),
+                            None,
+                        ),
+                        "block_count": len(page_items),
+                    },
+                    "items": page_items,
+                }
+            },
+            audit_context=context,
+        )
+
+    def material_file(source_uid):
+        context = core.get_route_audit_context()
+        user, response = student(context)
+        if response:
+            return core.attach_request_id_to_response(response, context)
+        context = core.get_route_audit_context(user)
+        source, _, failure = reader_source(user, source_uid, context)
+        if failure:
+            return failure
+        document = (
+            db.session.get(models.Document, source.document_id)
+            if source.document_id is not None
+            else None
+        )
+        if (
+            document is None
+            or str(document.deleted_at or "").strip()
+            or str(document.file_type or source.file_type or "").lower() != "pdf"
+        ):
+            return error(
+                "STUDENT_MATERIAL_FILE_NOT_AVAILABLE",
+                "The original PDF is not available.",
+                404,
+                context,
+            )
+        try:
+            if not material_file_exists(document):
+                raise FileNotFoundError(source_uid)
+            file_response = material_file_response(document)
+        except (FileNotFoundError, NotImplementedError, OSError, ValueError):
+            return error(
+                "STUDENT_MATERIAL_FILE_NOT_AVAILABLE",
+                "The original PDF is not available.",
+                404,
+                context,
+            )
+        file_response.headers["Cache-Control"] = "private, no-store"
+        file_response.headers["X-Content-Type-Options"] = "nosniff"
+        file_response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
+        return file_response
+
     def get_query(query_uid):
         context = core.get_route_audit_context()
         user, response = student(context)
@@ -567,6 +754,16 @@ def register_student_concept_query_routes(
     app.add_url_rule(
         "/api/student/concept-materials/<source_uid>/chunks",
         view_func=list_material_chunks,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/student/concept-materials/<source_uid>/reader",
+        view_func=material_reader,
+        methods=["GET"],
+    )
+    app.add_url_rule(
+        "/api/student/concept-materials/<source_uid>/file",
+        view_func=material_file,
         methods=["GET"],
     )
     app.add_url_rule("/api/student/concept-queries/<query_uid>", view_func=get_query, methods=["GET"])

@@ -279,6 +279,29 @@
       align-items: start;
     }
 
+    .student-reader-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+      gap: 16px;
+      align-items: start;
+      margin-top: 14px;
+    }
+
+    .student-pdf-frame {
+      width: 100%;
+      min-height: 620px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f4f7fa;
+    }
+
+    .student-reader-text {
+      max-height: 680px;
+      overflow: auto;
+      display: grid;
+      gap: 12px;
+    }
+
     .review-queue-list {
       max-height: 760px;
       overflow: auto;
@@ -466,7 +489,7 @@
       .topbar { align-items: flex-start; flex-direction: column; }
       .statusbar { position: static; padding: 10px 16px; }
       .hero { grid-template-columns: 1fr; min-height: auto; padding-top: 34px; }
-      .grid, .grid.two, .grid.four, .form-grid, .app-layout, .workspace-header, .split-panel { grid-template-columns: 1fr; }
+      .grid, .grid.two, .grid.four, .form-grid, .app-layout, .workspace-header, .split-panel, .student-reader-grid { grid-template-columns: 1fr; }
       .sidebar { position: static; }
       main { padding: 16px; }
     }
@@ -522,6 +545,7 @@
       studentConceptQuery: {
         sourceUid: "",
         workspaceScope: "",
+        pageNumber: 1,
         selectedText: "",
         chunkUid: "",
         selectionStart: 0,
@@ -590,6 +614,10 @@
         studentConceptMaterials: [],
         personalMaterials: [],
         studentConceptChunks: [],
+        studentMaterialReader: null,
+        studentMaterialPdfUrl: "",
+        studentMaterialPdfSourceUid: "",
+        studentMaterialFileError: "",
         conceptCardFeedbackQueue: [],
         conceptCardFeedbackPagination: null,
         teacherLearningAnalytics: null,
@@ -729,6 +757,7 @@
       try { payload = await response.json(); } catch (error) { payload = { status: "error", message: response.statusText }; }
       if (response.status === 401) {
         formalWorkflow.clear();
+        releaseStudentMaterialPdf();
         localStorage.removeItem("lexibridge_token");
         state.token = "";
         state.user = null;
@@ -772,6 +801,7 @@
         }
         return state.user;
       } catch (error) {
+        releaseStudentMaterialPdf();
         state.token = "";
         state.user = null;
         localStorage.removeItem("lexibridge_token");
@@ -1344,7 +1374,7 @@
           <p class="muted">${escapeHtml(material.evidence_tier || "PERSONAL_PRIVATE")} · ${material.search_eligible ? "可检索" : "暂不可检索"} · qualification quality: ${escapeHtml(material.qualification_quality_status || "unknown")}</p>
           <p class="muted">${escapeHtml(material.parser_id || "pending")} ${escapeHtml(material.parser_version || "")}</p>
           <div class="row">
-            ${material.processing_status === "READY" && material.source_uid && material.material_role === "ENGLISH_COURSE_MATERIAL" ? `<button class="small" data-testid="personal-material-query" onclick="Lexi.openPersonalMaterialQuery('${escapeHtml(material.source_uid)}')">选词学习</button>` : ""}
+            ${material.processing_status === "READY" && material.source_uid && material.material_role === "ENGLISH_COURSE_MATERIAL" ? `<button class="small" data-testid="personal-material-query" onclick="Lexi.openPersonalMaterialReader('${escapeHtml(material.source_uid)}')">阅读并选词</button>` : ""}
             <button class="small danger" data-testid="personal-material-delete" onclick="Lexi.deletePersonalMaterial(${Number(material.material_id)})">删除资料</button>
           </div>
         </article>
@@ -1403,22 +1433,56 @@
       </section>`;
     }
 
+    function renderStudentMaterialReader() {
+      const active = state.studentConceptQuery;
+      const reader = state.cache.studentMaterialReader;
+      if (!reader) return `<div class="card" data-testid="student-material-reader"><p class="muted">请选择一份已有治理和解析的英文资料。</p></div>`;
+      const source = reader.source || {};
+      const page = reader.page || {};
+      const items = reader.items || [];
+      const pdfUrl = state.cache.studentMaterialPdfUrl;
+      const sourceLabel = source.workspace_scope === "PERSONAL"
+        ? "我的资料 · 个人学习结果"
+        : source.workspace_scope === "MANAGED_COURSE"
+          ? `${escapeHtml(source.course_name || "机构托管课程")} · 课程资料`
+          : "英文学习资料";
+      return `<section class="card" data-testid="student-material-reader">
+        <div class="between">
+          <div><h2>${escapeHtml(source.title || "英文学习资料")}</h2><p class="muted">${sourceLabel} · 非课程官方答案</p></div>
+          <div class="row" data-testid="student-reader-page">
+            <button class="small secondary" data-testid="student-reader-prev" onclick="Lexi.changeStudentReaderPage(${Number(page.previous_page || 0)})" ${page.previous_page ? "" : "disabled"}>上一页</button>
+            <span class="badge neutral">第 ${Number(page.number || 1)} / ${Number(page.page_count || 1)} 页</span>
+            <button class="small secondary" data-testid="student-reader-next" onclick="Lexi.changeStudentReaderPage(${Number(page.next_page || 0)})" ${page.next_page ? "" : "disabled"}>下一页</button>
+          </div>
+        </div>
+        <div class="notice">在右侧同页解析文本中选择英文术语。系统会在服务端重新核对文本、offset、source、page 与 block provenance。</div>
+        <div class="student-reader-grid">
+          <div>
+            <h3>原始 PDF</h3>
+            ${pdfUrl ? `<iframe class="student-pdf-frame" data-testid="student-pdf-preview" title="${escapeHtml(source.title || "Course PDF")}" src="${escapeHtml(pdfUrl)}#page=${Number(page.number || 1)}"></iframe>` : `<div class="notice" data-testid="student-pdf-preview">${state.cache.studentMaterialFileError ? escapeHtml(state.cache.studentMaterialFileError) : "当前资料没有可用的原始 PDF 预览；仍可阅读经过治理的解析文本。"}</div>`}
+          </div>
+          <div>
+            <h3>可选取的解析文本</h3>
+            <div class="student-reader-text">${items.map(chunk => `<article class="quote"><div class="muted">${escapeHtml(chunk.heading_path || "")} · page ${Number(chunk.page_number)} · ${escapeHtml(chunk.block_type || "text")}</div><div data-testid="student-material-chunk" data-chunk-uid="${escapeHtml(chunk.chunk_uid)}" onmouseup="Lexi.captureConceptSelection(event, '${escapeHtml(chunk.chunk_uid)}')">${escapeHtml(chunk.text)}</div></article>`).join("") || `<p class="muted">本页没有可选取的英文证据块。</p>`}</div>
+          </div>
+        </div>
+        <div class="notice" data-testid="student-selection-summary">${active.selectedText ? `已选择：${escapeHtml(active.selectedText)}` : "尚未选择概念"}</div>
+        <div data-testid="student-reader-selection-action"><button data-testid="student-concept-align-action" onclick="Lexi.submitStudentConceptQuery()" ${!active.selectedText || active.loading ? "disabled" : ""}>${active.loading ? "正在检索证据…" : "查看概念对应"}</button></div>
+      </section>`;
+    }
+
     function renderStudentConceptQuery() {
       const active = state.studentConceptQuery;
       const materials = state.cache.studentConceptMaterials || [];
-      const chunks = state.cache.studentConceptChunks || [];
-      return pageShell("概念查询", "在有权限访问的英文资料中选择一个专业术语，获得有证据且明确表达不确定性的私人学习结果。", `
+      return pageShell("资料阅读与概念查询", "阅读有权访问的英文 PDF，在同页解析文本中选择一个专业概念，获得有证据且明确表达不确定性的私人学习结果。", `
         <div class="card" data-testid="student-concept-query-page">
           <label>英文学习资料</label>
           <select data-testid="student-concept-material-select" onchange="Lexi.selectConceptMaterial(this.value)">
             <option value="">请选择资料</option>
             ${materials.map(item => `<option value="${escapeHtml(item.source_uid)}" ${active.sourceUid === item.source_uid ? "selected" : ""}>${escapeHtml(item.title)} · ${item.workspace_scope === "PERSONAL" ? "我的资料" : escapeHtml(item.course_name || "课程资料")}</option>`).join("")}
           </select>
-          <p class="muted">在下方英文原文中拖动选择术语或短语，然后点击“查看概念对应”。</p>
-          <div class="stack">${chunks.map(chunk => `<div class="quote" data-testid="student-material-chunk" data-chunk-uid="${escapeHtml(chunk.chunk_uid)}" onmouseup="Lexi.captureConceptSelection(event, '${escapeHtml(chunk.chunk_uid)}')">${escapeHtml(chunk.text)}</div>`).join("") || `<p class="muted">请选择一份已有治理和解析的英文资料。</p>`}</div>
-          <div class="notice" data-testid="student-selection-summary">${active.selectedText ? `已选择：${escapeHtml(active.selectedText)}` : "尚未选择概念"}</div>
-          <button data-testid="student-concept-align-action" onclick="Lexi.submitStudentConceptQuery()" ${!active.selectedText || active.loading ? "disabled" : ""}>${active.loading ? "正在检索证据…" : "查看概念对应"}</button>
         </div>
+        ${renderStudentMaterialReader()}
         ${renderStudentConceptResult(active.result)}
       `);
     }
@@ -2709,22 +2773,65 @@
     async function loadStudentConceptMaterials() {
       const payload = await api("/api/student/concept-materials");
       state.cache.studentConceptMaterials = (payload.data && payload.data.items) || [];
-      if (!state.studentConceptQuery.sourceUid && state.cache.studentConceptMaterials.length) {
-        state.studentConceptQuery.sourceUid = state.cache.studentConceptMaterials[0].source_uid;
-        state.studentConceptQuery.workspaceScope = state.cache.studentConceptMaterials[0].workspace_scope;
+      const current = state.cache.studentConceptMaterials.find(
+        item => item.source_uid === state.studentConceptQuery.sourceUid
+      );
+      if (!current) {
+        releaseStudentMaterialPdf();
+        state.cache.studentMaterialReader = null;
+        state.cache.studentConceptChunks = [];
+        const fallback = state.cache.studentConceptMaterials[0] || null;
+        state.studentConceptQuery.sourceUid = fallback ? fallback.source_uid : "";
+        state.studentConceptQuery.workspaceScope = fallback ? fallback.workspace_scope : "";
       }
-      if (state.studentConceptQuery.sourceUid) await loadStudentConceptChunks(state.studentConceptQuery.sourceUid);
+      if (state.studentConceptQuery.sourceUid) await loadStudentMaterialReader(state.studentConceptQuery.sourceUid, 1, true);
     }
 
-    async function loadStudentConceptChunks(sourceUid) {
-      const payload = await api(`/api/student/concept-materials/${encodeURIComponent(sourceUid)}/chunks`);
-      state.cache.studentConceptChunks = (payload.data && payload.data.items) || [];
-      const source = payload.data && payload.data.source;
+    function releaseStudentMaterialPdf() {
+      if (state.cache.studentMaterialPdfUrl) URL.revokeObjectURL(state.cache.studentMaterialPdfUrl);
+      state.cache.studentMaterialPdfUrl = "";
+      state.cache.studentMaterialPdfSourceUid = "";
+      state.cache.studentMaterialFileError = "";
+    }
+
+    async function loadStudentMaterialFile(sourceUid, reader) {
+      releaseStudentMaterialPdf();
+      if (!reader || !reader.source || !reader.source.file_available) return;
+      const headers = {};
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      const filePath = `/api/student/concept-materials/${encodeURIComponent(sourceUid)}/file`;
+      try {
+        const response = await fetch(`${API_BASE}${filePath}`, { headers });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const contentType = String(response.headers.get("Content-Type") || "").toLowerCase();
+        if (!contentType.includes("application/pdf")) throw new Error("PDF content type is invalid");
+        const blob = await response.blob();
+        state.cache.studentMaterialPdfUrl = URL.createObjectURL(blob);
+        state.cache.studentMaterialPdfSourceUid = sourceUid;
+      } catch (error) {
+        state.cache.studentMaterialFileError = "原始 PDF 暂不可预览；你仍可使用有 provenance 的解析文本。";
+      }
+    }
+
+    async function loadStudentMaterialReader(sourceUid, pageNumber = 1, reloadFile = false) {
+      const payload = await api(`/api/student/concept-materials/${encodeURIComponent(sourceUid)}/reader?page=${Number(pageNumber || 1)}`);
+      const reader = payload.data && payload.data.reader;
+      state.cache.studentMaterialReader = reader || null;
+      state.cache.studentConceptChunks = (reader && reader.items) || [];
+      const source = reader && reader.source;
       state.studentConceptQuery.sourceUid = sourceUid;
       state.studentConceptQuery.workspaceScope = (source && source.workspace_scope) || "";
+      state.studentConceptQuery.pageNumber = Number(reader && reader.page && reader.page.number || 1);
       state.studentConceptQuery.selectedText = "";
       state.studentConceptQuery.chunkUid = "";
       state.studentConceptQuery.result = null;
+      if (reloadFile || state.cache.studentMaterialPdfSourceUid !== sourceUid) {
+        await loadStudentMaterialFile(sourceUid, reader);
+      }
+    }
+
+    async function loadStudentConceptChunks(sourceUid) {
+      return loadStudentMaterialReader(sourceUid, 1, true);
     }
 
     async function loadStudentCourses() {
@@ -3370,7 +3477,22 @@
       async selectConceptMaterial(sourceUid) {
         const material = (state.cache.studentConceptMaterials || []).find(item => item.source_uid === sourceUid);
         state.studentConceptQuery.workspaceScope = material ? material.workspace_scope : "";
-        await loadStudentConceptChunks(sourceUid);
+        if (!sourceUid) {
+          releaseStudentMaterialPdf();
+          state.cache.studentMaterialReader = null;
+          state.cache.studentConceptChunks = [];
+        } else {
+          await loadStudentMaterialReader(sourceUid, 1, true);
+        }
+        render();
+      },
+      async changeStudentReaderPage(pageNumber) {
+        if (!pageNumber || !state.studentConceptQuery.sourceUid) return;
+        await loadStudentMaterialReader(
+          state.studentConceptQuery.sourceUid,
+          Number(pageNumber),
+          false
+        );
         render();
       },
       captureConceptSelection(event, chunkUid) {
@@ -3524,6 +3646,7 @@
       async logout() {
         formalWorkflow.cancel();
         formalWorkflow.clear();
+        releaseStudentMaterialPdf();
         try { await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) }); } catch (error) {}
         state.token = "";
         state.user = null;
@@ -3669,10 +3792,16 @@
         }
       },
       async openPersonalMaterialQuery(sourceUid) {
+        return this.openPersonalMaterialReader(sourceUid);
+      },
+      async openPersonalMaterialReader(sourceUid) {
         state.page = "conceptQuery";
+        state.studentConceptQuery.sourceUid = sourceUid;
         await loadStudentConceptMaterials();
         const exists = state.cache.studentConceptMaterials.some(item => item.source_uid === sourceUid);
-        if (exists) await this.selectConceptMaterial(sourceUid);
+        if (exists && state.cache.studentMaterialReader?.source?.source_uid !== sourceUid) {
+          await this.selectConceptMaterial(sourceUid);
+        }
         render();
       },
 	      async startFormalAlignmentForDocument(documentId) {
