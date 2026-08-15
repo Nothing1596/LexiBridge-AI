@@ -116,6 +116,11 @@ def test_personal_query_is_private_non_official_idempotent_and_savable(
     assert query["authority"] == "NON_OFFICIAL"
     assert query["publication_status"] == "NOT_APPLICABLE"
     assert query["recommended_chinese_concept"]["text"] == "电势"
+    support = query["learning_support"]
+    assert support["contract_id"] == "student-learning-support@1.0.0"
+    assert support["status"] == "EVIDENCE_GROUNDED"
+    assert support["provider_used"] is False
+    assert support["why_they_align"]["status"] == "EVIDENCE_BACKED"
 
     replay = client.post("/api/student/concept-queries", json=payload, headers=auth(student_token))
     assert replay.status_code == 200

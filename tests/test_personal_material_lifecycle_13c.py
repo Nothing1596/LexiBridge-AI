@@ -245,3 +245,8 @@ def test_owned_unready_or_unprovenanced_material_fails_closed_as_not_ready(
     assert result["alignment_status"] == "NOT_READY"
     assert result["reason_code"] == "STUDENT_CONCEPT_SOURCE_NOT_READY"
     assert result["recommended_chinese_concept"] is None
+    assert result["learning_support"]["contract_id"] == (
+        "student-learning-support@1.0.0"
+    )
+    assert result["learning_support"]["status"] == "NO_RELIABLE_ALIGNMENT"
+    assert result["learning_support"]["provider_used"] is False

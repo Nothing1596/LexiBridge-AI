@@ -116,6 +116,11 @@ def register_student_concept_query_routes(
                     "student_explanation": "资料尚未完成处理、已被删除，或缺少可审计来源信息。",
                     "student_risk_summary": [reason],
                     "reason_code": reason,
+                    "learning_support": student_concept_queries.build_student_learning_support(
+                        {},
+                        alignment_status="NOT_READY",
+                        recommended_chinese_concept=None,
+                    ),
                 },
                 "idempotent_replay": False,
             },
@@ -187,6 +192,10 @@ def register_student_concept_query_routes(
         serialized["error_code"] = str(query.error_code or "")
         serialized["source_availability"] = source_availability(query)
         if serialized["source_availability"] == "SOURCE_UNAVAILABLE":
+            serialized = student_concept_queries.redact_unavailable_source_result(
+                serialized
+            )
+            serialized["source_availability"] = "SOURCE_UNAVAILABLE"
             serialized["evidence_availability"] = "UNAVAILABLE"
             serialized["source_unavailable_reason"] = "PERSONAL_MATERIAL_DELETED_OR_INACCESSIBLE"
         else:

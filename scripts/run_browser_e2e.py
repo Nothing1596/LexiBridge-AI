@@ -698,6 +698,49 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         add_step(flow, f"{step_prefix} query retained the selected source UID")
         expect_visible(page, '[data-testid="student-query-english-evidence"] .quote', f"{step_prefix} English evidence visible", flow)
         expect_visible(page, '[data-testid="student-query-chinese-evidence"] .quote', f"{step_prefix} Chinese evidence visible", flow)
+        expect_visible(
+            page,
+            '[data-testid="student-learning-support-grounding"]',
+            f"{step_prefix} evidence-only learning support disclosed",
+            flow,
+        )
+        expect_visible(
+            page,
+            '[data-testid="student-meaning-here"]',
+            f"{step_prefix} bounded course meaning visible",
+            flow,
+        )
+        expect_visible(
+            page,
+            '[data-testid="student-alignment-rationale"]',
+            f"{step_prefix} alignment rationale visible",
+            flow,
+        )
+        support = page.evaluate(
+            "() => window.Lexi && state.studentConceptQuery.result.learning_support"
+        )
+        alignment_status = page.evaluate(
+            "() => window.Lexi && state.studentConceptQuery.result.alignment_status"
+        )
+        assert support["contract_id"] == "student-learning-support@1.0.0"
+        assert support["provider_used"] is False
+        assert support["grounding_mode"] == "DETERMINISTIC_EVIDENCE_TEMPLATE"
+        expected_support_statuses = {
+            "READY": {"EVIDENCE_GROUNDED", "GROUNDING_INCOMPLETE"},
+            "REVIEW_REQUIRED": {
+                "ALTERNATIVES_UNRESOLVED",
+                "GROUNDING_INCOMPLETE",
+            },
+            "NOT_READY": {"NO_RELIABLE_ALIGNMENT"},
+        }
+        assert support["status"] in expected_support_statuses[alignment_status]
+        if expected_scope == "PERSONAL":
+            assert alignment_status == "READY"
+            assert support["status"] == "EVIDENCE_GROUNDED"
+        if alignment_status == "NOT_READY":
+            assert support["candidate_evidence"] == []
+            assert support["do_not_confuse_with"] == []
+        add_step(flow, f"{step_prefix} learning support remained deterministic and non-official")
         if expected_scope == "PERSONAL":
             private_query_uid = page.evaluate(
                 "() => window.Lexi && state.studentConceptQuery.result.query_uid"
