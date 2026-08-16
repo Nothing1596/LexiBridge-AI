@@ -630,6 +630,7 @@
         personalNotebookItems: [],
         personalNotebookSummary: null,
         personalNotebookPagination: null,
+        studentPilot: null,
         conceptCardFeedbackQueue: [],
         conceptCardFeedbackPagination: null,
         teacherLearningAnalytics: null,
@@ -1377,6 +1378,37 @@
 
     function renderPersonalWorkspace() {
       const materials = state.cache.personalMaterials || [];
+      const pilot = state.cache.studentPilot || {};
+      const enrollment = pilot.enrollment || null;
+      const pilotSession = pilot.latest_session || null;
+      const pilotPanel = !pilot.enabled ? "" : `
+        <section class="card" data-testid="student-pilot-panel">
+          <div class="between"><div><h3>可选：Personal Workspace 学生试用研究</h3><p class="muted">帮助我们判断从上传资料到理解概念的流程是否真正有用。参与与否不影响正常使用。</p></div><span class="badge neutral">自愿参与</span></div>
+          <div class="notice">只记录完成状态、耗时区间、证据是否完整、是否保存/写过笔记和量表评分；不收集术语、证据正文或笔记正文。可随时退出并删除试用研究记录。</div>
+          ${!enrollment || enrollment.consent_status !== "CONSENTED" ? `
+            <form class="form-grid" onsubmit="Lexi.enrollStudentPilot(event)">
+              <label class="full"><input data-testid="student-pilot-consent" name="consent" type="checkbox" required /> 我已阅读说明并自愿参加；我确认具备独立同意参加本次产品试用的资格。</label>
+              <button data-testid="student-pilot-enroll">同意并加入试用</button>
+            </form>` : `
+            <p data-testid="student-pilot-consented"><strong>已同意参加。</strong> ${pilotSession ? `当前任务：${escapeHtml(pilotSession.status)}` : "尚未开始任务。"}</p>
+            <div class="row">
+              ${!pilotSession || pilotSession.status === "COMPLETED" ? `<button data-testid="student-pilot-start" onclick="Lexi.startStudentPilotSession()">开始一次试用任务</button>` : ""}
+              <button class="danger" data-testid="student-pilot-withdraw" onclick="Lexi.withdrawStudentPilot()">退出并删除试用研究记录</button>
+            </div>
+            ${pilotSession && pilotSession.status === "STARTED" ? `<div class="notice" data-testid="student-pilot-active">请完成正常流程：上传/打开英文资料 → 选中一个概念 → 查看证据 → 保存或更新学习状态。结果页会出现“完成试用任务”。</div>` : ""}
+            ${pilotSession && pilotSession.status === "COMPLETED" && !pilot.survey ? `
+              <form class="form-grid" data-testid="student-pilot-survey" onsubmit="Lexi.submitStudentPilotSurvey(event)">
+                <div><label>结果对学习有帮助（1-5）</label><input name="helpfulness" type="number" min="1" max="5" required /></div>
+                <div><label>证据有帮助（1-5）</label><input name="evidence_helpfulness" type="number" min="1" max="5" required /></div>
+                <div><label>理解不确定性（1-5）</label><input name="uncertainty_understanding" type="number" min="1" max="5" required /></div>
+                <div><label>任务难度（1-5）</label><input name="task_difficulty" type="number" min="1" max="5" required /></div>
+                <label class="full"><input name="would_use_again" type="checkbox" /> 我愿意再次使用</label>
+                <div class="full"><label>补充意见（可选，不进入聚合报告）</label><textarea name="comment" maxlength="500"></textarea></div>
+                <button data-testid="student-pilot-survey-submit">提交试用反馈</button>
+              </form>` : ""}
+            ${pilot.survey ? `<div class="notice success" data-testid="student-pilot-survey-complete">试用反馈已提交。感谢参与。</div>` : ""}
+          `}
+        </section>`;
       const rows = materials.map(material => `
         <article class="card" data-testid="personal-material-item" data-material-id="${Number(material.material_id)}">
           <div class="between">
@@ -1396,6 +1428,7 @@
       const eligibleChineseEvidence = chineseEvidence.filter(material => material.processing_status === "READY" && material.search_eligible);
       return pageShell("我的学习空间", "你上传的资料仅供本人使用，不进入课程知识库或 Reviewer 队列。", `
         <section data-testid="student-personal-workspace">
+          ${pilotPanel}
           <form class="card form-grid" data-testid="personal-material-upload-form" onsubmit="Lexi.uploadDocument(event, 'personal')">
             <input type="hidden" name="language" value="en" />
             <input type="hidden" name="source_type" value="student_upload" />
@@ -1454,6 +1487,7 @@
           <button data-testid="student-query-save" onclick="Lexi.updatePersonalConceptState({saved:${saved ? "false" : "true"}})">${saved ? "移出概念本" : "保存到概念本"}</button>
           <button class="secondary" data-testid="student-query-understood" onclick="Lexi.updatePersonalConceptState({understanding_state:'UNDERSTOOD'})">理解了</button>
           <button class="secondary" data-testid="student-query-confused" onclick="Lexi.updatePersonalConceptState({understanding_state:'STILL_CONFUSED'})">仍然困惑</button>
+          ${(state.cache.studentPilot && state.cache.studentPilot.enabled && state.cache.studentPilot.latest_session && state.cache.studentPilot.latest_session.status === "STARTED" && result.workspace_scope === "PERSONAL") ? `<button class="secondary" data-testid="student-pilot-complete" onclick="Lexi.completeStudentPilotSession()">完成试用任务</button>` : ""}
         </div>
         <form class="form-grid" onsubmit="Lexi.savePersonalConceptNote(event)"><div class="full"><label>个人笔记</label><textarea name="note" data-testid="student-query-note">${escapeHtml((result.personal_state && result.personal_state.note) || "")}</textarea></div><button data-testid="student-query-note-save">保存笔记</button></form>
       </section>`;
@@ -2649,6 +2683,12 @@
     async function loadPersonalMaterials() {
       const payload = await api("/api/student/personal-materials");
       state.cache.personalMaterials = (payload.data && payload.data.items) || [];
+      try {
+        const pilotPayload = await api("/api/student/pilot");
+        state.cache.studentPilot = pilotPayload.data || null;
+      } catch (error) {
+        state.cache.studentPilot = null;
+      }
     }
 
     async function loadJobs() {
@@ -2791,6 +2831,8 @@
       return params.toString();
     }
 
+    let reviewCardLoadSequence = 0;
+
     async function loadReviewQueue() {
       if (!state.user || !["reviewer", "admin"].includes(state.user.role)) return;
       const query = reviewQueryString();
@@ -2806,6 +2848,7 @@
         if (!stillVisible && state.cache.reviewQueue.length) state.selectedReviewCardUid = state.cache.reviewQueue[0].card_uid;
         await loadReviewCard(state.selectedReviewCardUid);
       } else {
+        reviewCardLoadSequence += 1;
         state.cache.reviewCard = null;
         state.cache.reviewHistory = [];
       }
@@ -2813,23 +2856,30 @@
 
     async function loadReviewCard(cardUid) {
       if (!cardUid) return;
+      const loadSequence = ++reviewCardLoadSequence;
       const [cardPayload, reviewsPayload, reviewCasePayload] = await Promise.all([
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}`),
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}/reviews?per_page=50`),
         api(`/api/concept-cards/${encodeURIComponent(cardUid)}/review-case`)
       ]);
+      if (loadSequence !== reviewCardLoadSequence || state.selectedReviewCardUid !== cardUid) return;
       const card = (cardPayload.data && cardPayload.data.card) || cardPayload.card || {};
       const queueItem = (state.cache.reviewQueue || []).find(item => item.card_uid === cardUid) || {};
-      state.cache.reviewCard = { ...queueItem, ...card };
-      state.cache.reviewHistory = (reviewsPayload.data && reviewsPayload.data.items) || [];
-      state.cache.reviewCase = (reviewCasePayload.data && reviewCasePayload.data.case) || null;
-      state.cache.reviewDraft = null;
-      if (state.cache.reviewCase && state.cache.reviewCase.draft && state.cache.reviewCase.draft.draft_status === "DRAFT") {
+      const reviewCard = { ...queueItem, ...card };
+      const reviewHistory = (reviewsPayload.data && reviewsPayload.data.items) || [];
+      const reviewCase = (reviewCasePayload.data && reviewCasePayload.data.case) || null;
+      let reviewDraft = null;
+      if (reviewCase && reviewCase.draft && reviewCase.draft.draft_status === "DRAFT") {
         const draftPayload = await api(`/api/concept-cards/${encodeURIComponent(cardUid)}/draft`);
-        state.cache.reviewDraft = draftPayload.data && draftPayload.data.draft;
+        if (loadSequence !== reviewCardLoadSequence || state.selectedReviewCardUid !== cardUid) return;
+        reviewDraft = draftPayload.data && draftPayload.data.draft;
       }
       const verification = (queueItem && queueItem.verification_summary) || null;
-      if (verification) state.cache.reviewCard.verification_summary = verification;
+      if (verification) reviewCard.verification_summary = verification;
+      state.cache.reviewCard = reviewCard;
+      state.cache.reviewHistory = reviewHistory;
+      state.cache.reviewCase = reviewCase;
+      state.cache.reviewDraft = reviewDraft;
     }
 
     function studentConceptQueryString(extra = {}) {
@@ -3498,6 +3548,99 @@
 	      async loadPilotReport(rerender = false) {
 	        await loadPilotReport();
 	        if (rerender) render();
+	      },
+	      async enrollStudentPilot(event) {
+	        event.preventDefault();
+	        const form = new FormData(event.target);
+	        if (!form.get("consent")) return setMessage("请先确认自愿参加说明。", "notice error");
+	        try {
+	          await api("/api/student/pilot/enrollment", {
+	            method: "POST",
+	            headers: {"Idempotency-Key": `pilot-enroll:${Date.now()}`},
+	            body: JSON.stringify({
+	              pilot_id: "personal-workspace-one-concept@1.0.0",
+	              consent_version: "student-pilot-consent-zh@1.0.0",
+	              consent: true,
+	              eligibility_attested: true
+	            })
+	          });
+	          await loadPersonalMaterials();
+	          setMessage("已记录自愿参加。你仍可随时退出。", "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "无法记录试用同意。"), "notice error");
+	        }
+	      },
+	      async withdrawStudentPilot() {
+	        try {
+	          await api("/api/student/pilot/enrollment", {
+	            method: "DELETE",
+	            headers: {"Idempotency-Key": `pilot-withdraw:${Date.now()}`}
+	          });
+	          await loadPersonalMaterials();
+	          setMessage("已退出试用并删除试用研究记录；你的资料、查询和个人概念本未被删除。", "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "无法退出试用。"), "notice error");
+	        }
+	      },
+	      async startStudentPilotSession() {
+	        try {
+	          const payload = await api("/api/student/pilot/sessions", {
+	            method: "POST",
+	            headers: {"Idempotency-Key": `pilot-session-start:${Date.now()}`},
+	            body: JSON.stringify({pilot_id: "personal-workspace-one-concept@1.0.0"})
+	          });
+	          state.cache.studentPilot.latest_session = payload.data && payload.data.session;
+	          setMessage("试用任务已开始。请按正常方式完成一次 Personal Workspace 概念学习。", "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "无法开始试用任务。"), "notice error");
+	        }
+	      },
+	      async completeStudentPilotSession() {
+	        const pilot = state.cache.studentPilot || {};
+	        const session = pilot.latest_session || {};
+	        const result = state.studentConceptQuery.result || {};
+	        if (!session.session_uid || !result.query_uid) return setMessage("缺少可完成的试用任务或概念查询。", "notice error");
+	        try {
+	          const payload = await api(`/api/student/pilot/sessions/${encodeURIComponent(session.session_uid)}/complete`, {
+	            method: "PUT",
+	            headers: {"Idempotency-Key": `pilot-session-complete:${session.session_uid}`},
+	            body: JSON.stringify({query_uid: result.query_uid, expected_version: Number(session.version || 1)})
+	          });
+	          state.cache.studentPilot.latest_session = payload.data && payload.data.session;
+	          state.page = "personal";
+	          await loadPersonalMaterials();
+	          setMessage("试用任务已完成。请填写简短反馈。", "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "无法完成试用任务。"), "notice error");
+	        }
+	      },
+	      async submitStudentPilotSurvey(event) {
+	        event.preventDefault();
+	        const session = (state.cache.studentPilot && state.cache.studentPilot.latest_session) || {};
+	        const form = new FormData(event.target);
+	        try {
+	          await api(`/api/student/pilot/sessions/${encodeURIComponent(session.session_uid)}/survey`, {
+	            method: "PUT",
+	            headers: {"Idempotency-Key": `pilot-survey:${session.session_uid}`},
+	            body: JSON.stringify({
+	              helpfulness: Number(form.get("helpfulness")),
+	              evidence_helpfulness: Number(form.get("evidence_helpfulness")),
+	              uncertainty_understanding: Number(form.get("uncertainty_understanding")),
+	              task_difficulty: Number(form.get("task_difficulty")),
+	              would_use_again: Boolean(form.get("would_use_again")),
+	              comment: String(form.get("comment") || "")
+	            })
+	          });
+	          await loadPersonalMaterials();
+	          setMessage("试用反馈已提交。", "success");
+	          render();
+	        } catch (error) {
+	          setMessage(formatApiError(error, "无法提交试用反馈。"), "notice error");
+	        }
 	      },
 	      setCurrentCourse(courseId) {
 	        state.currentCourseId = String(courseId || "");

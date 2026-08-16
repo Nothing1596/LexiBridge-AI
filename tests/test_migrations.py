@@ -67,6 +67,9 @@ def test_empty_database_migration_creates_core_tables(tmp_path):
         "background_job",
         "background_job_event",
         "iteration_backlog_item",
+        "student_pilot_enrollment",
+        "student_pilot_session",
+        "student_pilot_survey",
     } <= tables
 
 

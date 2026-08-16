@@ -33,6 +33,21 @@ def test_teacher_review_ui_surfaces_loading_empty_error_and_conflict_states():
     assert "No reviewable cards, or this account has no permission" in source
 
 
+def test_reviewer_detail_loader_discards_stale_card_responses():
+    source = FRONTEND.read_text(encoding="utf-8")
+    loader = source.split("async function loadReviewCard(cardUid)", 1)[1].split(
+        "async function loadStudentConceptCards", 1
+    )[0]
+    assert "const loadSequence = ++reviewCardLoadSequence;" in loader
+    assert (
+        "loadSequence !== reviewCardLoadSequence || state.selectedReviewCardUid !== cardUid"
+        in loader
+    )
+    assert loader.index("loadSequence !== reviewCardLoadSequence") < loader.index(
+        "state.cache.reviewCard ="
+    )
+
+
 def test_browser_e2e_covers_review_approval_fake_draft_and_edit():
     source = BROWSER_RUNNER.read_text(encoding="utf-8")
     for expected in (

@@ -22,6 +22,10 @@ def app_module(tmp_path_factory):
     os.environ["ALLOW_MOCK_AI"] = "True"
     os.environ["OCR_PROVIDER"] = "none"
     os.environ["FORMULA_OCR_PROVIDER"] = "none"
+    os.environ["LEXIBRIDGE_SKIP_ENV_FILE"] = "true"
+    os.environ["DEEPSEEK_API_KEY"] = ""
+    os.environ["OPENAI_API_KEY"] = ""
+    os.environ["ANTHROPIC_API_KEY"] = ""
 
     spec = importlib.util.spec_from_file_location("lexibridge_test_app", BACKEND / "app.py")
     module = importlib.util.module_from_spec(spec)

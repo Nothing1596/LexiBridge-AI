@@ -1,53 +1,98 @@
-# Pilot Runbook
+# Student-first Personal Workspace Pilot Runbook
 
-## 1. Before The Pilot
+This runbook supersedes the pre-13A teacher/course-card pilot sequence. The old
+teacher-led report remains supported for historical compatibility, but it is
+not evidence of the current Student-first product.
 
-1. Run migrations and seed demo or course data.
-2. Confirm teacher/admin accounts are verified.
-3. Confirm course membership for pilot students.
-4. Run the smoke evaluation set and save the report.
-5. Confirm OCR, Formula OCR, and AI provider status are visible to users.
+## Scope and product claim
 
-## 2. Course Setup
+The pilot asks one question: can a consenting student independently upload
+authorized English and Chinese reference PDFs, select one English course
+concept, understand the evidence-backed alignment or uncertainty, and save a
+private learning record?
 
-1. Teacher creates or selects the course.
-2. Teacher uploads English course notes and Chinese reference material.
-3. Teacher monitors document ingestion jobs.
-4. Teacher triggers alignment after parsing completes.
-5. Teacher reviews `needs_more_evidence`, `pending_quality_control`, and conflict cards.
+It does not test official cards, Instructor review, Reviewer throughput,
+translation, chat, or real Provider quality. Participation is optional and is
+never required to use Personal Workspace.
 
-## 3. Student Trial
+## Before recruiting participants
 
-1. Student selects the joined course.
-2. Student searches core English terms.
-3. Student opens terminology cards and checks evidence.
-4. Student uses favorite/mastered actions.
-5. Student submits feedback for translation, evidence, explanation, OCR, formula OCR, or UI issues.
+1. Merge the pilot-infrastructure PR and deploy it with a repository-external
+   pilot database and private upload storage. Never use `backend/lexibridge.db`.
+2. Set `STUDENT_REAL_PILOT_ENABLED=true`. Keep external LLM/Provider execution
+   disabled unless separately approved by a later task.
+3. Use the exact consent contract
+   `student-pilot-consent-zh@1.0.0`; do not enrol a participant implicitly.
+4. Recruit only people who can independently consent. A study involving
+   minors, publication, sensitive data, or institutional research requires the
+   applicable ethics/privacy review before recruitment.
+5. Ask each participant to use materials they are authorized to use. Do not
+   place private documents in the repository, CI, screenshots, or artifacts.
+6. Verify permission, cross-account isolation, withdrawal, release safety and
+   Browser E2E on the release candidate.
 
-## 4. Feedback Handling
+## Participant task
 
-1. Teacher opens Feedback Review.
-2. Teacher filters high/critical feedback first.
-3. Teacher triages to `triaged` or `in_review`.
-4. Teacher resolves, rejects, marks needs more evidence, converts to backlog, or converts to EvaluationItem.
-5. Critical permission/security feedback is escalated to Admin.
+1. Sign in as Student and open **My Workspace**.
+2. Read the pilot disclosure. Declining leaves the whole product usable.
+3. If participating, explicitly consent and start one pilot session.
+4. Upload one English course PDF and one authorized Chinese reference PDF.
+5. Wait for both materials to become `READY`.
+6. Open the English PDF, select one bounded professional concept, and ask
+   LexiBridge for an alignment.
+7. Inspect both evidence sides and any uncertainty or alternatives.
+8. Save the result, optionally write a private note, and choose an
+   understanding state.
+9. Complete the pilot task and submit the bounded post-task survey.
+10. The participant may withdraw at any time. Withdrawal deletes pilot
+    sessions/surveys but does not delete their normal materials, query results,
+    or PersonalLearningRecord.
 
-## 5. Regression
+## Data minimization
 
-1. Convert important real feedback to EvaluationItem.
-2. Run the evaluation set.
-3. Confirm `no_evidence_forced_alignment_rate = 0`.
-4. Compare metrics with the previous pilot report.
+The pilot session stores only:
 
-## 6. Reporting
+- task state and bounded duration;
+- alignment status and evidence-complete boolean;
+- save, note-present and understanding-state booleans/categories;
+- four 1–5 ratings and a reuse-intent boolean;
+- an opaque one-way query reference hash.
 
-1. Run `python scripts/generate_pilot_report.py --course-id <id> --output docs/generated/pilot_report_course_<id>.md`.
-2. Run `python scripts/export_feedback_summary.py --course-id <id> --output feedback_summary.csv`.
-3. Review the iteration backlog and assign target PRs.
+It does not store the selected term, source/chunk UID, evidence text, note text,
+Prompt, Provider payload, or raw query UID. Optional survey comments are
+student-owned, excluded from aggregates and erased on withdrawal.
 
-## Data That Must Not Be Public
+Instructor and Reviewer roles cannot access the pilot routes. Admin receives
+only aggregates, and metrics remain suppressed below three completed sessions.
 
-- Full student email or real name.
-- Tokens, API keys, password reset codes.
-- Full personal uploaded document content.
-- Full OCR text or AI prompts/responses.
+## Pilot gate and stop conditions
+
+Target at least five consented, completed sessions before drawing even a small
+usability conclusion. The initial product thresholds are:
+
+- task completion rate at least 80%;
+- median end-to-end task duration at most 10 minutes, including upload and
+  local parsing wait;
+- mean evidence-helpfulness and uncertainty-understanding at least 4/5;
+- zero cross-account/private-content disclosure;
+- zero external/real Provider requests for this controlled pilot;
+- zero unsupported evidence/provenance incidents.
+
+Stop immediately on a privacy/access-control incident, unexpected network or
+Provider request, consent/version mismatch, or use of unauthorized material.
+Do not tune Prompt, retrieval, pairing or qualification during the same run.
+
+## Reporting boundary
+
+The admin aggregate may be exported only after the small-cell gate opens. A
+report must distinguish:
+
+- synthetic contract validation;
+- number of real consented/completed participants;
+- excluded or withdrawn sessions;
+- aggregate metrics;
+- observed usability issues;
+- engineering changes proposed for a separate task.
+
+Never call CI/Browser E2E a real-student pilot. The legacy
+`generate_pilot_report.py` course-card report is not the report for this pilot.
