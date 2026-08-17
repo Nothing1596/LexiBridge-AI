@@ -31,6 +31,7 @@ def create_governed_chunk(app_module, *, token=None, text=None, **overrides):
         language=language,
         source_type=overrides.get("source_type", "teacher_upload"),
         source_role=overrides.get("source_role", "english_course_material" if language == "en" else "chinese_reference_material"),
+        scope_type=overrides.get("scope_type"),
         visibility=overrides.get("visibility", "course"),
         trust_level=overrides.get("source_trust_level", overrides.get("trust_level", "teacher_verified")),
         quality_status=overrides.get("source_quality_status", quality_status),
@@ -45,6 +46,7 @@ def create_governed_chunk(app_module, *, token=None, text=None, **overrides):
         source_uid=source.source_uid,
         knowledge_source_id=source.id,
         document_id=0,
+        scope_type=overrides.get("scope_type"),
         course=course,
         chapter=chapter,
         language=language,
@@ -61,6 +63,7 @@ def create_governed_chunk(app_module, *, token=None, text=None, **overrides):
         status=overrides.get("chunk_status", "active"),
         parse_uid=overrides.get("parse_uid", f"parse-{uuid.uuid4().hex}"),
         parse_block_uid=overrides.get("parse_block_uid", f"block-{uuid.uuid4().hex}"),
+        formula_block_ids_json=overrides.get("formula_block_ids_json", "[]"),
     )
     app_module.db.session.add(chunk)
     app_module.db.session.commit()
@@ -96,6 +99,70 @@ def test_search_evidence_returns_structured_governed_candidate(app_module):
         assert len(candidate["snippet"]) <= evidence_retrieval.DEFAULT_SNIPPET_CHARS + 6
         assert "content" not in candidate
         assert query_token in candidate["matched_terms"]
+
+
+def test_stale_formula_flags_are_suppressed_only_for_explicitly_formula_free_prose(
+    app_module,
+):
+    with app_module.app.app_context():
+        token = unique_token("ChargeUnit")
+        _, clean_chunk, _ = create_governed_chunk(
+            app_module,
+            token=token,
+            text=f"{token}: electric charge is measured in coulombs (C).",
+            source_quality_flags=[
+                "native_text_ok",
+                "formula_detected",
+                "formula_ocr_required",
+            ],
+            quality_flags=[
+                "native_text_ok",
+                "formula_detected",
+                "formula_ocr_required",
+            ],
+            formula_block_ids_json="[]",
+            scope_type="personal",
+        )
+        _, formula_chunk, _ = create_governed_chunk(
+            app_module,
+            token=token,
+            text=f"{token}: V = U / q.",
+            source_quality_flags=[
+                "native_text_ok",
+                "formula_detected",
+                "formula_ocr_required",
+            ],
+            quality_flags=[
+                "native_text_ok",
+                "formula_detected",
+                "formula_ocr_required",
+            ],
+            formula_block_ids_json="[]",
+            scope_type="personal",
+        )
+
+        clean = evidence_retrieval.search_evidence(
+            app_module.db.session,
+            app_module.KnowledgeChunk,
+            app_module.KnowledgeSource,
+            token,
+            filters={"source_uid": clean_chunk.source_uid},
+        )
+        formula = evidence_retrieval.search_evidence(
+            app_module.db.session,
+            app_module.KnowledgeChunk,
+            app_module.KnowledgeSource,
+            token,
+            filters={
+                "source_uid": formula_chunk.source_uid,
+                "include_needs_review": True,
+            },
+        )
+
+        assert clean.total == 1
+        assert "formula_context_risk" not in clean.candidates[0]["risk_labels"]
+        assert formula.total == 1
+        assert "formula_context_risk" in formula.candidates[0]["risk_labels"]
 
 
 def test_search_evidence_rejects_empty_query(app_module):

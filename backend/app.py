@@ -14154,6 +14154,12 @@ def create_parse_record_for_saved_file(save_path, document, filename, mime_type,
         filename=filename,
         mime_type=mime_type or "",
         language_hint=getattr(document, "language", "") or "",
+        formula_text_policy=(
+            "substantive"
+            if str(getattr(document, "scope_type", "") or "").casefold()
+            == "personal"
+            else "legacy"
+        ),
         now_fn=current_time_text,
     )
     parse_record, parse_blocks = persist_document_parse_result(

@@ -40,6 +40,26 @@ class DeterministicWorkflowRerankerBackend:
         return [5.0 for _ in pairs]
 
 
+class DeterministicChargeEmbeddingBackend:
+    """Exercise evidence-backed Student review without a reranker."""
+
+    backend_id = "local_multilingual_e5_pytorch_cpu_v1"
+    model_id = "intfloat/multilingual-e5-small"
+    model_revision = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+
+    def readiness(self):
+        return type("Readiness", (), {"ready": True, "reason_code": "READY"})()
+
+    def embed_queries(self, texts):
+        return [[1.0, 0.0] for _ in texts]
+
+    def embed_passages(self, texts):
+        return [
+            [1.0, 0.0] if "电荷" in text and "电势" not in text else [0.0, 1.0]
+            for text in texts
+        ]
+
+
 def auth(token):
     return {"Authorization": f"Bearer {token}"}
 
@@ -228,6 +248,97 @@ def test_clean_native_parse_quality_adapter_does_not_hide_review_flags():
         "quality_status": "native_text_ok",
         "quality_flags": ["native_text_ok", "future_unknown_risk"],
     }) == "native_text_ok"
+
+
+def test_uploaded_unit_prose_yields_private_review_alternatives_without_reranker(
+    client, app_module, student_token, monkeypatch, isolated_workflow_test_state
+):
+    monkeypatch.delenv("FORMULA_DETECTION_MODE", raising=False)
+    chinese_source_uid, _ = upload_and_process(
+        client,
+        app_module,
+        student_token,
+        filename="personal-charge-reference.pdf",
+        language="zh",
+        lines=(
+            "电荷",
+            "电荷是物质的一种基本物理属性。",
+            "电荷以库仑（C）计量。",
+        ),
+    )
+    english_source_uid, english_chunks = upload_and_process(
+        client,
+        app_module,
+        student_token,
+        filename="personal-charge-course.pdf",
+        language="en",
+        lines=(
+            "Electric charge",
+            "Electric charge is a physical property of matter.",
+            "Like charges repel - unlike charges attract.",
+        ),
+    )
+    chunk_uid, chunk_text = next(
+        (uid, text)
+        for uid, text in english_chunks
+        if "electric charge" in text.casefold()
+    )
+    selected = "Electric charge"
+    start = chunk_text.index(selected)
+
+    app_module.app.config.pop("STUDENT_ALIGNMENT_RUNNER", None)
+    app_module.app.config["STUDENT_CROSS_LANGUAGE_EMBEDDING_BACKEND"] = (
+        DeterministicChargeEmbeddingBackend()
+    )
+    app_module.app.config.pop("STUDENT_BILINGUAL_RERANKER_BACKEND", None)
+    response = client.post(
+        "/api/student/concept-queries",
+        headers={
+            **auth(student_token),
+            "Idempotency-Key": "13c-quality-private-review-no-reranker",
+        },
+        json={
+            "workspace_scope": "PERSONAL",
+            "source_uid": english_source_uid,
+            "chunk_uid": chunk_uid,
+            "selected_text": selected,
+            "selection_start": start,
+            "selection_end": start + len(selected),
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["data"]["query"]
+    assert result["alignment_status"] == "REVIEW_REQUIRED"
+    assert result["recommended_chinese_concept"]["text"] == "电荷"
+    assert result["chinese_evidence"][0]["source_uid"] == chinese_source_uid
+    assert result["uncertain"] is True
+
+    with app_module.app.app_context():
+        query = app_module.StudentConceptQuery.query.filter_by(
+            query_uid=result["query_uid"]
+        ).one()
+        raw = __import__("json").loads(query.result_json)
+        assert raw["qualification"]["decision"] == "REJECTED"
+        reasons = set(raw["qualification"]["reason_codes"])
+        assert "EVIDENCE_QUALIFICATION_EXECUTION_FAILED" in reasons
+        assert "EVIDENCE_SOURCE_NOT_ELIGIBLE" not in reasons
+        documents = app_module.Document.query.filter(
+            app_module.Document.id.in_([
+                app_module.KnowledgeSource.query.filter_by(
+                    source_uid=english_source_uid
+                ).one().document_id,
+                app_module.KnowledgeSource.query.filter_by(
+                    source_uid=chinese_source_uid
+                ).one().document_id,
+            ])
+        ).all()
+        assert all(
+            "formula_ocr_required" not in set(
+                __import__("json").loads(document.quality_flags_json or "[]")
+            )
+            for document in documents
+        )
 
 
 def test_browser_contract_uses_uploaded_source_without_fake_alignment_runner():

@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlalchemy import or_
 
+from services import formula_detection
 from services import parse_quality_risk
 
 
@@ -137,6 +138,28 @@ def _quality_flags(chunk: Any, source: Any = None) -> list[str]:
         if flag not in seen:
             normalized.append(flag)
             seen.add(flag)
+    raw_formula_blocks = _field(chunk, "formula_block_ids_json", None)
+    formula_blocks = _loads_json(raw_formula_blocks, None)
+    if (
+        _combined_field(chunk, source, "scope_type", "").casefold() == "personal"
+        and raw_formula_blocks is not None
+        and formula_blocks == []
+        and not formula_detection.contains_substantive_formula_text(
+            _chunk_text(chunk)
+        )
+    ):
+        # Compatibility for documents processed by the former punctuation-
+        # based detector.  Do not mutate persisted provenance; suppress only
+        # the stale formula risks for a chunk that explicitly has zero layout
+        # formula blocks and no formula signal under the current detector.
+        stale_formula_flags = {
+            "formula_detected",
+            "formula_ocr_required",
+            "formula_ocr_unavailable",
+        }
+        normalized = [
+            flag for flag in normalized if flag not in stale_formula_flags
+        ]
     return normalized
 
 

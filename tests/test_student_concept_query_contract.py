@@ -56,9 +56,40 @@ def test_query_fingerprint_is_stable_and_source_version_sensitive():
         selection_start=0,
         selection_end=18,
         selected_text="electric potential",
+        evidence_scope_id="scope-v1",
         alignment_policy_version="governed-bilingual-evidence-qualification@1.1.0",
     )
     assert queries.build_query_fingerprint(**base) == queries.build_query_fingerprint(**base)
     assert queries.build_query_fingerprint(**base) != queries.build_query_fingerprint(
         **{**base, "source_version": "2"}
     )
+    assert queries.build_query_fingerprint(**base) != queries.build_query_fingerprint(
+        **{**base, "evidence_scope_id": "scope-v2"}
+    )
+
+
+def test_evidence_scope_identity_changes_with_governed_source_version():
+    source = {
+        "source_uid": "zh-personal",
+        "language": "zh",
+        "status": "active",
+        "allow_student_search": True,
+        "authorization_status": "allowed_for_private_use",
+        "license_status": "restricted",
+        "scope_type": "personal",
+        "visibility": "private",
+        "owner_user_id": 7,
+        "version": 1,
+        "content_hash": "hash-v1",
+    }
+    first = queries.resolve_evidence_scope(
+        [source], workspace_scope="PERSONAL", student_id=7,
+        course_id=None, allow_platform_governed=False,
+    )
+    second = queries.resolve_evidence_scope(
+        [{**source, "version": 2, "content_hash": "hash-v2"}],
+        workspace_scope="PERSONAL", student_id=7,
+        course_id=None, allow_platform_governed=False,
+    )
+    assert first.allowed_source_uids == second.allowed_source_uids
+    assert first.scope_id != second.scope_id

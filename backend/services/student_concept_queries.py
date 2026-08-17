@@ -342,6 +342,7 @@ def build_query_fingerprint(**values: Any) -> str:
         "selection_start": int(values.get("selection_start") or 0),
         "selection_end": int(values.get("selection_end") or 0),
         "selected_text": " ".join(_text(values.get("selected_text")).casefold().split()),
+        "evidence_scope_id": _text(values.get("evidence_scope_id")),
         "alignment_policy_version": _text(
             values.get("alignment_policy_version") or ALIGNMENT_POLICY_VERSION
         ),
@@ -368,6 +369,7 @@ def resolve_evidence_scope(
     personal_or_course_count = 0
     platform_count = 0
     platform_included = False
+    evidence_identities: list[str] = []
     for source in sources:
         if not _source_is_governed(source):
             continue
@@ -395,12 +397,20 @@ def resolve_evidence_scope(
             uid = _text(_field(source, "source_uid"))
             if uid:
                 allowed.append(uid)
+                evidence_identities.append(":".join((
+                    uid,
+                    _text(_field(source, "version")),
+                    _text(_field(source, "content_hash")),
+                )))
                 if is_platform:
                     platform_count += 1
                 else:
                     personal_or_course_count += 1
     allowed_uids = tuple(sorted(set(allowed)))
-    scope_material = f"{scope}:{student_id}:{course_id or ''}:{','.join(allowed_uids)}"
+    scope_material = (
+        f"{scope}:{student_id}:{course_id or ''}:"
+        f"{'|'.join(sorted(set(evidence_identities)))}"
+    )
     if scope == "PERSONAL" and personal_or_course_count:
         evidence_tier = (
             "PERSONAL_PRIVATE_WITH_PLATFORM_FALLBACK"
@@ -426,13 +436,94 @@ def resolve_evidence_scope(
     )
 
 
-def alignment_status_from_qualification(qualification: Any) -> str:
+_STUDENT_REVIEW_ONLY_REASONS = frozenset({
+    bilingual_evidence_qualification.EVIDENCE_PAIR_MARGIN_INSUFFICIENT,
+    bilingual_evidence_qualification.EVIDENCE_PAIR_UNCERTAIN,
+    bilingual_evidence_qualification.EVIDENCE_QUALIFICATION_EXECUTION_FAILED,
+    bilingual_evidence_qualification.EVIDENCE_SCORE_COMPONENT_CONFLICT,
+    bilingual_evidence_qualification.EVIDENCE_TERM_SCOPE_RISK,
+})
+
+
+def _has_bounded_selected_candidate(
+    selected_candidate: Any, chinese_evidence: Any, chinese_candidates: Any
+) -> bool:
+    if not isinstance(selected_candidate, dict) or bool(
+        _field(selected_candidate, "generated")
+    ):
+        return False
+    selected_uid = _text(_field(selected_candidate, "candidate_uid"))
+    selected_source_uid = _text(_field(selected_candidate, "source_uid"))
+    selected_chunk_uid = _text(_field(selected_candidate, "chunk_uid"))
+    selected_text = _text(
+        _field(selected_candidate, "text")
+        or _field(selected_candidate, "chinese_term")
+    )
+    evidence_refs = {
+        (_text(_field(item, "source_uid")), _text(_field(item, "chunk_uid")))
+        for item in chinese_evidence or []
+        if isinstance(item, dict)
+    }
+    return any(
+        not bool(_field(candidate, "generated"))
+        and bool(_field(candidate, "evidence_backed"))
+        and bool(_text(_field(candidate, "text") or _field(candidate, "chinese_term")))
+        and (
+            _text(_field(candidate, "source_uid")),
+            _text(_field(candidate, "chunk_uid")),
+        ) in evidence_refs
+        and (
+            bool(selected_uid)
+            and _text(_field(candidate, "candidate_uid")) == selected_uid
+            or (
+                not selected_uid
+                and _text(_field(candidate, "source_uid")) == selected_source_uid
+                and _text(_field(candidate, "chunk_uid")) == selected_chunk_uid
+                and _text(
+                    _field(candidate, "text")
+                    or _field(candidate, "chinese_term")
+                ) == selected_text
+            )
+        )
+        for candidate in chinese_candidates or []
+        if isinstance(candidate, dict)
+    )
+
+
+def alignment_status_from_qualification(
+    qualification: Any,
+    *,
+    selected_candidate: Any = None,
+    chinese_evidence: Any = (),
+    chinese_candidates: Any = (),
+) -> str:
     decision = _text(
         qualification.get("decision") if isinstance(qualification, dict) else qualification
     ).upper()
     if decision == "QUALIFIED":
         return "READY"
     if decision == "REVIEW_REQUIRED":
+        return "REVIEW_REQUIRED"
+    reasons = {
+        _text(reason)
+        for reason in (
+            qualification.get("reason_codes", [])
+            if isinstance(qualification, dict)
+            else []
+        )
+        if _text(reason)
+    }
+    if (
+        decision == "REJECTED"
+        and reasons
+        and reasons <= _STUDENT_REVIEW_ONLY_REASONS
+        and _has_bounded_selected_candidate(
+            selected_candidate, chinese_evidence, chinese_candidates
+        )
+    ):
+        # This is a PRIVATE/NON_OFFICIAL display decision only.  The governed
+        # qualification remains REJECTED, so readiness and Provider execution
+        # stay fail-closed while the student may inspect bounded alternatives.
         return "REVIEW_REQUIRED"
     return "NOT_READY"
 
@@ -688,7 +779,12 @@ def build_student_learning_support(
 
 
 def serialize_alignment_result(result: dict[str, Any]) -> dict[str, Any]:
-    status = alignment_status_from_qualification(result.get("qualification"))
+    status = alignment_status_from_qualification(
+        result.get("qualification"),
+        selected_candidate=result.get("selected_candidate"),
+        chinese_evidence=result.get("chinese_evidence", []),
+        chinese_candidates=result.get("chinese_candidates", []),
+    )
     selected = result.get("selected_candidate") if isinstance(result.get("selected_candidate"), dict) else {}
     raw = {
         "alignment_result_uid": result.get("result_uid"),

@@ -157,6 +157,56 @@ def test_personal_query_is_private_non_official_idempotent_and_savable(
         assert all("Connect this" not in (item.input_payload or "") for item in audits)
 
 
+def test_same_selection_recomputes_after_personal_evidence_scope_changes(
+    app_module, client, student_token
+):
+    student_id, source_uid, _, _, chunk_uid, text = seed_personal_material(app_module)
+    calls = []
+
+    def recording_runner(**kwargs):
+        calls.append(tuple(kwargs["allowed_source_uids"]))
+        return fake_ready_workflow(**kwargs)
+
+    app_module.app.config["STUDENT_ALIGNMENT_RUNNER"] = recording_runner
+    start = text.index("electric potential")
+    payload = {
+        "workspace_scope": "PERSONAL",
+        "source_uid": source_uid,
+        "chunk_uid": chunk_uid,
+        "selected_text": "electric potential",
+        "selection_start": start,
+        "selection_end": start + len("electric potential"),
+    }
+    first = client.post(
+        "/api/student/concept-queries", json=payload, headers=auth(student_token)
+    )
+    assert first.status_code == 200
+    assert first.get_json()["data"]["idempotent_replay"] is False
+
+    with app_module.app.app_context():
+        new_source = app_module.KnowledgeSource(
+            source_uid=f"zh-personal-new-{uuid.uuid4().hex[:8]}",
+            name="Updated private evidence",
+            language="zh", scope_type="personal", owner_user_id=student_id,
+            visibility="private", status="active", version=1,
+            content_hash=uuid.uuid4().hex,
+            authorization_status="authorized", license_status="licensed",
+            allow_student_search=True, source_role="chinese_reference_material",
+        )
+        app_module.db.session.add(new_source)
+        app_module.db.session.commit()
+
+    second = client.post(
+        "/api/student/concept-queries", json=payload, headers=auth(student_token)
+    )
+    assert second.status_code == 200
+    assert second.get_json()["data"]["idempotent_replay"] is False
+    assert second.get_json()["data"]["query"]["query_uid"] != (
+        first.get_json()["data"]["query"]["query_uid"]
+    )
+    assert len(calls) == 2
+
+
 def test_other_student_and_non_student_roles_cannot_read_private_query(
     app_module, client, student_token, teacher_token, admin_token
 ):

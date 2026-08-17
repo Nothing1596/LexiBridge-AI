@@ -10,11 +10,19 @@ from io import BytesIO
 from typing import Any
 
 
-FORMULA_SYMBOLS = (
+STRONG_FORMULA_SYMBOLS = (
+    "∫", "∑", "√", "∞", "≤", "≥", "≠", "≈", "∂",
+)
+LEGACY_FORMULA_SYMBOLS = (
     "∫", "∑", "√", "∞", "≤", "≥", "≠", "≈", "θ", "λ", "μ", "σ", "ω",
     "π", "α", "β", "γ", "Δ", "∂", "^", "_", "=", "+", "-", "/", "(", ")",
-    "[", "]"
+    "[", "]",
 )
+LEGACY_FORMULA_WORDS = {
+    "frac", "sqrt", "int", "sum", "lim", "sin", "cos", "tan", "log", "ln",
+    "exp", "theta", "lambda", "omega", "alpha", "beta", "gamma", "sigma",
+    "pi", "mu", "delta",
+}
 
 # Page/slide markers are parser provenance, not source mathematics.  The old
 # detector treated the brackets in ``[Page 1]`` as a formula signal, which
@@ -22,18 +30,52 @@ FORMULA_SYMBOLS = (
 _PARSER_LOCATION_LINE = re.compile(
     r"^\s*\[(?:page|slide)\s+\d+\]\s*$", re.IGNORECASE | re.MULTILINE
 )
-FORMULA_WORDS = {
-    "frac", "sqrt", "int", "sum", "lim", "sin", "cos", "tan", "log", "ln",
-    "exp", "theta", "lambda", "omega", "alpha", "beta", "gamma", "sigma",
-    "pi", "mu", "delta"
-}
+_EQUATION_PATTERN = re.compile(
+    r"(?:^|[\s:;])"
+    r"(?:[A-Za-zΑ-ω]\w*|\d+(?:\.\d+)?)"
+    r"\s*(?:=|≤|≥|≠|≈)\s*"
+    r"(?:[A-Za-zΑ-ω]\w*|\d+(?:\.\d+)?|[-+]?\d)"
+)
+_POWER_OR_SUBSCRIPT_PATTERN = re.compile(
+    r"\b[A-Za-zΑ-ω]\w*\s*[\^_]\s*(?:\{?[-+]?\d+\}?|[A-Za-zΑ-ω]\w*)"
+)
+_MATH_FUNCTION_PATTERN = re.compile(
+    r"\b(?:frac|sqrt|int|sum|lim|sin|cos|tan|log|ln|exp)\s*(?:\{|\()",
+    re.IGNORECASE,
+)
+
+
+def _without_parser_location_lines(text: str) -> str:
+    return _PARSER_LOCATION_LINE.sub("", str(text or ""))
+
 
 def contains_formula_text(text):
-    text = _PARSER_LOCATION_LINE.sub("", str(text or ""))
-    if any(symbol in text for symbol in FORMULA_SYMBOLS):
+    """Preserve the governed legacy detector for non-Personal workflows."""
+    text = _without_parser_location_lines(text)
+    if any(symbol in text for symbol in LEGACY_FORMULA_SYMBOLS):
         return True
     tokens = re.findall(r"[A-Za-z]+", text.lower())
-    return any(token in FORMULA_WORDS for token in tokens)
+    return any(token in LEGACY_FORMULA_WORDS for token in tokens)
+
+
+def contains_substantive_formula_text(text):
+    """Return true only for substantive mathematical notation.
+
+    Punctuation, unit abbreviations such as ``(C)``/``N/C``, page markers,
+    and prose hyphens are not formula regions.  Treating any slash,
+    parenthesis, or dash as mathematics made clean course PDFs require formula
+    OCR even when the layout detector found zero formula blocks.
+    """
+    text = _without_parser_location_lines(text)
+    if any(symbol in text for symbol in STRONG_FORMULA_SYMBOLS):
+        return True
+    if _EQUATION_PATTERN.search(text):
+        return True
+    if _POWER_OR_SUBSCRIPT_PATTERN.search(text):
+        return True
+    if _MATH_FUNCTION_PATTERN.search(text):
+        return True
+    return False
 
 
 @dataclass(frozen=True)

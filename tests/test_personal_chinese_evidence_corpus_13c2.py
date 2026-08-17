@@ -23,13 +23,20 @@ def chinese_pdf_bytes():
 
 
 def test_formula_detection_ignores_parser_page_markers_but_keeps_formula_signals():
-    from services.formula_detection import contains_formula_text
+    from services.formula_detection import contains_substantive_formula_text
 
-    assert not contains_formula_text(
+    assert not contains_substantive_formula_text(
         "[Page 1]\nElectric potential is potential energy per unit charge."
     )
-    assert contains_formula_text("V = U / q")
-    assert contains_formula_text("∫ f(x) dx")
+    assert not contains_substantive_formula_text(
+        "Electric charge is measured in coulombs (C). Like charges repel - unlike charges attract."
+    )
+    assert not contains_substantive_formula_text(
+        "电场通常以牛顿每库仑（N/C）计量，电势通常以伏特（V）计量。"
+    )
+    assert contains_substantive_formula_text("V = U / q")
+    assert contains_substantive_formula_text("∫ f(x) dx")
+    assert contains_substantive_formula_text("x^2 + y^2 = r^2")
 
 
 def test_clean_layout_provenance_labels_are_not_parse_quality_failures():
