@@ -8,7 +8,7 @@ export class PdfSelectionMappingError extends Error {
   }
 }
 
-function normalizedTextWithOffsets(value) {
+function normalizedTextWithOffsets(value, compactWhitespace = false) {
   const source = String(value || "");
   let normalized = "";
   const starts = [];
@@ -19,6 +19,7 @@ function normalizedTextWithOffsets(value) {
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index];
     if (/\s/u.test(character)) {
+      if (compactWhitespace) continue;
       if (normalized && !normalized.endsWith(" ")) {
         pendingWhitespaceStart = pendingWhitespaceStart < 0
           ? index
@@ -57,7 +58,13 @@ function allOccurrences(haystack, needle) {
   return result;
 }
 
-function candidateResult(item, normalizedItem, normalizedStart, normalizedLength) {
+function candidateResult(
+  item,
+  normalizedItem,
+  normalizedStart,
+  normalizedLength,
+  compactWhitespace,
+) {
   const originalStart = normalizedItem.starts[normalizedStart];
   const originalEnd = normalizedItem.ends[normalizedStart + normalizedLength - 1];
   return {
@@ -69,13 +76,46 @@ function candidateResult(item, normalizedItem, normalizedStart, normalizedLength
     blockUid: String(item.block_uid || ""),
     normalizedStart,
     normalizedItemText: normalizedItem.normalized,
+    mappingMode: compactWhitespace
+      ? "PDF_TEXT_LAYER_COMPACT_WHITESPACE"
+      : "PDF_TEXT_LAYER_NORMALIZED_WHITESPACE",
   };
 }
 
-function disambiguateWithPagePosition(candidates, selected, pagePrefixText, pageText) {
+function collectCandidates(items, selected, compactWhitespace) {
+  const candidates = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || item.selectable !== true || !String(item.chunk_uid || "")) continue;
+    const normalizedItem = normalizedTextWithOffsets(item.text, compactWhitespace);
+    for (const start of allOccurrences(normalizedItem.normalized, selected)) {
+      candidates.push(candidateResult(
+        item,
+        normalizedItem,
+        start,
+        selected.length,
+        compactWhitespace,
+      ));
+    }
+  }
+  return candidates;
+}
+
+function disambiguateWithPagePosition(
+  candidates,
+  selected,
+  pagePrefixText,
+  pageText,
+  compactWhitespace,
+) {
   if (!String(pageText || "").trim()) return [];
-  const normalizedPage = normalizedTextWithOffsets(pageText).normalized;
-  const normalizedPrefix = normalizedTextWithOffsets(pagePrefixText).normalized;
+  const normalizedPage = normalizedTextWithOffsets(
+    pageText,
+    compactWhitespace,
+  ).normalized;
+  const normalizedPrefix = normalizedTextWithOffsets(
+    pagePrefixText,
+    compactWhitespace,
+  ).normalized;
   const selectedPageStart = normalizedPrefix.length;
   const selectedOccurrences = allOccurrences(normalizedPage, selected);
   const selectedOrdinal = selectedOccurrences.filter(
@@ -126,21 +166,13 @@ export function mapPdfSelectionToReaderItem({
     );
   }
 
-  const candidates = [];
-  for (const item of Array.isArray(items) ? items : []) {
-    if (!item || item.selectable !== true || !String(item.chunk_uid || "")) continue;
-    const normalizedItem = normalizedTextWithOffsets(item.text);
-    for (const start of allOccurrences(
-      normalizedItem.normalized,
-      normalizedSelection,
-    )) {
-      candidates.push(candidateResult(
-        item,
-        normalizedItem,
-        start,
-        normalizedSelection.length,
-      ));
-    }
+  let selectedForMapping = normalizedSelection;
+  let compactWhitespace = false;
+  let candidates = collectCandidates(items, selectedForMapping, false);
+  if (candidates.length === 0) {
+    selectedForMapping = normalizedTextWithOffsets(rawSelection, true).normalized;
+    compactWhitespace = true;
+    candidates = collectCandidates(items, selectedForMapping, true);
   }
 
   if (candidates.length === 0) {
@@ -153,9 +185,10 @@ export function mapPdfSelectionToReaderItem({
 
   const positioned = disambiguateWithPagePosition(
     candidates,
-    normalizedSelection,
+    selectedForMapping,
     pagePrefixText,
     pageText,
+    compactWhitespace,
   );
   if (positioned.length === 1) return positioned[0];
   throw new PdfSelectionMappingError(

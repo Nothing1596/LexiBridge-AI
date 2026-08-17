@@ -67,6 +67,8 @@ The mapper:
 
 - normalizes PDF whitespace and English case while retaining original
   character offsets;
+- tolerates omitted layout whitespace between PDF text nodes only when the
+  compact form still identifies one unique governed span;
 - limits the raw selection to 180 characters;
 - maps repeated same-page text only through a unique occurrence order;
 - rejects missing, ambiguous, overlong, outside-layer and not-ready inputs;
@@ -158,9 +160,9 @@ Accident database before/final:
 ## Artifacts
 
 - `14D-pdfjs-runtime-manifest.json`:
-  `0f02299b42ed341e5d61a0f692d12f2b38033f63d2402d5fde62b2afdfe5ee1d`;
+  `2e5aba6036fb99d1e4d00629d5fc7e69f09923bdd57913c6bd93296866b9b47e`;
 - `14D-selection-mapping-matrix.csv`:
-  `762313952b3ef00428391a1ff00182ca5e877e3bf34ff39b21c01718e86aea77`;
+  `afaefda31e8065134c13258680b4f644d0f9e444ab92ef8604d2659f49997798`;
 - `14D-browser-e2e-result.json`:
   `656adbcbe34d0e29b2bf9928eb660ac5197210be15b13c9a8d921c6aa0c87060`.
 

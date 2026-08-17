@@ -25,6 +25,7 @@
   "selection_contract": {
     "max_characters": 180,
     "unique_governed_chunk_required": true,
+    "omitted_layout_whitespace": "unique_compact_match_only",
     "server_revalidation_required": true,
     "ambiguous_mapping": "fail_closed",
     "unmapped_selection": "fail_closed",

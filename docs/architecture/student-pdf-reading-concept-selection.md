@@ -91,6 +91,9 @@ governed reader item. The mapper returns:
 
 Whitespace and case differences introduced by PDF text extraction are
 normalized while preserving an offset map back to the governed source text.
+When a PDF text layer omits layout whitespace between adjacent text nodes, a
+compact comparison is allowed only if it still yields exactly one governed
+span; the returned text and offsets always come from that governed span.
 Repeated text is resolved only when its page occurrence order uniquely matches
 the governed occurrence. Missing, overlong, outside-layer or ambiguous
 selections fail closed with stable client reason codes. The client never

@@ -112,6 +112,17 @@ def test_pdf_selection_mapping_is_unique_bounded_and_fail_closed():
       if (whitespace.chunkUid !== 'c2' || whitespace.selectedText !== 'Electric potential') {{
         throw new Error(JSON.stringify(whitespace));
       }}
+      const omittedLayoutSpace = mapPdfSelectionToReaderItem({{
+        selectedText: 'Electricpotential',
+        pagePrefixText: items[0].text,
+        pageText: items.map(x => x.text.replaceAll(' ', '')).join(''),
+        items
+      }});
+      if (omittedLayoutSpace.chunkUid !== 'c2' ||
+          omittedLayoutSpace.selectedText !== 'Electric potential' ||
+          omittedLayoutSpace.mappingMode !== 'PDF_TEXT_LAYER_COMPACT_WHITESPACE') {{
+        throw new Error(JSON.stringify(omittedLayoutSpace));
+      }}
       const repeatedItem = {{chunk_uid: 'repeat', page_number: 1, selectable: true,
         text: 'Electric potential. Electric potential is energy per unit charge.'}};
       const repeated = mapPdfSelectionToReaderItem({{

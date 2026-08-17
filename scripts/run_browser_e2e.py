@@ -608,22 +608,28 @@ def select_pdfjs_text(page, phrase: str) -> dict[str, Any]:
     layer.evaluate(
         """(element, phrase) => {
             const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-            const nodes = [];
-            let combined = '';
+            const positions = [];
+            let compact = '';
             while (walker.nextNode()) {
                 const node = walker.currentNode;
-                nodes.push({node, start: combined.length, end: combined.length + node.data.length});
-                combined += node.data;
+                for (let offset = 0; offset < node.data.length; offset += 1) {
+                    const character = node.data[offset];
+                    if (/\\s/u.test(character)) continue;
+                    compact += character.toLocaleLowerCase('en-US');
+                    positions.push({node, offset});
+                }
             }
-            const start = combined.toLowerCase().indexOf(String(phrase).toLowerCase());
+            const normalizedPhrase = String(phrase)
+                .replace(/\\s/gu, '')
+                .toLocaleLowerCase('en-US');
+            const start = compact.indexOf(normalizedPhrase);
             if (start < 0) throw new Error(`PDF text layer is missing: ${phrase}`);
-            const end = start + phrase.length;
-            const startNode = nodes.find(item => item.start <= start && start < item.end);
-            const endNode = nodes.find(item => item.start < end && end <= item.end);
-            if (!startNode || !endNode) throw new Error('PDF selection boundary is unavailable');
+            const first = positions[start];
+            const last = positions[start + normalizedPhrase.length - 1];
+            if (!first || !last) throw new Error('PDF selection boundary is unavailable');
             const range = document.createRange();
-            range.setStart(startNode.node, start - startNode.start);
-            range.setEnd(endNode.node, end - endNode.start);
+            range.setStart(first.node, first.offset);
+            range.setEnd(last.node, last.offset + 1);
             const selection = window.getSelection();
             selection.removeAllRanges();
             selection.addRange(range);
