@@ -201,6 +201,31 @@ def test_wait_text_contains_synchronizes_async_browser_content():
     assert page.wait_call["timeout"] == 10000
 
 
+@pytest.mark.parametrize(
+    ("alignment_status", "support_status"),
+    [
+        ("READY", "EVIDENCE_GROUNDED"),
+        ("REVIEW_REQUIRED", "ALTERNATIVES_UNRESOLVED"),
+        ("NOT_READY", "NO_RELIABLE_ALIGNMENT"),
+    ],
+)
+def test_student_browser_accepts_every_student_facing_alignment_state(
+    alignment_status,
+    support_status,
+):
+    module = load_runner_module()
+    support = {
+        "contract_id": "student-learning-support@1.0.0",
+        "provider_used": False,
+        "grounding_mode": "DETERMINISTIC_EVIDENCE_TEMPLATE",
+        "status": support_status,
+        "candidate_evidence": [] if alignment_status == "NOT_READY" else [{}],
+        "do_not_confuse_with": [] if alignment_status == "NOT_READY" else [{}],
+    }
+
+    module.assert_student_learning_support_contract(alignment_status, support)
+
+
 def test_readiness_e2e_summary_maps_json_fields():
     readiness = load_readiness_module()
     summary = readiness.summarize_browser_e2e_result(

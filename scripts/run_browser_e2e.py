@@ -267,6 +267,29 @@ def add_step(flow: dict[str, Any], name: str, status: str = "PASS", details: str
     flow["steps"].append({"name": name, "status": status, "details": details})
 
 
+def assert_student_learning_support_contract(
+    alignment_status: str,
+    support: dict[str, Any],
+) -> None:
+    """Validate the Student-first display contract without forcing automation."""
+    expected_support_statuses = {
+        "READY": {"EVIDENCE_GROUNDED", "GROUNDING_INCOMPLETE"},
+        "REVIEW_REQUIRED": {
+            "ALTERNATIVES_UNRESOLVED",
+            "GROUNDING_INCOMPLETE",
+        },
+        "NOT_READY": {"NO_RELIABLE_ALIGNMENT"},
+    }
+    assert alignment_status in expected_support_statuses
+    assert support["contract_id"] == "student-learning-support@1.0.0"
+    assert support["provider_used"] is False
+    assert support["grounding_mode"] == "DETERMINISTIC_EVIDENCE_TEMPLATE"
+    assert support["status"] in expected_support_statuses[alignment_status]
+    if alignment_status == "NOT_READY":
+        assert support["candidate_evidence"] == []
+        assert support["do_not_confuse_with"] == []
+
+
 def flow_has_failures(flow: dict[str, Any], external_dependencies: list[dict[str, Any]]) -> bool:
     failed_steps = any(step.get("status") == "FAIL" for step in flow.get("steps", []))
     unexpected_failed_requests = [
@@ -746,24 +769,7 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         alignment_status = page.evaluate(
             "() => window.Lexi && state.studentConceptQuery.result.alignment_status"
         )
-        assert support["contract_id"] == "student-learning-support@1.0.0"
-        assert support["provider_used"] is False
-        assert support["grounding_mode"] == "DETERMINISTIC_EVIDENCE_TEMPLATE"
-        expected_support_statuses = {
-            "READY": {"EVIDENCE_GROUNDED", "GROUNDING_INCOMPLETE"},
-            "REVIEW_REQUIRED": {
-                "ALTERNATIVES_UNRESOLVED",
-                "GROUNDING_INCOMPLETE",
-            },
-            "NOT_READY": {"NO_RELIABLE_ALIGNMENT"},
-        }
-        assert support["status"] in expected_support_statuses[alignment_status]
-        if expected_scope == "PERSONAL":
-            assert alignment_status == "READY"
-            assert support["status"] == "EVIDENCE_GROUNDED"
-        if alignment_status == "NOT_READY":
-            assert support["candidate_evidence"] == []
-            assert support["do_not_confuse_with"] == []
+        assert_student_learning_support_contract(alignment_status, support)
         add_step(flow, f"{step_prefix} learning support remained deterministic and non-official")
         if expected_scope == "PERSONAL":
             private_query_uid = page.evaluate(
@@ -1130,12 +1136,17 @@ def run_reviewer_flow(
         "Reviewer Chinese evidence visible",
         flow,
     )
+    # The detail, history, and review-case requests render the same panel.
+    # Wait until all three have settled so a late render cannot erase the
+    # required rationale between fill and submit.
+    page.wait_for_load_state("networkidle", timeout=10000)
     accept_form = page.locator("form").filter(
         has=page.locator('[data-testid="review-action-accept-recommendation"]')
     ).first
-    accept_form.locator('textarea[name="review_comment"]').fill(
-        "Reviewer browser smoke accepts the governed recommendation."
-    )
+    review_comment = "Reviewer browser smoke accepts the governed recommendation."
+    accept_comment = accept_form.locator('textarea[name="review_comment"]')
+    accept_comment.fill(review_comment)
+    assert accept_comment.input_value() == review_comment
     with page.expect_response(
         lambda response: (
             response.request.method == "POST"
