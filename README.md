@@ -173,15 +173,20 @@ evidence, not an approved card, and not student-facing learning material.
 Install dependencies:
 
 ```bash
-python3 -m venv backend/.venv
-source backend/.venv/bin/activate
-pip install -r backend/requirements.txt
+bash scripts/bootstrap_runtime.sh
+bash scripts/run_python.sh scripts/runtime_environment.py --diagnose
 ```
+
+The canonical macOS runtime is stored outside the Desktop repository under
+`~/Library/Application Support/LexiBridge-AI/runtime` by default. This avoids
+making pilot uptime depend on the legacy in-repository `.venv-macos`. Runtime
+and test dependencies are exactly pinned in separate lock files. Set
+`LEXIBRIDGE_RUNTIME_VENV` to choose another external location.
 
 Initialize or migrate the database:
 
 ```bash
-python scripts/migrate_db.py
+bash scripts/run_python.sh scripts/migrate_db.py --apply
 ```
 
 Start backend:
@@ -190,16 +195,21 @@ Start backend:
 bash scripts/run_backend.sh
 ```
 
+The default `pilot` server mode uses Gunicorn through `backend/wsgi.py` with a
+single process and bounded threads suitable for the controlled SQLite pilot.
+Flask's development server is available only when explicitly requested with
+`LEXIBRIDGE_SERVER_MODE=development`.
+
 Start the local background worker in a second terminal:
 
 ```bash
-python scripts/run_worker.py
+bash scripts/run_worker.sh
 ```
 
 For a one-shot worker pass during testing:
 
 ```bash
-python scripts/run_worker.py --once
+bash scripts/run_worker.sh --once
 ```
 
 The default `standard` loop alternates first opportunity between the formal
@@ -208,7 +218,7 @@ jobs, processing at most one job per iteration. It never consumes legacy
 `alignment_run` jobs. Run the compatibility worker separately and explicitly:
 
 ```bash
-python scripts/run_worker.py --mode legacy-alignment
+bash scripts/run_worker.sh --mode legacy-alignment
 ```
 
 `--mode formal` and `--mode generic` are also available for isolated local
@@ -248,7 +258,7 @@ frontend/index.html
 
 ## Test Accounts
 
-Run `python scripts/migrate_db.py` first.
+Run `bash scripts/run_python.sh scripts/migrate_db.py --apply` first.
 
 | Role | Email | Password |
 | --- | --- | --- |
@@ -954,7 +964,7 @@ Use `?sync=true` only for local tests or compatibility scripts that need immedia
 Contract checks:
 
 ```bash
-backend/.venv-macos/bin/python -m pytest tests/test_api_contract.py
+bash scripts/run_python.sh -m pytest tests/test_api_contract.py
 ```
 
 The standard JSON error envelope is:
@@ -1076,11 +1086,11 @@ PR-8 adds a deterministic demo package for course reports, classroom demos, and 
 Seed and run the demo:
 
 ```bash
-python scripts/migrate_db.py
-python scripts/seed_demo_data.py
+bash scripts/run_python.sh scripts/migrate_db.py --apply
+bash scripts/run_python.sh scripts/seed_demo_data.py
 bash scripts/run_backend.sh
-python scripts/run_worker.py
-python scripts/run_demo_flow.py
+bash scripts/run_worker.sh
+bash scripts/run_python.sh scripts/run_demo_flow.py
 ```
 
 If port `5000` is occupied:
@@ -1233,7 +1243,7 @@ Auto approval remains strict: a card needs confidence `>=85`, strong English evi
 Run the existing migration command to create or update local tables, including `concept_alignment_card` and `audit_record`:
 
 ```bash
-python scripts/migrate_db.py
+bash scripts/run_python.sh scripts/migrate_db.py --apply
 ```
 
 Legacy `Term` and `TerminologyCard` tables are retained. Future migration work can map old term rows into `ConceptAlignmentCard` records without deleting legacy data.
@@ -1243,7 +1253,7 @@ Legacy `Term` and `TerminologyCard` tables are retained. Future migration work c
 Before committing, run the local pre-release gate from the repository root:
 
 ```bash
-python scripts/dev_check.py
+bash scripts/run_python.sh scripts/dev_check.py
 ```
 
 The same command works from macOS, Linux, and Windows PowerShell when the project virtual environment is active. It runs the release safety scan, the full pytest suite, database initialization against a temporary SQLite file, and a backend import/API smoke check. It does not require a real `.env` or live API keys, and it writes runtime files to a temporary directory instead of the project root.
@@ -1251,37 +1261,37 @@ The same command works from macOS, Linux, and Windows PowerShell when the projec
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/lexibridge-pycache python -m py_compile backend/app.py scripts/migrate_db.py backend/services/ai_providers.py backend/services/ocr.py
 bash -n scripts/run_backend.sh
-python scripts/migrate_db.py
+bash scripts/run_python.sh scripts/migrate_db.py --apply
 ```
 
 PR-5 security and migration regression tests:
 
 ```bash
-backend/.venv-macos/bin/python -m pytest tests/test_api_contract.py
-backend/.venv-macos/bin/python -m pytest tests/test_auth.py tests/test_permissions.py
-backend/.venv-macos/bin/python -m pytest tests/test_upload_security.py
-backend/.venv-macos/bin/python -m pytest tests/test_personal_privacy.py
-backend/.venv-macos/bin/python -m pytest tests/test_migrations.py
+bash scripts/run_python.sh -m pytest tests/test_api_contract.py
+bash scripts/run_python.sh -m pytest tests/test_auth.py tests/test_permissions.py
+bash scripts/run_python.sh -m pytest tests/test_upload_security.py
+bash scripts/run_python.sh -m pytest tests/test_personal_privacy.py
+bash scripts/run_python.sh -m pytest tests/test_migrations.py
 ```
 
 PR-6 background job regression tests:
 
 ```bash
-backend/.venv-macos/bin/python -m pytest tests/test_jobs.py tests/test_job_api.py tests/test_worker.py
+bash scripts/run_python.sh -m pytest tests/test_jobs.py tests/test_job_api.py tests/test_worker.py
 ```
 
 PR-8 demo regression tests:
 
 ```bash
-backend/.venv-macos/bin/python -m pytest tests/test_demo_seed.py
-backend/.venv-macos/bin/python -m pytest tests/test_demo_flow.py
-backend/.venv-macos/bin/python -m pytest tests/test_demo_evaluation.py
+bash scripts/run_python.sh -m pytest tests/test_demo_seed.py
+bash scripts/run_python.sh -m pytest tests/test_demo_flow.py
+bash scripts/run_python.sh -m pytest tests/test_demo_evaluation.py
 ```
 
 Full test suite:
 
 ```bash
-backend/.venv-macos/bin/python -m pytest
+bash scripts/run_python.sh -m pytest
 ```
 
 Frontend inline JavaScript syntax:
@@ -1341,13 +1351,13 @@ The production check fails for unsafe settings such as `DEBUG=true`, weak `SECRE
 Run the local worker:
 
 ```bash
-python scripts/run_worker.py
+bash scripts/run_worker.sh
 ```
 
 Collect a health report:
 
 ```bash
-python scripts/collect_health_report.py
+bash scripts/run_python.sh scripts/collect_health_report.py
 ```
 
 The report includes users, courses, documents, knowledge chunks, terminology cards, queued/running/failed jobs, OCR/provider failure counts, latest EvaluationRun metrics, upload size, derived upload size, and database size.
@@ -1489,13 +1499,13 @@ Task 9A adds a system-level pilot readiness audit instead of new product feature
 Run the full pilot readiness check:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_readiness_check.py
+bash scripts/run_python.sh scripts/pilot_readiness_check.py
 ```
 
 For a faster local loop that skips the full pytest pass but still runs targeted pilot gates:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_readiness_check.py --skip-full-tests
+bash scripts/run_python.sh scripts/pilot_readiness_check.py --skip-full-tests
 ```
 
 The readiness check uses a temporary SQLite database and temporary uploads directory. It removes real LLM API key environment variables from its subprocess environment, keeps external providers disabled, verifies legacy healthcheck live-probe blocking, verifies legacy alignment route/worker external-execution blocking, scans for runnable legacy external alignment jobs, and does not call DeepSeek, OpenAI, Claude, translation APIs, embeddings, vector databases, or rerankers.
@@ -1556,12 +1566,12 @@ Clean worktree verification pattern:
 git worktree add /private/tmp/lexibridge-checkpoint-verify HEAD
 cd /private/tmp/lexibridge-checkpoint-verify
 
-<project-root>/backend/.venv-macos/bin/python -m pytest -q
-<project-root>/backend/.venv-macos/bin/python scripts/check_release_safety.py
-<project-root>/backend/.venv-macos/bin/python scripts/dev_check.py
-<project-root>/backend/.venv-macos/bin/python scripts/run_browser_e2e.py \
+bash scripts/run_python.sh -m pytest -q
+bash scripts/run_python.sh scripts/check_release_safety.py
+bash scripts/run_python.sh scripts/dev_check.py
+bash scripts/run_python.sh scripts/run_browser_e2e.py \
   --json-output /private/tmp/checkpoint-full-e2e.json
-<project-root>/backend/.venv-macos/bin/python scripts/pilot_readiness_check.py \
+bash scripts/run_python.sh scripts/pilot_readiness_check.py \
   --json-output /private/tmp/checkpoint-readiness.json
 ```
 
@@ -1580,7 +1590,7 @@ Task 9B keeps the product surface unchanged and hardens the pilot startup checks
 Run readiness with a machine-readable result:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_readiness_check.py \
+bash scripts/run_python.sh scripts/pilot_readiness_check.py \
   --profile small-pilot \
   --json-output /private/tmp/lexibridge-pilot-result.json
 ```
@@ -1588,15 +1598,15 @@ backend/.venv-macos/bin/python scripts/pilot_readiness_check.py \
 Create, verify, and restore a pilot backup:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_backup.py \
+bash scripts/run_python.sh scripts/pilot_backup.py \
   --database /absolute/path/to/lexibridge.db \
   --uploads /absolute/path/to/uploads \
   --output /private/tmp/lexibridge-pilot-backup
 
-backend/.venv-macos/bin/python scripts/verify_pilot_backup.py \
+bash scripts/run_python.sh scripts/verify_pilot_backup.py \
   --backup /private/tmp/lexibridge-pilot-backup
 
-backend/.venv-macos/bin/python scripts/pilot_restore.py \
+bash scripts/run_python.sh scripts/pilot_restore.py \
   --backup /private/tmp/lexibridge-pilot-backup \
   --database-target /private/tmp/lexibridge-restored.db \
   --uploads-target /private/tmp/lexibridge-restored-uploads
@@ -1605,9 +1615,8 @@ backend/.venv-macos/bin/python scripts/pilot_restore.py \
 Run browser E2E:
 
 ```bash
-backend/.venv-macos/bin/python -m pip install -r requirements-e2e.txt
-backend/.venv-macos/bin/python -m playwright install chromium
-backend/.venv-macos/bin/python scripts/run_browser_e2e.py \
+bash scripts/bootstrap_e2e.sh
+bash scripts/run_python.sh scripts/run_browser_e2e.py \
   --json-output /private/tmp/lexibridge-browser-e2e.json
 ```
 

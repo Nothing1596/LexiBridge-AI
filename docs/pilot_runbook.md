@@ -1,12 +1,12 @@
 # Pilot Runbook
 
-Updated: 2026-07-10
+Updated: 2026-08-17
 
 This runbook is for local demo and small-course pilot operation. It is not a production deployment guide.
 
 ## Environment Requirements
 
-- Python virtual environment: `backend/.venv-macos/bin/python` when present.
+- Canonical external Python runtime created with `bash scripts/bootstrap_runtime.sh`.
 - SQLite database for local/demo/small pilot.
 - Browser capable of opening `frontend/index.html`.
 - No external LLM provider is required or enabled.
@@ -33,8 +33,15 @@ External provider keys such as `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, or `ANTHROP
 Run:
 
 ```bash
-backend/.venv-macos/bin/python scripts/migrate_db.py
+bash scripts/bootstrap_runtime.sh
+bash scripts/run_python.sh scripts/migrate_db.py --apply
 ```
+
+The default macOS runtime is outside the Desktop repository at
+`~/Library/Application Support/LexiBridge-AI/runtime`. The launcher probes the
+interpreter and required distributions before use. `backend/.venv-macos` is a
+temporary compatibility fallback only; new pilot environments must not depend
+on it.
 
 The current migration mechanism is `db.create_all()` plus additive `ensure_schema_columns()`. It is suitable for local development, demo, and small-scale pilot upgrade checks. It is not a production-grade Alembic migration system.
 
@@ -43,32 +50,39 @@ The current migration mechanism is `db.create_all()` plus additive `ensure_schem
 Create or refresh demo data:
 
 ```bash
-backend/.venv-macos/bin/python scripts/seed_review_demo.py --reset-demo
+bash scripts/run_python.sh scripts/seed_review_demo.py --reset-demo
 ```
 
 Repeat without reset to verify idempotency:
 
 ```bash
-backend/.venv-macos/bin/python scripts/seed_review_demo.py
+bash scripts/run_python.sh scripts/seed_review_demo.py
 ```
 
 The seed creates local-only demo users, course review policy/permissions, student memberships, visibility policies, governed evidence, reviewable cards, approved student cards, learning states, student feedback, and teacher analytics data.
 
 ## Start Backend
 
-For local demo:
+For the controlled local pilot:
 
 ```bash
-backend/.venv-macos/bin/python backend/app.py
+bash scripts/run_backend.sh
 ```
 
-or use the existing run script if configured:
+The default launcher performs explicit migration and starts Gunicorn through
+the WSGI entrypoint. It uses one process by default for the SQLite concurrency
+boundary. The Flask development server is available only for deliberate local
+debugging:
 
 ```bash
-scripts/run_backend.sh
+LEXIBRIDGE_SERVER_MODE=development bash scripts/run_backend.sh
 ```
 
-Flask's development server is not a production deployment boundary.
+Start the worker through the same verified interpreter selection:
+
+```bash
+bash scripts/run_worker.sh
+```
 
 ## Open Frontend
 
@@ -122,25 +136,25 @@ Current pilot has no real LLM production verification.
 Run release safety:
 
 ```bash
-backend/.venv-macos/bin/python scripts/check_release_safety.py
+bash scripts/run_python.sh scripts/check_release_safety.py
 ```
 
 Run development checks:
 
 ```bash
-backend/.venv-macos/bin/python scripts/dev_check.py
+bash scripts/run_python.sh scripts/dev_check.py
 ```
 
 Run pilot readiness:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_readiness_check.py
+bash scripts/run_python.sh scripts/pilot_readiness_check.py
 ```
 
 For a small pilot profile with JSON output:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_readiness_check.py \
+bash scripts/run_python.sh scripts/pilot_readiness_check.py \
   --profile small-pilot \
   --json-output /private/tmp/lexibridge-pilot-result.json
 ```
@@ -148,8 +162,35 @@ backend/.venv-macos/bin/python scripts/pilot_readiness_check.py \
 For a faster local loop:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_readiness_check.py --skip-full-tests
+bash scripts/run_python.sh scripts/pilot_readiness_check.py --skip-full-tests
 ```
+
+## Payload-Free Runtime Observation
+
+Record loopback-only health samples outside the repository. The probe rejects
+remote targets, credentials, query strings, and non-health paths:
+
+```bash
+bash scripts/run_python.sh scripts/collect_runtime_probe.py \
+  --endpoint http://127.0.0.1:5000/api/test \
+  --target-label pilot-local \
+  --jsonl-output /private/tmp/lexibridge-runtime-observation.jsonl
+```
+
+Generate an evidence-based report after the declared window:
+
+```bash
+bash scripts/run_python.sh scripts/runtime_observation_report.py \
+  --log /private/tmp/lexibridge-runtime-observation.jsonl \
+  --window-start 2026-08-17T00:00:00Z \
+  --window-end 2026-08-31T00:00:00Z \
+  --json-output /private/tmp/lexibridge-runtime-observation-report.json
+```
+
+The report must remain `RUNTIME_OBSERVATION_PENDING` until actual elapsed days,
+active days, samples, and health gates are satisfied. Tooling does not backdate
+or infer uptime. This runtime report complements, but does not replace, the
+separate legacy-alignment consumer/deprecation observation contract.
 
 Readiness verdicts:
 
@@ -164,7 +205,7 @@ The current expected result for local demo or small-course pilot is `READY_WITH_
 Stop writes before backup. Then run:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_backup.py \
+bash scripts/run_python.sh scripts/pilot_backup.py \
   --database /absolute/path/to/lexibridge.db \
   --uploads /absolute/path/to/uploads \
   --output /private/tmp/lexibridge-pilot-backup
@@ -181,7 +222,7 @@ The manifest records SHA-256 hashes, table counts, file counts, sizes, timestamp
 Verify the backup:
 
 ```bash
-backend/.venv-macos/bin/python scripts/verify_pilot_backup.py \
+bash scripts/run_python.sh scripts/verify_pilot_backup.py \
   --backup /private/tmp/lexibridge-pilot-backup
 ```
 
@@ -192,7 +233,7 @@ If the backup is tampered with or hash checks fail, verification returns non-zer
 Restore to new targets first:
 
 ```bash
-backend/.venv-macos/bin/python scripts/pilot_restore.py \
+bash scripts/run_python.sh scripts/pilot_restore.py \
   --backup /private/tmp/lexibridge-pilot-backup \
   --database-target /absolute/path/to/restored.db \
   --uploads-target /absolute/path/to/restored-uploads
@@ -209,8 +250,8 @@ Restore behavior:
 After restore:
 
 1. Point `DATABASE_URL` and `UPLOAD_FOLDER` to the restored targets.
-2. Run `backend/.venv-macos/bin/python scripts/migrate_db.py`.
-3. Run `backend/.venv-macos/bin/python scripts/pilot_readiness_check.py --skip-full-tests`.
+2. Run `bash scripts/run_python.sh scripts/migrate_db.py --apply`.
+3. Run `bash scripts/run_python.sh scripts/pilot_readiness_check.py --skip-full-tests`.
 4. Keep external providers disabled during recovery verification.
 
 ## Browser E2E
@@ -218,7 +259,7 @@ After restore:
 Run browser E2E separately:
 
 ```bash
-backend/.venv-macos/bin/python scripts/run_browser_e2e.py \
+bash scripts/run_python.sh scripts/run_browser_e2e.py \
   --json-output /private/tmp/lexibridge-browser-e2e.json
 ```
 
@@ -227,8 +268,7 @@ If Python Playwright or Chromium is not installed, the script returns `E2E_ENVIR
 Install runtime in the project environment before making browser E2E a blocking gate:
 
 ```bash
-backend/.venv-macos/bin/python -m pip install -r requirements-e2e.txt
-backend/.venv-macos/bin/python -m playwright install chromium
+bash scripts/bootstrap_e2e.sh
 ```
 
 Do not run those installation commands in environments that must stay offline. Browser E2E uses only localhost once the runtime exists.
@@ -236,7 +276,7 @@ Do not run those installation commands in environments that must stay offline. B
 Headed debug run:
 
 ```bash
-backend/.venv-macos/bin/python scripts/run_browser_e2e.py \
+bash scripts/run_python.sh scripts/run_browser_e2e.py \
   --headed \
   --keep-artifacts \
   --json-output /private/tmp/lexibridge-browser-e2e-debug.json
@@ -245,8 +285,8 @@ backend/.venv-macos/bin/python scripts/run_browser_e2e.py \
 Run only one flow when isolating failures:
 
 ```bash
-backend/.venv-macos/bin/python scripts/run_browser_e2e.py --student-only
-backend/.venv-macos/bin/python scripts/run_browser_e2e.py --teacher-only
+bash scripts/run_python.sh scripts/run_browser_e2e.py --student-only
+bash scripts/run_python.sh scripts/run_browser_e2e.py --teacher-only
 ```
 
 The browser runner:
@@ -281,7 +321,7 @@ Browser E2E troubleshooting:
 Run:
 
 ```bash
-backend/.venv-macos/bin/python scripts/seed_review_demo.py --reset-demo
+bash scripts/run_python.sh scripts/seed_review_demo.py --reset-demo
 ```
 
 This resets and recreates the demo namespace. It does not delete arbitrary user/course data outside the demo markers.

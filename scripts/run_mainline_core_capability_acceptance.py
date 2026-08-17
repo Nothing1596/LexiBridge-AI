@@ -538,9 +538,31 @@ def _start_and_process_formal(app_module, client, token: str, source_uid: str, f
     run_uid = str((start_payload.get("data") or {}).get("run_uid") or "")
     worker_outcome = ""
     if run_uid:
-        with app_module.app.app_context():
-            worker = app_module.run_formal_worker_once(worker_id=f"10cp0-{fixture_id}-worker")
-            worker_outcome = str(getattr(worker, "outcome", ""))
+        terminal_statuses = {
+            "ready_for_review",
+            "completed_with_warnings",
+            "blocked",
+            "failed",
+        }
+        # The acceptance suite uses one shared queue for all fixtures. A single
+        # worker pass can legitimately claim a prior fixture's remaining job,
+        # leaving this run queued and making the result order-dependent. Drain
+        # only until the requested run is terminal, with a hard local bound.
+        for worker_pass in range(64):
+            with app_module.app.app_context():
+                worker = app_module.run_formal_worker_once(
+                    worker_id=f"10cp0-{fixture_id}-worker-{worker_pass + 1}"
+                )
+                worker_outcome = str(getattr(worker, "outcome", ""))
+                current_run = (
+                    app_module.DocumentAlignmentWorkflowRun.query.filter_by(
+                        run_uid=run_uid
+                    ).one_or_none()
+                )
+                if current_run is not None and current_run.status in terminal_statuses:
+                    break
+            if worker_outcome.casefold() in {"no_job_available", "no_job"}:
+                break
     terminal = client.get(f"/api/document-alignment-runs/{run_uid}", headers=_auth(token)) if run_uid else None
     items_response = client.get(
         f"/api/document-alignment-runs/{run_uid}/items?page=1&page_size={FORMAL_ITEM_PAGE_SIZE}",

@@ -1,9 +1,2 @@
-flask
-flask-cors
-flask-sqlalchemy
-pymupdf
-python-docx
-python-pptx
-reportlab
-pytest
-PyYAML
+-r requirements-runtime.lock.txt
+-r requirements-dev.lock.txt
