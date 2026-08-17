@@ -16,6 +16,7 @@ from services.formula_detection import (
     contains_substantive_formula_text,
     detect_pdf_formula_regions,
 )
+from services.docling_parser_adapter import classify_pdf_for_docling
 from services.layout_analysis import (
     SKIPPED_TEXT_LAYOUT_TYPES,
     layout_blocks_to_text,
@@ -219,14 +220,16 @@ def _parse_pdf_native(path: str) -> tuple[str, list[dict[str, Any]], dict[str, A
     }
 
 
-def _parse_pdf_with_layout(path: str) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+def _parse_pdf_with_layout(
+    path: str, *, provider: str | None = None
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """Parse a PDF through the layout analysis pipeline.
 
     Same return contract as ``_parse_pdf_native``. Raises on layout failure so
     the caller can fall back to the legacy per-page extraction; layout analysis
     must never be the reason a parse fails.
     """
-    result = parse_pdf_layout(path)
+    result = parse_pdf_layout(path) if provider is None else parse_pdf_layout(path, provider=provider)
     if not result.ok:
         raise RuntimeError(result.error or f"Layout analysis failed with status {result.status}.")
 
@@ -269,7 +272,9 @@ def _parse_pdf_with_layout(path: str) -> tuple[str, list[dict[str, Any]], dict[s
         "partial_text": 0 < len(image_only_page_numbers) < page_count,
         "image_only_pages": image_only_page_numbers,
         "layout_provider": result.provider,
+        "layout_parser_version": result.parser_version,
         "layout_warnings": list(result.warnings or ()),
+        "layout_quality_flags": list(result.quality_flags or ()),
     }
 
 
@@ -590,7 +595,11 @@ def build_parse_record_from_result(
         "ocr_required": quality["ocr_required"],
         "ocr_available": quality["ocr_available"],
         "formula_detected": quality["formula_detected"],
-        "table_detected": False,
+        "table_detected": any(
+            str(block.get("block_type") or "").casefold() == "table"
+            for block in blocks
+            if isinstance(block, dict)
+        ),
         "image_only_suspected": quality["image_only_suspected"],
         "error_code": error_code,
         "error_message": error_message,
@@ -625,8 +634,11 @@ def parse_document_with_quality(
     ocr_available = _ocr_available(ocr_provider_name)
     ocr_language_hint = language_hint or "bilingual"
     ocr_completed = False
+    supplemental_ocr_completed = False
+    parser_completed_ocr = False
     exception = None
     layout_quality_flags: list[str] = []
+    parser_version = "parse_quality_v1"
 
     try:
         if file_type == "unknown":
@@ -637,7 +649,35 @@ def parse_document_with_quality(
             parser_name = "native_text"
         elif file_type == "pdf":
             layout_provider = ""
-            if os.environ.get("LAYOUT_PROVIDER", "").strip():
+            configured_layout_provider = os.environ.get("LAYOUT_PROVIDER", "").strip()
+            if configured_layout_provider.casefold().replace("-", "_") in {
+                "conditional_docling",
+                "docling_conditional",
+            }:
+                routing = classify_pdf_for_docling(file_path)
+                routing_flags = [
+                    str(reason or "").casefold()
+                    for reason in routing.reason_codes
+                    if reason
+                ]
+                if routing.docling_allowed:
+                    try:
+                        raw_text, blocks, meta = _parse_pdf_with_layout(
+                            file_path, provider="docling"
+                        )
+                    except Exception:
+                        warnings.append("layout_fallback_native")
+                        raw_text, blocks, meta = _parse_pdf_native(file_path)
+                    else:
+                        layout_provider = str(meta.get("layout_provider") or "")
+                        parser_completed_ocr = (
+                            layout_provider == "docling"
+                            and routing.document_class == "scanned_pdf"
+                        )
+                else:
+                    raw_text, blocks, meta = _parse_pdf_native(file_path)
+                layout_quality_flags.extend(routing_flags)
+            elif configured_layout_provider:
                 try:
                     raw_text, blocks, meta = _parse_pdf_with_layout(file_path)
                 except Exception:
@@ -649,16 +689,28 @@ def parse_document_with_quality(
                 raw_text, blocks, meta = _parse_pdf_native(file_path)
             if layout_provider:
                 warnings.extend(meta.get("layout_warnings") or [])
-                layout_quality_flags = ["layout_applied", f"layout_provider_{layout_provider}"]
+                layout_quality_flags = normalize_quality_flags(
+                    list(layout_quality_flags)
+                    + ["layout_applied", f"layout_provider_{layout_provider}"]
+                    + list(meta.get("layout_quality_flags") or [])
+                )
+                layout_parser_version = str(meta.get("layout_parser_version") or "")
+                if layout_parser_version:
+                    parser_version = f"parse_quality_v1+{layout_provider}@{layout_parser_version}"
             page_count = meta.get("page_count")
             image_only_suspected = bool(meta.get("image_only_suspected"))
             partial_text = bool(meta.get("partial_text"))
-            ocr_required = image_only_suspected or partial_text
+            ocr_required = image_only_suspected or partial_text or parser_completed_ocr
+            ocr_completed = parser_completed_ocr
+            if parser_completed_ocr:
+                layout_quality_flags = normalize_quality_flags(
+                    list(layout_quality_flags) + ["docling_ocr_completed"]
+                )
             try:
                 formula_regions = detect_pdf_formula_regions(file_path)
             except Exception:
                 warnings.append("formula_region_detection_failed")
-            if ocr_required and ocr_available:
+            if ocr_required and ocr_available and not parser_completed_ocr:
                 provider = get_ocr_provider(ocr_provider_name or os.environ.get("OCR_PROVIDER", "none"))
                 image_only_pages = list(meta.get("image_only_pages") or [])
                 if not image_only_pages and page_count:
@@ -671,12 +723,20 @@ def parse_document_with_quality(
                         block["block_index"] = existing_count + index
                         blocks.append(block)
                     ocr_completed = True
+                    supplemental_ocr_completed = True
                 warnings.extend(ocr_data.get("warnings", []) or [])
                 errors.extend(ocr_data.get("errors", []) or [])
-            elif ocr_required and not ocr_available:
+            elif ocr_required and not ocr_available and not parser_completed_ocr:
                 warnings.append("OCR is required but no OCR provider is available.")
-            parser_base = f"pymupdf_layout_{layout_provider}" if layout_provider else "pymupdf_native"
-            parser_name = f"{parser_base}_tesseract_ocr" if ocr_completed else parser_base
+            if layout_provider == "docling":
+                parser_base = "docling_layout"
+            else:
+                parser_base = f"pymupdf_layout_{layout_provider}" if layout_provider else "pymupdf_native"
+            parser_name = (
+                f"{parser_base}_tesseract_ocr"
+                if supplemental_ocr_completed
+                else parser_base
+            )
         elif file_type == "docx":
             raw_text, blocks, meta = _parse_docx_native(file_path)
             page_count = meta.get("page_count")
@@ -764,6 +824,7 @@ def parse_document_with_quality(
         mime_type=mime_type or "",
         file_size_bytes=_file_size(file_path),
         parser_name=parser_name,
+        parser_version=parser_version,
         file_type=file_type,
         raw_text=raw_text,
         blocks=blocks,
