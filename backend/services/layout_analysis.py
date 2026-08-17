@@ -14,11 +14,20 @@ import re
 from dataclasses import dataclass, field, replace
 from statistics import median
 
+from services.docling_parser_adapter import (
+    DOCLING_POLICY_ID,
+    DOCLING_PROVIDER_ID,
+    DoclingParserAdapter,
+    classify_pdf_for_docling,
+)
+
 
 LAYOUT_PROVIDER_ENV = "LAYOUT_PROVIDER"
 LAYOUT_MODEL_PATH_ENV = "LAYOUT_MODEL_PATH"
 PROVIDER_RULE_BASED = "rule_based"
 PROVIDER_DOCLAYOUT_YOLO_ONNX = "doclayout_yolo_onnx"
+PROVIDER_DOCLING = DOCLING_PROVIDER_ID
+PROVIDER_CONDITIONAL_DOCLING = "conditional_docling"
 LAYOUT_TYPE_TEXT = "text"
 LAYOUT_TYPE_TITLE = "title"
 LAYOUT_TYPE_CAPTION = "caption"
@@ -132,6 +141,7 @@ class LayoutBlock:
 class LayoutAnalysisResult:
     status: str
     provider: str = ""
+    parser_version: str = ""
     page_count: int = 0
     blocks: tuple = ()
     needs_ocr_engine: bool = False
@@ -156,6 +166,16 @@ def normalize_provider_name(value):
 
     if provider in {"", "rule", "rules", "rule_based", "rule-based"}:
         return PROVIDER_RULE_BASED
+
+    if provider in {"docling", "docling_offline"}:
+        return PROVIDER_DOCLING
+
+    if provider in {
+        "conditional_docling",
+        "conditional-docling",
+        "docling_conditional",
+    }:
+        return PROVIDER_CONDITIONAL_DOCLING
 
     return provider
 
@@ -337,11 +357,67 @@ class DocLayoutYoloOnnxLayoutAnalyzer(LayoutAnalyzer):
         )
 
 
+class DoclingLayoutAnalyzer(LayoutAnalyzer):
+    """Translate the isolated Docling worker contract into layout blocks."""
+
+    provider_name = PROVIDER_DOCLING
+
+    def __init__(self):
+        self.adapter = DoclingParserAdapter()
+
+    def is_available(self):
+        # Availability is deliberately resolved by the adapter's local-only
+        # preflight so no credential or network probe is needed here.
+        return True
+
+    def analyze_pdf(self, path):
+        result = self.adapter.analyze_pdf(path)
+        if result.status != "ok":
+            return LayoutAnalysisResult(
+                status=result.status,
+                provider=self.provider_name,
+                error=result.reason_code or "DOCLING_PARSE_FAILED",
+                warnings=result.warnings,
+                quality_flags=["docling_fail_closed"],
+            )
+        blocks = []
+        for item in result.blocks:
+            blocks.append(
+                LayoutBlock(
+                    page_number=item.page_number,
+                    text=item.text,
+                    bbox=BoundingBox(*item.bbox),
+                    layout_type=item.layout_type,
+                    reading_order=item.reading_order,
+                    page_width=item.page_width,
+                    page_height=item.page_height,
+                    provider=self.provider_name,
+                    confidence=item.confidence,
+                )
+            )
+        return LayoutAnalysisResult(
+            status="ok",
+            provider=self.provider_name,
+            parser_version=result.parser_version,
+            page_count=result.page_count,
+            blocks=tuple(blocks),
+            needs_ocr_engine=_needs_ocr_engine(result.page_count, blocks),
+            warnings=result.warnings,
+            quality_flags=[
+                "docling_offline_adapter",
+                f"docling_version_{result.parser_version or 'unknown'}",
+            ],
+        )
+
+
 def get_layout_analyzer(name=None):
     provider = normalize_provider_name(name or os.environ.get(LAYOUT_PROVIDER_ENV, PROVIDER_RULE_BASED))
 
     if provider == PROVIDER_DOCLAYOUT_YOLO_ONNX:
         return DocLayoutYoloOnnxLayoutAnalyzer()
+
+    if provider == PROVIDER_DOCLING:
+        return DoclingLayoutAnalyzer()
 
     if provider == PROVIDER_RULE_BASED:
         return RuleBasedLayoutAnalyzer()
@@ -355,6 +431,7 @@ def parse_pdf_layout(path, provider=None):
     An unavailable or unknown ONNX provider falls back to the deterministic
     rule-based provider with an explanatory warning attached to the result.
     """
+    explicit_provider = provider is not None
     requested = normalize_provider_name(
         provider or os.environ.get(LAYOUT_PROVIDER_ENV, PROVIDER_RULE_BASED)
     )
@@ -368,6 +445,54 @@ def parse_pdf_layout(path, provider=None):
 
         fallback = RuleBasedLayoutAnalyzer().analyze_pdf(path)
         return _with_warning(fallback, f"onnx_provider_unavailable:{result.error}")
+
+    if requested == PROVIDER_CONDITIONAL_DOCLING:
+        decision = classify_pdf_for_docling(path)
+        route_flag = decision.reason_codes[0].casefold() if decision.reason_codes else "docling_route_unknown"
+        route_flag = re.sub(r"[^a-z0-9]+", "_", route_flag).strip("_")
+        if not decision.docling_allowed:
+            fallback = RuleBasedLayoutAnalyzer().analyze_pdf(path)
+            return replace(
+                fallback,
+                quality_flags=list(fallback.quality_flags)
+                + [
+                    f"docling_policy_{DOCLING_POLICY_ID.replace('@', '_').replace('.', '_').replace('-', '_')}",
+                    route_flag,
+                ],
+            )
+        result = DoclingLayoutAnalyzer().analyze_pdf(path)
+        if result.ok:
+            return replace(
+                result,
+                quality_flags=list(result.quality_flags)
+                + [
+                    f"docling_policy_{DOCLING_POLICY_ID.replace('@', '_').replace('.', '_').replace('-', '_')}",
+                    route_flag,
+                ],
+            )
+        fallback = RuleBasedLayoutAnalyzer().analyze_pdf(path)
+        return replace(
+            _with_warning(fallback, f"docling_fallback:{result.error or result.status}"),
+            quality_flags=list(fallback.quality_flags)
+            + ["docling_fallback_rule_based", route_flag],
+        )
+
+    if requested == PROVIDER_DOCLING:
+        if not explicit_provider:
+            fallback = RuleBasedLayoutAnalyzer().analyze_pdf(path)
+            return replace(
+                _with_warning(fallback, "docling_direct_provider_rejected"),
+                quality_flags=list(fallback.quality_flags)
+                + ["docling_conditional_policy_required"],
+            )
+        result = DoclingLayoutAnalyzer().analyze_pdf(path)
+        if result.ok:
+            return result
+        fallback = RuleBasedLayoutAnalyzer().analyze_pdf(path)
+        return replace(
+            _with_warning(fallback, f"docling_fallback:{result.error or result.status}"),
+            quality_flags=list(fallback.quality_flags) + ["docling_fallback_rule_based"],
+        )
 
     if requested != PROVIDER_RULE_BASED:
         fallback = RuleBasedLayoutAnalyzer().analyze_pdf(path)
@@ -750,11 +875,13 @@ def _with_warning(result, warning):
     return LayoutAnalysisResult(
         status=result.status,
         provider=result.provider,
+        parser_version=result.parser_version,
         page_count=result.page_count,
         blocks=result.blocks,
         needs_ocr_engine=result.needs_ocr_engine,
         warnings=warnings,
         error=result.error,
+        quality_flags=list(result.quality_flags),
     )
 
 
