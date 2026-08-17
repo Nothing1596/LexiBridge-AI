@@ -19,7 +19,12 @@ def raw_result(decision):
         "chinese_candidates": [
             {"candidate_uid": "candidate-1", "text": "电势", "evidence_backed": True, "generated": False}
         ],
-        "selected_candidate": {"candidate_uid": "candidate-1", "text": "电势"},
+        "selected_candidate": {
+            "candidate_uid": "candidate-1",
+            "text": "电势",
+            "source_uid": "source-zh",
+            "chunk_uid": "zh-1",
+        },
         "qualification": {"decision": decision},
     }
 
@@ -63,4 +68,58 @@ def test_generated_hint_is_not_evidence_or_canonical_term():
     }]
     payload = queries.serialize_alignment_result(value)
     assert payload["generated_hints"][0]["evidence_backed"] is False
+    assert payload["recommended_chinese_concept"] is None
+
+
+def test_private_student_result_can_show_evidence_backed_ambiguity_without_changing_formal_rejection():
+    value = raw_result("REJECTED")
+    value["qualification"]["reason_codes"] = [
+        "EVIDENCE_PAIR_MARGIN_INSUFFICIENT",
+        "EVIDENCE_PAIR_UNCERTAIN",
+        "EVIDENCE_QUALIFICATION_EXECUTION_FAILED",
+        "EVIDENCE_SCORE_COMPONENT_CONFLICT",
+    ]
+    value["chinese_candidates"][0].update(
+        source_uid="source-zh", chunk_uid="zh-1"
+    )
+
+    payload = queries.serialize_alignment_result(value)
+
+    assert value["qualification"]["decision"] == "REJECTED"
+    assert payload["alignment_status"] == "REVIEW_REQUIRED"
+    assert payload["display_mode"] == "EVIDENCE_BACKED_ALTERNATIVES"
+    assert payload["uncertain"] is True
+    assert payload["recommended_chinese_concept"]["text"] == "电势"
+
+
+def test_private_student_result_does_not_promote_fatal_rejection_to_review():
+    value = raw_result("REJECTED")
+    value["qualification"]["reason_codes"] = [
+        "EVIDENCE_PROVENANCE_INCOMPLETE",
+        "EVIDENCE_PAIR_UNCERTAIN",
+    ]
+    value["chinese_candidates"][0].update(
+        source_uid="source-zh", chunk_uid="zh-1"
+    )
+    payload = queries.serialize_alignment_result(value)
+    assert payload["alignment_status"] == "NOT_READY"
+    assert payload["recommended_chinese_concept"] is None
+
+
+def test_private_student_result_does_not_promote_unbound_selected_candidate():
+    value = raw_result("REJECTED")
+    value["qualification"]["reason_codes"] = [
+        "EVIDENCE_PAIR_MARGIN_INSUFFICIENT",
+        "EVIDENCE_PAIR_UNCERTAIN",
+    ]
+    value["chinese_candidates"][0].update(
+        source_uid="source-zh", chunk_uid="zh-1"
+    )
+    value["selected_candidate"] = {
+        "candidate_uid": "generated-or-missing",
+        "text": "电位",
+        "generated": True,
+    }
+    payload = queries.serialize_alignment_result(value)
+    assert payload["alignment_status"] == "NOT_READY"
     assert payload["recommended_chinese_concept"] is None

@@ -364,25 +364,6 @@ def register_student_concept_query_routes(
             f"personal:{user.id}" if scope == "PERSONAL" else f"course:{source.course_id}"
         )
         source_version = str(source.version or 1)
-        fingerprint = student_concept_queries.build_query_fingerprint(
-            student_uid=user.id,
-            workspace_scope=scope,
-            workspace_uid=workspace_uid,
-            source_uid=source.source_uid,
-            source_version=source_version,
-            chunk_uid=chunk.chunk_uid,
-            selection_start=selection.selection_start,
-            selection_end=selection.selection_end,
-            selected_text=selection.selected_text,
-        )
-        existing = models.StudentConceptQuery.query.filter_by(
-            student_id=user.id, query_fingerprint=fingerprint
-        ).first()
-        if existing is not None:
-            return core.api_success_with_audit_context(
-                {"query": serialize_query(existing), "idempotent_replay": True},
-                audit_context=context,
-            )
         sources = models.KnowledgeSource.query.filter_by(language="zh", status="active").all()
         evidence_scope = student_concept_queries.resolve_evidence_scope(
             sources,
@@ -404,6 +385,26 @@ def register_student_concept_query_routes(
                 student_id=user.id,
                 course_id=source.course_id if scope == "MANAGED_COURSE" else None,
                 allow_platform_governed=True,
+            )
+        fingerprint = student_concept_queries.build_query_fingerprint(
+            student_uid=user.id,
+            workspace_scope=scope,
+            workspace_uid=workspace_uid,
+            source_uid=source.source_uid,
+            source_version=source_version,
+            chunk_uid=chunk.chunk_uid,
+            selection_start=selection.selection_start,
+            selection_end=selection.selection_end,
+            selected_text=selection.selected_text,
+            evidence_scope_id=evidence_scope.scope_id,
+        )
+        existing = models.StudentConceptQuery.query.filter_by(
+            student_id=user.id, query_fingerprint=fingerprint
+        ).first()
+        if existing is not None:
+            return core.api_success_with_audit_context(
+                {"query": serialize_query(existing), "idempotent_replay": True},
+                audit_context=context,
             )
         now = core.current_time_text()
         query_uid, result_uid = str(uuid.uuid4()), str(uuid.uuid4())

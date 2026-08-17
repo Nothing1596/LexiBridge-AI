@@ -7,6 +7,7 @@ from services.cross_language_retrieval import (
     CrossLanguageRetrievalError,
     CrossLanguageRetrievalQuery,
     SemanticPassage,
+    build_passage_representation,
     build_query_text,
     rank_chinese_passages,
 )
@@ -53,6 +54,21 @@ def _passage(uid, text, **changes):
     return SemanticPassage(**data)
 
 
+class ConceptAnchorBackend(FakeBackend):
+    def __init__(self):
+        self.passage_inputs = []
+
+    def embed_queries(self, texts):
+        return [[1.0, 0.0] for _ in texts]
+
+    def embed_passages(self, texts):
+        self.passage_inputs.extend(texts)
+        return [
+            [1.0, 0.0] if text.startswith("电荷\n概念定义") else [0.0, 1.0]
+            for text in texts
+        ]
+
+
 def test_english_only_query_retrieves_chinese_without_lexical_overlap():
     results = rank_chinese_passages(
         _query(),
@@ -94,3 +110,39 @@ def test_context_is_bounded_and_backend_unavailable_fails_closed():
     backend.readiness = lambda: type("R", (), {"ready": False, "reason_code": "NO"})()
     with pytest.raises(CrossLanguageRetrievalError, match="LOCAL_MULTILINGUAL"):
         rank_chinese_passages(_query(), [_passage("x", "文本")], backend)
+
+
+def test_passage_representation_focuses_heading_and_definition_not_repeated_page_noise():
+    repeated = "Synthetic private rehearsal footer that repeats on every page"
+    passages = [
+        _passage(
+            "charge",
+            f"{repeated}\n第 1 页\n电荷\n概念定义\n电荷是物质的一种基本物理属性。\n关键性质\n电荷守恒。",
+            page_number=1,
+            block_uid="block-charge",
+        ),
+        _passage(
+            "potential",
+            f"{repeated}\n第 2 页\n电势\n概念定义\n电势描述单位正电荷的电势能。\n关键性质\n电势是标量。",
+            page_number=2,
+            block_uid="block-potential",
+        ),
+    ]
+    backend = ConceptAnchorBackend()
+
+    results = rank_chinese_passages(_query(canonical_english_term="electric charge"), passages, backend)
+
+    assert results[0].chunk_uid == "charge"
+    assert backend.passage_inputs[0].startswith("电荷\n概念定义")
+    assert repeated not in backend.passage_inputs[0]
+    assert "关键性质" not in backend.passage_inputs[0]
+    assert results[0].provenance["page_number"] == 1
+    assert results[0].provenance["block_uid"] == "block-charge"
+
+
+def test_passage_representation_is_bounded_and_deterministic():
+    text = "概念\n概念定义\n" + "定义正文" * 500
+    first = build_passage_representation(text)
+    second = build_passage_representation(text)
+    assert first == second
+    assert len(first) <= 240

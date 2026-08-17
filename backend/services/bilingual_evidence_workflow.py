@@ -286,6 +286,14 @@ def retrieve_cross_language_chinese_evidence(
             content_hash=evidence_retrieval._text(
                 evidence_retrieval._field(chunk, "content_hash", "")
             ) or __import__("hashlib").sha256(content.encode()).hexdigest(),
+            page_number=evidence_retrieval._field(chunk, "page_number", None),
+            block_uid=evidence_retrieval._text(
+                evidence_retrieval._field(chunk, "parse_block_uid", "")
+            ),
+            heading_path=evidence_retrieval._text(
+                evidence_retrieval._field(chunk, "source_section", "")
+                or evidence_retrieval._field(chunk, "chapter", "")
+            ),
         ))
     request = cross_language_retrieval.CrossLanguageRetrievalQuery(
         english_candidate_uid=input_data["english_candidate_uid"],
@@ -304,6 +312,9 @@ def retrieve_cross_language_chinese_evidence(
             "language": result.language, "status": result.source_status,
             "quality_status": result.quality_status, "snippet": result.snippet,
             "score": result.score, "rank": result.rank,
+            "page_number": result.provenance.get("page_number"),
+            "block_uid": result.provenance.get("block_uid", ""),
+            "heading_path": result.provenance.get("heading_path", ""),
             "retrieval_reason": result.retrieval_method,
             "retrieval_method": result.retrieval_method,
             "backend_id": result.backend_id, "model_id": result.model_id,

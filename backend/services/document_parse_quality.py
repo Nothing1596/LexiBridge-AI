@@ -11,7 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from services.formula_detection import contains_formula_text, detect_pdf_formula_regions
+from services.formula_detection import (
+    contains_formula_text,
+    contains_substantive_formula_text,
+    detect_pdf_formula_regions,
+)
 from services.layout_analysis import (
     SKIPPED_TEXT_LAYOUT_TYPES,
     layout_blocks_to_text,
@@ -492,6 +496,8 @@ def classify_parse_quality(parse_result: dict[str, Any]) -> dict[str, Any]:
     ocr_available = bool(parse_result.get("ocr_available", False))
     ocr_completed = bool(parse_result.get("ocr_completed", False))
     formula_detected = bool(parse_result.get("formula_detected", False))
+    if not bool(parse_result.get("formula_detection_evaluated", False)):
+        formula_detected = formula_detected or contains_formula_text(raw_text)
     image_only_suspected = bool(parse_result.get("image_only_suspected", False))
 
     if file_type == "unknown":
@@ -526,7 +532,7 @@ def classify_parse_quality(parse_result: dict[str, Any]) -> dict[str, Any]:
         parse_status = "success"
         flags.append("native_text_ok")
 
-    if formula_detected or contains_formula_text(raw_text):
+    if formula_detected:
         flags.append("formula_detected")
         flags.append("formula_ocr_required")
     if "formula_ocr_unavailable" in flags:
@@ -543,7 +549,7 @@ def classify_parse_quality(parse_result: dict[str, Any]) -> dict[str, Any]:
         "errors": errors,
         "ocr_required": ocr_required,
         "ocr_available": ocr_available,
-        "formula_detected": formula_detected or contains_formula_text(raw_text),
+        "formula_detected": formula_detected,
         "image_only_suspected": image_only_suspected,
     }
 
@@ -601,6 +607,7 @@ def parse_document_with_quality(
     *,
     ocr_provider_name: str | None = None,
     language_hint: str | None = None,
+    formula_text_policy: str = "legacy",
     now_fn=None,
 ) -> DocumentParseResult:
     source_filename = filename or os.path.basename(str(file_path or ""))
@@ -709,6 +716,11 @@ def parse_document_with_quality(
         exception = exc
         errors.append(str(exc))
 
+    formula_text_detector = (
+        contains_substantive_formula_text
+        if str(formula_text_policy or "").strip().casefold() == "substantive"
+        else contains_formula_text
+    )
     parse_input = {
         "file_type": file_type,
         "raw_text": raw_text,
@@ -718,7 +730,8 @@ def parse_document_with_quality(
         "quality_flags": layout_quality_flags,
         "ocr_required": ocr_required,
         "ocr_available": ocr_available,
-        "formula_detected": contains_formula_text(raw_text) or bool(formula_regions),
+        "formula_detected": formula_text_detector(raw_text) or bool(formula_regions),
+        "formula_detection_evaluated": True,
         "image_only_suspected": image_only_suspected,
         "partial_text": partial_text,
         "ocr_completed": ocr_completed,
