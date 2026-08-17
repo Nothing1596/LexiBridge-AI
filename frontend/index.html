@@ -279,27 +279,112 @@
       align-items: start;
     }
 
-    .student-reader-grid {
-      display: grid;
-      grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
-      gap: 16px;
-      align-items: start;
+    .student-pdf-preview {
+      position: relative;
       margin-top: 14px;
-    }
-
-    .student-pdf-frame {
-      width: 100%;
-      min-height: 620px;
       border: 1px solid var(--line);
       border-radius: 10px;
-      background: #f4f7fa;
+      background: #e9eef4;
+      overflow: hidden;
     }
 
-    .student-reader-text {
+    .student-pdf-scroll {
+      min-height: 420px;
+      max-height: 760px;
+      overflow: auto;
+      padding: 16px;
+    }
+
+    .student-pdf-page {
+      position: relative;
+      margin: 0 auto;
+      background: #fff;
+      box-shadow: 0 8px 24px rgba(7, 23, 44, 0.18);
+      --scale-factor: 1;
+      --user-unit: 1;
+      --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+      --scale-round-x: 1px;
+      --scale-round-y: 1px;
+    }
+
+    .student-pdf-page canvas {
+      display: block;
+      position: absolute;
+      inset: 0;
+    }
+
+    /* Minimal text-layer rules derived from Apache-2.0 PDF.js 6.2.108. */
+    .student-pdf-text-layer {
+      color-scheme: only light;
+      position: absolute;
+      inset: 0;
+      overflow: clip;
+      opacity: 1;
+      line-height: 1;
+      letter-spacing: normal;
+      word-spacing: normal;
+      text-size-adjust: none;
+      forced-color-adjust: none;
+      transform-origin: 0 0;
+      z-index: 2;
+      --min-font-size: 1;
+      --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+      --min-font-size-inv: calc(1 / var(--min-font-size));
+    }
+
+    .student-pdf-text-layer span,
+    .student-pdf-text-layer br {
+      color: transparent;
+      position: absolute;
+      white-space: pre;
+      cursor: text;
+      transform-origin: 0% 0%;
+      user-select: text;
+    }
+
+    .student-pdf-text-layer > :not(.markedContent),
+    .student-pdf-text-layer .markedContent span:not(.markedContent) {
+      z-index: 1;
+      --font-height: 0;
+      font-size: calc(var(--text-scale-factor) * var(--font-height));
+      --scale-x: 1;
+      --rotate: 0deg;
+      transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+    }
+
+    .student-pdf-text-layer .markedContent { display: contents; }
+    .student-pdf-text-layer ::selection {
+      background: rgba(27, 183, 216, 0.38);
+      color: transparent;
+    }
+
+    .student-pdf-text-layer .endOfContent {
+      display: block;
+      position: absolute;
+      inset: 100% 0 0;
+      user-select: none;
+    }
+
+    .student-pdf-status {
+      position: absolute;
+      z-index: 4;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(7, 23, 44, 0.9);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .student-reader-fallback {
       max-height: 680px;
       overflow: auto;
       display: grid;
       gap: 12px;
+      padding: 14px;
     }
 
     .review-queue-list {
@@ -489,7 +574,7 @@
       .topbar { align-items: flex-start; flex-direction: column; }
       .statusbar { position: static; padding: 10px 16px; }
       .hero { grid-template-columns: 1fr; min-height: auto; padding-top: 34px; }
-      .grid, .grid.two, .grid.four, .form-grid, .app-layout, .workspace-header, .split-panel, .student-reader-grid { grid-template-columns: 1fr; }
+      .grid, .grid.two, .grid.four, .form-grid, .app-layout, .workspace-header, .split-panel { grid-template-columns: 1fr; }
       .sidebar { position: static; }
       main { padding: 16px; }
     }
@@ -627,6 +712,7 @@
         studentMaterialPdfUrl: "",
         studentMaterialPdfSourceUid: "",
         studentMaterialFileError: "",
+        studentMaterialPdfRenderError: "",
         personalNotebookItems: [],
         personalNotebookSummary: null,
         personalNotebookPagination: null,
@@ -1501,6 +1587,8 @@
       const page = reader.page || {};
       const items = reader.items || [];
       const pdfUrl = state.cache.studentMaterialPdfUrl;
+      const pdfRenderError = state.cache.studentMaterialPdfRenderError;
+      const usePdfTextLayer = Boolean(pdfUrl && !pdfRenderError);
       const sourceLabel = source.workspace_scope === "PERSONAL"
         ? "我的资料 · 个人学习结果"
         : source.workspace_scope === "MANAGED_COURSE"
@@ -1515,16 +1603,18 @@
             <button class="small secondary" data-testid="student-reader-next" onclick="Lexi.changeStudentReaderPage(${Number(page.next_page || 0)})" ${page.next_page ? "" : "disabled"}>下一页</button>
           </div>
         </div>
-        <div class="notice">在右侧同页解析文本中选择英文术语。系统会在服务端重新核对文本、offset、source、page 与 block provenance。</div>
-        <div class="student-reader-grid">
-          <div>
-            <h3>原始 PDF</h3>
-            ${pdfUrl ? `<iframe class="student-pdf-frame" data-testid="student-pdf-preview" title="${escapeHtml(source.title || "Course PDF")}" src="${escapeHtml(pdfUrl)}#page=${Number(page.number || 1)}"></iframe>` : `<div class="notice" data-testid="student-pdf-preview">${state.cache.studentMaterialFileError ? escapeHtml(state.cache.studentMaterialFileError) : "当前资料没有可用的原始 PDF 预览；仍可阅读经过治理的解析文本。"}</div>`}
-          </div>
-          <div>
-            <h3>可选取的解析文本</h3>
-            <div class="student-reader-text">${items.map(chunk => `<article class="quote"><div class="muted">${escapeHtml(chunk.heading_path || "")} · page ${Number(chunk.page_number)} · ${escapeHtml(chunk.block_type || "text")}</div><div data-testid="student-material-chunk" data-chunk-uid="${escapeHtml(chunk.chunk_uid)}" onmouseup="Lexi.captureConceptSelection(event, '${escapeHtml(chunk.chunk_uid)}')">${escapeHtml(chunk.text)}</div></article>`).join("") || `<p class="muted">本页没有可选取的英文证据块。</p>`}</div>
-          </div>
+        <div class="notice">在 PDF 页面文字上直接选择一个英文术语或短语。系统只在选择能够唯一映射到受治理的 source / page / block / chunk / span 时允许查询。</div>
+        <div class="student-pdf-preview" data-testid="student-pdf-preview">
+          ${usePdfTextLayer ? `<div class="student-pdf-scroll">
+            <div class="student-pdf-page" data-testid="student-pdf-page">
+              <canvas data-testid="student-pdf-canvas" aria-label="${escapeHtml(source.title || "Course PDF")} · page ${Number(page.number || 1)}"></canvas>
+              <div class="student-pdf-text-layer textLayer" data-testid="student-pdf-text-layer" aria-label="可选择的 PDF 文字层"></div>
+            </div>
+            <div class="student-pdf-status" data-testid="student-pdf-status">正在加载 PDF 页面…</div>
+          </div>` : `<div class="student-reader-fallback" data-testid="student-pdf-fallback">
+            <div class="notice error">${escapeHtml(pdfRenderError || state.cache.studentMaterialFileError || "当前资料没有可用的 PDF 文本层；可以从受治理的同页文本继续选择。")}</div>
+            ${items.map(chunk => `<article class="quote"><div class="muted">${escapeHtml(chunk.heading_path || "")} · page ${Number(chunk.page_number)} · ${escapeHtml(chunk.block_type || "text")}</div><div data-testid="student-material-chunk" data-chunk-uid="${escapeHtml(chunk.chunk_uid)}" onmouseup="Lexi.captureGovernedFallbackSelection(event)">${escapeHtml(chunk.text)}</div></article>`).join("") || `<p class="muted">本页没有可选择且 provenance 完整的英文证据块。</p>`}
+          </div>`}
         </div>
         <div class="notice" data-testid="student-selection-summary">${active.selectedText ? `已选择：${escapeHtml(active.selectedText)}` : "尚未选择概念"}</div>
         <div data-testid="student-reader-selection-action"><button data-testid="student-concept-align-action" onclick="Lexi.submitStudentConceptQuery()" ${!active.selectedText || active.loading ? "disabled" : ""}>${active.loading ? "正在检索证据…" : "查看概念对应"}</button></div>
@@ -1534,7 +1624,7 @@
     function renderStudentConceptQuery() {
       const active = state.studentConceptQuery;
       const materials = state.cache.studentConceptMaterials || [];
-      return pageShell("资料阅读与概念查询", "阅读有权访问的英文 PDF，在同页解析文本中选择一个专业概念，获得有证据且明确表达不确定性的私人学习结果。", `
+      return pageShell("资料阅读与概念查询", "阅读有权访问的英文 PDF，直接在页面文字上选择一个专业概念，获得有证据且明确表达不确定性的私人学习结果。", `
         <div class="card" data-testid="student-concept-query-page">
           <label>英文学习资料</label>
           <select data-testid="student-concept-material-select" onchange="Lexi.selectConceptMaterial(this.value)">
@@ -2659,6 +2749,7 @@
       else if (page === "diagnostics") app.innerHTML = renderDiagnostics();
       else if (page === "account") app.innerHTML = renderAccount();
       else app.innerHTML = renderDashboard();
+      if (page === "conceptQuery") scheduleStudentPdfRender();
     }
 
     async function loadCourses() {
@@ -2931,11 +3022,18 @@
       if (state.studentConceptQuery.sourceUid) await loadStudentMaterialReader(state.studentConceptQuery.sourceUid, 1, true);
     }
 
+    let studentPdfRenderTicket = 0;
+
     function releaseStudentMaterialPdf() {
+      studentPdfRenderTicket += 1;
+      if (window.LexiPdfReader && typeof window.LexiPdfReader.destroy === "function") {
+        window.LexiPdfReader.destroy().catch(() => {});
+      }
       if (state.cache.studentMaterialPdfUrl) URL.revokeObjectURL(state.cache.studentMaterialPdfUrl);
       state.cache.studentMaterialPdfUrl = "";
       state.cache.studentMaterialPdfSourceUid = "";
       state.cache.studentMaterialFileError = "";
+      state.cache.studentMaterialPdfRenderError = "";
     }
 
     async function loadStudentMaterialFile(sourceUid, reader) {
@@ -2952,8 +3050,47 @@
         const blob = await response.blob();
         state.cache.studentMaterialPdfUrl = URL.createObjectURL(blob);
         state.cache.studentMaterialPdfSourceUid = sourceUid;
+        state.cache.studentMaterialPdfRenderError = "";
       } catch (error) {
         state.cache.studentMaterialFileError = "原始 PDF 暂不可预览；你仍可使用有 provenance 的解析文本。";
+      }
+    }
+
+    function scheduleStudentPdfRender() {
+      const reader = state.cache.studentMaterialReader;
+      const sourceUrl = state.cache.studentMaterialPdfUrl;
+      if (!reader || !sourceUrl || state.cache.studentMaterialPdfRenderError) return;
+      const ticket = ++studentPdfRenderTicket;
+      window.requestAnimationFrame(() => renderStudentPdfPage(ticket));
+    }
+
+    async function renderStudentPdfPage(ticket) {
+      try {
+        const pdfReader = window.LexiPdfReader
+          || await import("./js/pdfjs-concept-reader.mjs");
+        if (ticket !== studentPdfRenderTicket || state.page !== "conceptQuery") return;
+        const preview = document.querySelector('[data-testid="student-pdf-preview"]');
+        const pageElement = document.querySelector('[data-testid="student-pdf-page"]');
+        const canvas = document.querySelector('[data-testid="student-pdf-canvas"]');
+        const textLayer = document.querySelector('[data-testid="student-pdf-text-layer"]');
+        const statusElement = document.querySelector('[data-testid="student-pdf-status"]');
+        if (!preview || !pageElement || !canvas || !textLayer || !statusElement) return;
+        const renderPage = pdfReader.renderPdfConceptPage
+          || window.LexiPdfReader.renderPdfConceptPage;
+        await renderPage({
+          sourceUrl: state.cache.studentMaterialPdfUrl,
+          pageNumber: state.studentConceptQuery.pageNumber,
+          items: (state.cache.studentMaterialReader && state.cache.studentMaterialReader.items) || [],
+          preview,
+          canvas,
+          textLayer,
+          pageElement,
+          statusElement,
+        });
+      } catch (error) {
+        if (ticket !== studentPdfRenderTicket) return;
+        state.cache.studentMaterialPdfRenderError = "PDF 页面文字层无法安全加载；已切换到受治理的同页文本。";
+        render();
       }
     }
 
@@ -3733,7 +3870,31 @@
         );
         render();
       },
-      captureConceptSelection(event, chunkUid) {
+      capturePdfConceptSelection() {
+        try {
+          if (!window.LexiPdfReader) throw Object.assign(new Error("PDF reader is not ready"), {code: "PDF_SELECTION_READER_NOT_READY"});
+          const mapped = window.LexiPdfReader.captureCurrentSelection();
+          state.studentConceptQuery.selectedText = mapped.selectedText;
+          state.studentConceptQuery.chunkUid = mapped.chunkUid;
+          state.studentConceptQuery.selectionStart = mapped.selectionStart;
+          state.studentConceptQuery.selectionEnd = mapped.selectionEnd;
+          render();
+        } catch (error) {
+          state.studentConceptQuery.selectedText = "";
+          state.studentConceptQuery.chunkUid = "";
+          const messages = {
+            PDF_SELECTION_EMPTY: "请在 PDF 页面上选择一个英文术语或短语。",
+            PDF_SELECTION_TOO_LONG: "一次只能选择一个有界的英文概念，请缩短选择。",
+            PDF_SELECTION_NOT_MAPPED: "这段文字无法映射到受治理的证据块，请重新选择。",
+            PDF_SELECTION_AMBIGUOUS: "这段文字在本页重复出现，请扩大选择范围以明确语境。",
+            PDF_SELECTION_OUTSIDE_TEXT_LAYER: "请选择当前 PDF 页面文字层中的连续文本。",
+            PDF_SELECTION_READER_NOT_READY: "PDF 文字层仍在加载，请稍后再选择。",
+          };
+          setMessage(messages[error.code] || "无法安全确认这次 PDF 选词，请重新选择。", "notice error");
+          render();
+        }
+      },
+      captureGovernedFallbackSelection(event) {
         const selection = window.getSelection();
         if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return;
         const range = selection.getRangeAt(0);
@@ -3744,7 +3905,7 @@
         prefix.setEnd(range.startContainer, range.startOffset);
         const selectedText = selection.toString();
         state.studentConceptQuery.selectedText = selectedText;
-        state.studentConceptQuery.chunkUid = chunkUid;
+        state.studentConceptQuery.chunkUid = String(container.dataset.chunkUid || "");
         state.studentConceptQuery.selectionStart = prefix.toString().length;
         state.studentConceptQuery.selectionEnd = prefix.toString().length + selectedText.length;
         render();
