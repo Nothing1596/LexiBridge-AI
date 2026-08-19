@@ -89,7 +89,7 @@ def run_setup(database: Path, uploads: Path, flow_name: str) -> dict[str, Any]:
     seed_spec.loader.exec_module(seed)
     with app_module.app.app_context():
         summary = seed.seed_review_demo(app_module, reset_demo=False)
-        seed_student_concept_query_demo(app_module)
+        seed_student_concept_query_demo(app_module, uploads)
     app_module.app.config["STUDENT_CROSS_LANGUAGE_EMBEDDING_BACKEND"] = (
         BrowserWorkflowEmbeddingBackend()
     )
@@ -134,7 +134,7 @@ class BrowserWorkflowRerankerBackend:
         return [5.0 for _ in pairs]
 
 
-def seed_student_concept_query_demo(app_module: Any) -> None:
+def seed_student_concept_query_demo(app_module: Any, uploads: Path) -> None:
     student = app_module.User.query.filter_by(email="review.student@lexibridge.local").first()
     course = app_module.Course.query.filter_by(name="DEMO Signals and Systems").first()
     if student is None or course is None:
@@ -169,6 +169,68 @@ def seed_student_concept_query_demo(app_module: Any) -> None:
             )
             app_module.db.session.add(source)
     app_module.db.session.flush()
+    course_source = app_module.KnowledgeSource.query.filter_by(
+        source_uid="e2e-course-en"
+    ).one()
+    if course_source.document_id is None:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+
+        course_pdf = uploads / "e2e-managed-course-electrostatics.pdf"
+        pdf = canvas.Canvas(str(course_pdf), pagesize=letter)
+        pdf.drawString(72, 720, "Electric potential")
+        pdf.drawString(
+            72,
+            690,
+            "The electric potential at a point equals potential energy per unit charge.",
+        )
+        pdf.save()
+        storage = app_module.storage_service().save_file(
+            str(course_pdf),
+            purpose="uploaded_document",
+            owner_user_id=student.id,
+            course_id=course.id,
+            original_filename=course_pdf.name,
+        )
+        parse_uid = "e2e-course-en-parse"
+        document = app_module.Document(
+            owner_user_id=student.id,
+            course_id=course.id,
+            scope_type="course",
+            filename=course_pdf.name,
+            original_filename=course_pdf.name,
+            file_type="pdf",
+            content_type="application/pdf",
+            size_bytes=int(storage.get("size_bytes") or 0),
+            sha256=str(storage.get("sha256") or ""),
+            storage_backend=str(storage.get("storage_backend") or ""),
+            storage_key=str(storage.get("storage_key") or ""),
+            language="en",
+            parsing_status="parsed",
+            parse_uid=parse_uid,
+            deleted_at="",
+        )
+        parse_record = app_module.DocumentParseRecord(
+            parse_uid=parse_uid,
+            source_filename=course_pdf.name,
+            file_type="pdf",
+            mime_type="application/pdf",
+            parser_name="pymupdf_native",
+            parser_version="parse_quality_v1",
+            parse_status="parsed",
+            quality_status="native_text_ok",
+            page_count=1,
+            block_count=1,
+        )
+        app_module.db.session.add_all([document, parse_record])
+        app_module.db.session.flush()
+        course_source.document_id = document.id
+        course_source.parse_uid = parse_uid
+        course_source.file_type = "pdf"
+    else:
+        document = app_module.db.session.get(
+            app_module.Document, course_source.document_id
+        )
     for uid, source_uid, scope, course_id, owner, language, text in (
         (
             "e2e-personal-zh-chunk", "e2e-personal-zh", "personal", None,
@@ -185,7 +247,12 @@ def seed_student_concept_query_demo(app_module: Any) -> None:
     ):
         if app_module.KnowledgeChunk.query.filter_by(chunk_uid=uid).first() is None:
             app_module.db.session.add(app_module.KnowledgeChunk(
-                chunk_uid=uid, source_uid=source_uid, document_id=910000 + len(uid),
+                chunk_uid=uid, source_uid=source_uid,
+                document_id=(
+                    document.id
+                    if source_uid == "e2e-course-en"
+                    else 910000 + len(uid)
+                ),
                 content=text, normalized_text=text.lower(), language=language,
                 scope_type=scope, course_id=course_id, course=course.name if course_id else "",
                 owner_user_id=str(owner or ""), visibility="course" if course_id else "private",
@@ -202,7 +269,7 @@ def find_free_port() -> int:
 
 
 def start_server(app_module: Any, port: int):
-    from flask import Response
+    from flask import Response, send_from_directory
     from werkzeug.serving import make_server
 
     if "pilot_browser_e2e_frontend" not in app_module.app.view_functions:
@@ -228,6 +295,21 @@ def start_server(app_module: Any, port: int):
                 (ROOT / "frontend" / "js" / "formal-workflow.js").read_text(encoding="utf-8"),
                 mimetype="application/javascript",
             )
+
+    if "pilot_browser_e2e_frontend_modules" not in app_module.app.view_functions:
+        @app_module.app.route(
+            "/js/<path:filename>", endpoint="pilot_browser_e2e_frontend_modules"
+        )
+        def pilot_browser_e2e_frontend_modules(filename):
+            return send_from_directory(ROOT / "frontend" / "js", filename)
+
+    if "pilot_browser_e2e_pdfjs_assets" not in app_module.app.view_functions:
+        @app_module.app.route(
+            "/vendor/pdfjs/<path:filename>",
+            endpoint="pilot_browser_e2e_pdfjs_assets",
+        )
+        def pilot_browser_e2e_pdfjs_assets(filename):
+            return send_from_directory(ROOT / "frontend" / "vendor" / "pdfjs", filename)
 
     if "pilot_browser_e2e_favicon" not in app_module.app.view_functions:
         @app_module.app.route("/favicon.ico", endpoint="pilot_browser_e2e_favicon")
@@ -503,6 +585,74 @@ def wait_text_contains(page, selector: str, expected: str, timeout: int = 10000)
     return page.locator(selector)
 
 
+def wait_pdfjs_page_ready(page, page_number: int, flow: dict[str, Any], label: str):
+    page.wait_for_function(
+        """expected => {
+            const preview = document.querySelector('[data-testid="student-pdf-preview"]');
+            const layer = document.querySelector('[data-testid="student-pdf-text-layer"]');
+            return preview?.dataset.pdfjsStatus === 'READY'
+                && preview?.dataset.pdfjsVersion === '6.2.108'
+                && preview?.dataset.pdfjsPage === String(expected)
+                && layer?.querySelectorAll('span').length > 0;
+        }""",
+        arg=page_number,
+        timeout=15000,
+    )
+    assert page.locator('[data-testid="student-material-reader"] iframe').count() == 0
+    assert page.locator('[data-testid="student-pdf-fallback"]').count() == 0
+    add_step(flow, f"{label} rendered through local PDF.js text layer")
+
+
+def select_pdfjs_text(page, phrase: str) -> dict[str, Any]:
+    layer = page.locator('[data-testid="student-pdf-text-layer"]')
+    layer.evaluate(
+        """(element, phrase) => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            const positions = [];
+            let compact = '';
+            while (walker.nextNode()) {
+                const node = walker.currentNode;
+                for (let offset = 0; offset < node.data.length; offset += 1) {
+                    const character = node.data[offset];
+                    if (/\\s/u.test(character)) continue;
+                    compact += character.toLocaleLowerCase('en-US');
+                    positions.push({node, offset});
+                }
+            }
+            const normalizedPhrase = String(phrase)
+                .replace(/\\s/gu, '')
+                .toLocaleLowerCase('en-US');
+            const start = compact.indexOf(normalizedPhrase);
+            if (start < 0) throw new Error(`PDF text layer is missing: ${phrase}`);
+            const first = positions[start];
+            const last = positions[start + normalizedPhrase.length - 1];
+            if (!first || !last) throw new Error('PDF selection boundary is unavailable');
+            const range = document.createRange();
+            range.setStart(first.node, first.offset);
+            range.setEnd(last.node, last.offset + 1);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            element.dispatchEvent(new PointerEvent('pointerup', {bubbles: true}));
+        }""",
+        phrase,
+    )
+    page.wait_for_function(
+        """phrase => state.studentConceptQuery.selectedText.toLowerCase()
+            === String(phrase).toLowerCase()""",
+        arg=phrase,
+        timeout=10000,
+    )
+    return page.evaluate(
+        """() => ({
+            selectedText: state.studentConceptQuery.selectedText,
+            chunkUid: state.studentConceptQuery.chunkUid,
+            selectionStart: state.studentConceptQuery.selectionStart,
+            selectionEnd: state.studentConceptQuery.selectionEnd,
+        })"""
+    )
+
+
 def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifact_dir: Path, capture: FlowCapture, app_module: Any) -> None:
     student = summary["users"]["student"]
     open_frontend(page, capture.port, flow)
@@ -678,19 +828,22 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
     expect_visible(page, '[data-testid="student-material-reader"]', "shared Student material reader visible", flow)
     expect_visible(page, '[data-testid="student-pdf-preview"]', "authorized Personal PDF preview visible", flow)
     expect_visible(page, '[data-testid="student-reader-page"]', "page-aware reader navigation visible", flow)
+    wait_pdfjs_page_ready(page, 1, flow, "Personal PDF")
     add_step(flow, "Personal PDF opened through authenticated Blob reader")
     with page.expect_response(
         lambda response: response.url.endswith(f"/api/student/concept-materials/{uploaded_source_uid}/reader?page=2"),
         timeout=10000,
     ):
         page.locator('[data-testid="student-reader-next"]').click()
-    assert "electric field" in page.locator('[data-testid="student-material-chunk"]').first.inner_text().lower()
+    wait_pdfjs_page_ready(page, 2, flow, "Personal PDF page 2")
+    assert "electric field" in page.locator('[data-testid="student-pdf-text-layer"]').inner_text().lower()
     with page.expect_response(
         lambda response: response.url.endswith(f"/api/student/concept-materials/{uploaded_source_uid}/reader?page=1"),
         timeout=10000,
     ):
         page.locator('[data-testid="student-reader-prev"]').click()
-    add_step(flow, "page navigation kept PDF and governed selectable text synchronized")
+    wait_pdfjs_page_ready(page, 1, flow, "Personal PDF page 1")
+    add_step(flow, "page navigation kept PDF canvas and text layer synchronized")
     for source_uid, expected_scope, step_prefix in (
         (uploaded_source_uid, "PERSONAL", "Personal Workspace uploaded source"),
         ("e2e-course-en", "MANAGED_COURSE", "Managed Course"),
@@ -705,25 +858,13 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
             "() => state.cache.studentMaterialReader?.source?.workspace_scope"
         ) == expected_scope
         add_step(flow, f"{step_prefix} entered the shared page-aware reader")
-        chunk = expect_visible(
-            page, '[data-testid="student-material-chunk"]',
-            f"{step_prefix} English material visible", flow,
+        wait_pdfjs_page_ready(page, 1, flow, step_prefix)
+        mapping = select_pdfjs_text(page, "electric potential")
+        assert mapping["chunkUid"]
+        assert mapping["selectionEnd"] - mapping["selectionStart"] == len(
+            "electric potential"
         )
-        chunk.evaluate(
-            """(el, chunkUid) => {
-                const text = el.textContent;
-                const start = text.toLowerCase().indexOf('electric potential');
-                if (start < 0) throw new Error('fixture concept is missing');
-                const range = document.createRange();
-                range.setStart(el.firstChild, start);
-                range.setEnd(el.firstChild, start + 'electric potential'.length);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-                window.Lexi.captureConceptSelection({currentTarget: el}, chunkUid);
-            }""",
-            chunk.get_attribute("data-chunk-uid"),
-        )
+        add_step(flow, f"{step_prefix} PDF text mapped to governed chunk/span")
         selection_summary = expect_visible(
             page,
             '[data-testid="student-selection-summary"]',

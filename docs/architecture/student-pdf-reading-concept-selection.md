@@ -1,109 +1,155 @@
-# Student PDF Reading and Concept Selection
+# Student PDF Reading and Direct Concept Selection
 
-## Scope
+## Product boundary
 
-Task 13C.3 turns the existing Student ConceptQuery page into a page-aware
-course-material reader. It composes the Task 12/13 ingestion and alignment
-objects; it does not add a parser, index, retrieval engine, alignment engine or
-database table.
-
-The reader serves both `PERSONAL` and `MANAGED_COURSE` workspaces. Workspace
-scope changes ownership, membership and labels only. The selection and
-alignment contracts are identical.
-
-## Before and after
-
-Before:
+The PDF reader is an input surface for a one-concept query. It is not the
+student's final learning output and it does not replace the concept learning
+card. The product sequence is:
 
 ```text
-My Workspace -> select "选词学习" -> generic material selector
-  -> first 100 KnowledgeChunks rendered as one flat list
-  -> select text -> existing ConceptQuery
+authorized English PDF
+  -> student directly selects one term or bounded phrase on the PDF page
+  -> governed source/page/block/chunk/span mapping
+  -> existing ConceptQuery and Task 12 alignment chain
+  -> student-facing concept learning card
+  -> private PersonalLearningRecord
 ```
 
-After:
+The current phase closes the direct-selection input contract. The next ordered
+interface phase owns the card presentation and must not move alignment logic
+into the reader.
+
+## Shared workspace flow
+
+`PERSONAL` and `MANAGED_COURSE` use the same reader, selection mapper,
+ConceptQuery DTO, alignment service, result serializer and private notebook.
+Workspace scope changes ownership/membership checks and labels only.
 
 ```text
-authorized English KnowledgeSource
-  -> student material reader contract
-  -> authenticated original-PDF stream -> browser-local Blob URL
-  -> page-aware governed KnowledgeChunks with page/block/span provenance
-  -> select one bounded English term or phrase inside one chunk
-  -> server re-reads the chunk and validates exact text and offsets
-  -> existing ConceptQuery / Task 12 alignment / PersonalLearningRecord
+Personal Document / Managed Course Document
+  -> DocumentParseRecord
+  -> governed KnowledgeSource and KnowledgeChunk
+  -> Student material access check
+  -> authenticated original-PDF response
+  -> browser-local Blob URL
+  -> self-hosted PDF.js canvas + text layer
+  -> exact governed chunk/span mapping
+  -> server revalidation
+  -> existing alignment result
 ```
 
-## Reader contract
+No parser, embedding, retrieval, pairing, qualification, readiness, Provider,
+card, or review workflow is duplicated.
 
-`student-material-reader@1.0.0` is exposed through the Student namespace:
+## PDF.js runtime contract
+
+The frontend vendors `pdfjs-dist@6.2.108` under `frontend/vendor/pdfjs` with
+its Apache-2.0 license, runtime modules, character maps, standard fonts and
+WASM resources. `manifest.json` pins the package version and SHA-256 hashes.
+The browser loads every PDF.js asset from the LexiBridge origin; no CDN or
+external runtime request is allowed.
+
+The reader:
+
+- obtains the original PDF through the existing authenticated Student file
+  route;
+- stores the response only as a browser-local Blob URL;
+- renders the selected page to a canvas;
+- renders PDF.js `TextLayer` for native pointer/text selection;
+- keeps page navigation, the canvas and the selectable layer synchronized;
+- revokes the Blob URL and destroys the PDF.js document on source change or
+  logout;
+- disables XFA and dynamic evaluation support;
+- exposes no credential in a URL, DOM node, artifact or PDF.js module.
+
+## Reader API
+
+`student-material-reader@1.0.0` remains the server contract:
 
 - `GET /api/student/concept-materials/{source_uid}/reader?page={page}`
 - `GET /api/student/concept-materials/{source_uid}/file`
 
-The JSON endpoint returns source identity, workspace identity, bounded parser
-identity, available-page navigation and the governed chunks on exactly one
-page. Each selectable item includes chunk UID, page, parse-block UID, heading
-path, block type, content hash and a chunk-relative `[span_start, span_end)`.
-Storage keys, local paths and full document bodies are not serialized.
+The JSON response provides one page of governed selectable items. Each item
+contains the chunk UID, page, parse-block UID, heading path, block type,
+content hash and chunk-relative span. Storage paths and full document bodies
+are not serialized.
 
-The original PDF endpoint is Student-only and reuses the same ownership or
-active-course-membership check. It returns only an active, accessible PDF with
-`private, no-store`, `nosniff`, same-origin framing and inline disposition.
-The frontend fetches it with the existing Bearer credential, creates a
-browser-local Blob URL, and revokes the URL on source change or logout. The
-credential is never placed in an iframe URL.
+The file endpoint is Student-only and repeats the same exact owner or active
+course-member check. It returns only an active accessible PDF with private,
+no-store, nosniff and same-origin controls.
 
-## Selection and provenance
+## Direct-selection mapping
 
-Browser PDF viewers do not expose a portable DOM selection API. The product
-therefore displays the original PDF beside page-synchronized parsed text. The
-student selects from the parsed text, not from an unverifiable visual overlay.
+The visual PDF text layer is never trusted as evidence by itself. A selection
+is admitted only when normalized PDF.js text maps to exactly one selectable
+governed reader item. The mapper returns:
 
-Selection remains bounded to one `KnowledgeChunk`. The client submits only
-source UID, chunk UID, selected text and offsets. The server retrieves the
-authorized chunk again, verifies exact byte-for-character text equality,
-reconstructs bounded context and records source/page/block/span provenance.
-Missing page or block provenance fails closed before the text is selectable.
+- `chunk_uid`;
+- exact text as stored in the governed chunk;
+- chunk-relative `selection_start` and `selection_end`;
+- page and block identity for local audit.
 
-This is an auditable page reader, not coordinate-level PDF highlighting. A
-future coordinate overlay would require governed bounding boxes from the
-parser and is intentionally outside this phase.
+Whitespace and case differences introduced by PDF text extraction are
+normalized while preserving an offset map back to the governed source text.
+When a PDF text layer omits layout whitespace between adjacent text nodes, a
+compact comparison is allowed only if it still yields exactly one governed
+span; the returned text and offsets always come from that governed span.
+Repeated text is resolved only when its page occurrence order uniquely matches
+the governed occurrence. Missing, overlong, outside-layer or ambiguous
+selections fail closed with stable client reason codes. The client never
+searches another page, top-k result or alternative chunk to manufacture a
+mapping.
 
-## Access control
+The existing ConceptQuery request remains unchanged:
 
-- Personal source: exact Student ownership, active governed source, private PDF.
-- Managed Course source: active `CourseMember` and source bound to that course.
+```json
+{
+  "workspace_scope": "PERSONAL | MANAGED_COURSE",
+  "source_uid": "opaque source UID",
+  "chunk_uid": "opaque chunk UID",
+  "selected_text": "bounded English concept",
+  "selection_start": 0,
+  "selection_end": 15
+}
+```
+
+The server retrieves the authorized chunk again, verifies exact text and
+offsets, reconstructs bounded context and persists source/page/block/span
+provenance. Client mapping therefore cannot bypass server authorization or
+evidence validation.
+
+## Safe fallback
+
+The governed parsed-text fallback is shown only when the original PDF is
+unavailable or PDF.js cannot render a usable page. It is never displayed next
+to a working PDF text layer. The fallback uses the same one-page reader DTO and
+submits the same ConceptQuery contract. Missing provenance remains
+non-selectable.
+
+This fallback preserves access to evidence; it does not convert OCR output,
+translation hints or arbitrary browser text into source evidence.
+
+## Access and privacy
+
+- Personal source: exact Student ownership and active private source.
+- Managed Course source: active `CourseMember` and course-bound source.
 - Other Student: not-found semantics.
-- Instructor, Reviewer and Admin: denied by the Student-only route guard.
-- Deleted/inactive source or unavailable file: no file response.
-- A Managed Course source without retained original PDF still exposes its
-  governed parsed text; the UI shows a safe unavailable-preview state.
+- Instructor, Reviewer and Admin: denied by the Student-only route.
+- Deleted/inactive source or unavailable file: no PDF response.
+- Complete source text, Blob URLs, credentials and local paths are excluded
+  from logs and artifacts.
 
-The reader never exposes another Student's source, a source from another
-course, storage metadata, credentials, Provider configuration or Reviewer data.
+Reading and selecting requires no LLM Provider. The core evidence result
+remains available without a Provider. Automated acceptance uses temporary
+databases and synthetic PDFs with zero application external API requests, zero
+real Provider requests and no real credential reads.
 
-## Reused objects and migration decision
+## Reuse and migration decision
 
-Reused production objects:
+Reused objects are `Document`, `DocumentParseRecord`, `KnowledgeSource`,
+`KnowledgeChunk`, `CourseMember`, `StudentConceptQuery` and
+`PersonalLearningRecord`. No schema migration is required.
 
-- `Document` for private storage identity and file lifecycle;
-- `DocumentParseRecord` for parser identity and page count;
-- `KnowledgeSource` for governance and access scope;
-- `KnowledgeChunk` for selectable page/block evidence;
-- `CourseMember` for Managed Course membership;
-- `StudentConceptQuery` and `PersonalLearningRecord` for query and learning
-  state;
-- the existing Task 12 bilingual evidence workflow.
-
-No migration is required. The older `/chunks` endpoint remains as a temporary
-compatibility surface but the product UI no longer uses its flat, 100-item
-view. Removal can happen only under a separate API deprecation task.
-
-## Provider and privacy boundary
-
-Reading and selecting a concept requires no Provider. The original PDF remains
-private and is not copied into artifacts, audit payloads or model inputs. The
-alignment result can still be shown without LLM explanation because the core
-concept, candidates and evidence come from the existing governed alignment
-chain. Automated tests use temporary databases/storage and deterministic local
-scoring backends, with zero external application or real Provider requests.
+The old flat `/chunks` compatibility endpoint remains unchanged but is not
+used by the student reader. The former iframe plus separate parsed-text column
+has been removed from the product UI. API deprecation remains a separate task.
