@@ -561,6 +561,143 @@
       line-height: 1;
     }
 
+    .learning-card-shell {
+      display: grid;
+      gap: 14px;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid #cfe2ea;
+      box-shadow: 0 18px 45px rgba(12, 38, 66, 0.08);
+    }
+
+    .learning-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 22px 24px 0;
+    }
+
+    .learning-card-eyebrow {
+      color: #527086;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .learning-card-status {
+      display: grid;
+      justify-items: end;
+      gap: 5px;
+      text-align: right;
+    }
+
+    .learning-card-status strong {
+      color: var(--blue);
+      font-size: 15px;
+    }
+
+    .learning-card-front {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      min-height: 280px;
+      margin: 0 24px;
+      border: 1px solid #bdebf5;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #f8fdff 0%, #eef9fc 100%);
+      overflow: hidden;
+    }
+
+    .learning-card-prompt,
+    .learning-card-answer {
+      display: grid;
+      align-content: center;
+      gap: 12px;
+      padding: 30px;
+    }
+
+    .learning-card-prompt {
+      border-right: 1px solid #cfeaf1;
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .learning-card-term {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(30px, 4vw, 50px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      overflow-wrap: anywhere;
+    }
+
+    .learning-card-answer .learning-card-term {
+      color: var(--blue);
+    }
+
+    .learning-card-context {
+      margin: 0;
+      color: #3c5367;
+      line-height: 1.65;
+    }
+
+    .learning-card-hidden-answer {
+      min-height: 180px;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 14px;
+      text-align: center;
+      color: #4f6577;
+    }
+
+    .learning-card-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 0 24px;
+    }
+
+    .learning-card-actions button.is-active {
+      color: #fff;
+      background: var(--blue);
+      border-color: var(--blue);
+    }
+
+    .learning-card-panel {
+      margin: 0 24px 22px;
+      padding: 20px;
+      border: 1px solid #d8e6ec;
+      border-radius: 16px;
+      background: #fff;
+    }
+
+    .learning-card-panel[hidden] {
+      display: none;
+    }
+
+    .learning-card-section-title {
+      margin-top: 0;
+    }
+
+    .learning-card-state {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      padding: 0 24px;
+    }
+
+    .notebook-learning-layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .notebook-row {
+      text-align: left;
+    }
+
     .tabs {
       display: flex;
       gap: 8px;
@@ -574,9 +711,14 @@
       .topbar { align-items: flex-start; flex-direction: column; }
       .statusbar { position: static; padding: 10px 16px; }
       .hero { grid-template-columns: 1fr; min-height: auto; padding-top: 34px; }
-      .grid, .grid.two, .grid.four, .form-grid, .app-layout, .workspace-header, .split-panel { grid-template-columns: 1fr; }
+      .grid, .grid.two, .grid.four, .form-grid, .app-layout, .workspace-header, .split-panel, .learning-card-front, .notebook-learning-layout { grid-template-columns: 1fr; }
       .sidebar { position: static; }
       main { padding: 16px; }
+      .learning-card-header { padding: 18px 18px 0; }
+      .learning-card-front { margin: 0 18px; }
+      .learning-card-prompt { border-right: 0; border-bottom: 1px solid #cfeaf1; }
+      .learning-card-actions, .learning-card-state { padding: 0 18px; }
+      .learning-card-panel { margin: 0 18px 18px; }
     }
   </style>
 </head>
@@ -637,6 +779,13 @@
         selectionEnd: 0,
         loading: false,
         result: null
+      },
+      learningCard: {
+        resultUid: "",
+        evidenceExpanded: false,
+        noteExpanded: false,
+        reviewMode: false,
+        answerRevealed: true
       },
       personalNotebookFilters: {
         view: "SAVED",
@@ -1533,11 +1682,46 @@
       `);
     }
 
+    function studentAlignmentDisplay(status) {
+      const values = {
+        READY: {label: "证据充分", description: "双侧证据支持当前概念对应。", tone: "good"},
+        REVIEW_REQUIRED: {label: "存在多个有证据的候选", description: "当前证据还不足以唯一确认，请比较候选与来源。", tone: "warn"},
+        NOT_READY: {label: "暂无可靠中文对应", description: "独立中文资料中还没有足够可靠的概念证据。", tone: "warn"}
+      };
+      return values[status] || values.NOT_READY;
+    }
+
+    function learningCardStateFor(result) {
+      const resultUid = String((result && result.result_uid) || "");
+      if (state.learningCard.resultUid !== resultUid) {
+        state.learningCard = {
+          resultUid,
+          evidenceExpanded: false,
+          noteExpanded: false,
+          reviewMode: false,
+          answerRevealed: true
+        };
+      }
+      return state.learningCard;
+    }
+
+    function resetStudentConceptResult() {
+      state.studentConceptQuery.result = null;
+      state.learningCard = {
+        resultUid: "",
+        evidenceExpanded: false,
+        noteExpanded: false,
+        reviewMode: false,
+        answerRevealed: true
+      };
+    }
+
     function renderStudentConceptResult(result) {
       if (!result) return `<div class="card" data-testid="student-concept-result-empty"><p class="muted">请先在英文资料中选择一个专业概念。</p></div>`;
       const recommended = result.recommended_chinese_concept;
       const evidence = items => (items || []).map(item => `<div class="quote"><p>${escapeHtml(item.snippet || "")}</p><small>${escapeHtml(item.source_uid || "")} · page ${escapeHtml(item.page_number || "-")}</small></div>`).join("") || `<p class="muted">暂无可用证据。</p>`;
-      const statusText = result.student_explanation || (result.alignment_status === "READY" ? "证据充分" : result.alignment_status === "REVIEW_REQUIRED" ? "存在多个可能对应" : "暂无可靠中文对应");
+      const display = studentAlignmentDisplay(result.alignment_status);
+      const statusText = result.student_explanation || display.description;
       const support = result.learning_support || {};
       const sourceUnavailable = support.status === "SOURCE_UNAVAILABLE" || result.source_availability === "SOURCE_UNAVAILABLE";
       const groundingNotice = sourceUnavailable
@@ -1551,31 +1735,72 @@
       const hints = (result.generated_hints || []).map(hint => `<div class="notice" data-testid="student-generated-hint-warning"><strong>机器提示（非证据）</strong><p>${escapeHtml(hint.text || "")}</p><small>generated=true · evidence_backed=false</small></div>`).join("");
       const riskSummary = (result.student_risk_summary || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
       const saved = Boolean(result.personal_state && result.personal_state.saved);
-      return `<section class="card" data-testid="student-concept-result">
-        <div class="between"><h2>概念学习结果</h2><span class="badge ${result.alignment_status === "READY" ? "good" : "warn"}" data-testid="student-alignment-status">${escapeHtml(result.alignment_status)}</span></div>
-        <div class="notice">个人学习结果 · 非课程官方答案 · PRIVATE · NON_OFFICIAL</div>
+      const understanding = String((result.personal_state && result.personal_state.understanding_state) || "UNMARKED");
+      const learningCard = learningCardStateFor(result);
+      const showAnswer = !learningCard.reviewMode || learningCard.answerRevealed;
+      const workspaceLabel = result.workspace_scope === "PERSONAL" ? "我的资料" : escapeHtml(result.course_name || "机构托管课程资料");
+      const answerHeading = sourceUnavailable ? "历史对齐中文概念" : result.alignment_status === "REVIEW_REQUIRED" ? "可能对应" : "推荐中文概念";
+      const chineseTerm = (recommended && recommended.text) || "暂无可靠中文对应";
+      return `<section class="card learning-card-shell" data-testid="student-concept-result">
+        <header class="learning-card-header">
+          <div>
+            <div class="learning-card-eyebrow">个人学习结果 · 非课程官方答案 · PRIVATE · NON_OFFICIAL</div>
+            <h2>概念学习卡</h2>
+            <p class="muted">${workspaceLabel} · ${sourceUnavailable ? "历史记录" : "证据驱动"}</p>
+          </div>
+          <div class="learning-card-status">
+            <span class="badge ${display.tone}" data-testid="student-alignment-status" data-machine-status="${escapeHtml(result.alignment_status)}">机器对齐状态</span>
+            <strong data-testid="student-learning-card-status-label">${escapeHtml(display.label)}</strong>
+          </div>
+        </header>
+        <div class="learning-card-state">
+          <span class="badge ${saved ? "good" : "neutral"}">${saved ? "已保存" : "未保存"}</span>
+          <span class="badge ${understanding === "UNDERSTOOD" ? "good" : understanding === "STILL_CONFUSED" ? "warn" : "neutral"}">${understanding === "UNDERSTOOD" ? "已理解" : understanding === "STILL_CONFUSED" ? "仍然困惑" : "未标记理解状态"}</span>
+          ${learningCard.reviewMode ? `<span class="badge blue">复习模式</span>` : ""}
+        </div>
         <div class="notice" data-testid="student-learning-support-grounding">${groundingNotice}</div>
-        <div class="grid two">
-          <div><h3>English Concept</h3><p data-testid="student-result-english-term"><strong>${escapeHtml(result.english_term || result.selected_text || "")}</strong></p><h4>What It Means Here</h4><p data-testid="student-meaning-here">${escapeHtml(meaning.text || result.bounded_context || "")}</p></div>
-          <div><h3>${sourceUnavailable ? "历史对齐中文概念" : result.alignment_status === "REVIEW_REQUIRED" ? "可能对应" : "推荐中文概念"}</h3><p data-testid="student-result-chinese-term"><strong>${escapeHtml((recommended && recommended.text) || "尚无可靠对应")}</strong></p><p>${escapeHtml(statusText)}</p></div>
-        </div>
-        <div class="grid two"><div><h3>English Evidence</h3><div data-testid="student-query-english-evidence">${evidence(result.english_evidence)}</div></div><div><h3>中文证据</h3><div data-testid="student-query-chinese-evidence">${evidence(result.chinese_evidence)}</div></div></div>
-        <div class="grid two">
-          <div><h3>Why They Align</h3><p data-testid="student-alignment-rationale">${escapeHtml(rationale.summary || statusText)}</p></div>
-          <div><h3>Alternatives</h3>${candidateList || `<p class="muted">当前没有其他有证据支持的候选。</p>`}</div>
-          <div><h3>Do Not Confuse With</h3>${conceptComparisonList(support.do_not_confuse_with)}</div>
-          <div><h3>Confidence / Uncertainty</h3><p>${escapeHtml(statusText)}</p>${riskSummary ? `<ul>${riskSummary}</ul>` : ""}</div>
-        </div>
+        <article class="learning-card-front" data-testid="student-learning-card">
+          <div class="learning-card-prompt" data-testid="student-learning-card-front">
+            <span class="learning-card-eyebrow">English concept</span>
+            <h3 class="learning-card-term" data-testid="student-result-english-term">${escapeHtml(result.english_term || result.selected_text || "")}</h3>
+            ${learningCard.reviewMode ? `<p class="muted">先回忆中文概念，再显示答案。</p>` : `<p class="muted">来自当前英文课程语境</p>`}
+          </div>
+          <div class="learning-card-answer" data-testid="student-learning-card-answer">
+            ${showAnswer ? `
+              <span class="learning-card-eyebrow">${answerHeading}</span>
+              <h3 class="learning-card-term" data-testid="student-result-chinese-term">${escapeHtml(chineseTerm)}</h3>
+              <p>${escapeHtml(statusText)}</p>
+              <h4>What It Means Here</h4>
+              <p class="learning-card-context" data-testid="student-meaning-here">${escapeHtml(meaning.text || result.bounded_context || "")}</p>
+            ` : `<div class="learning-card-hidden-answer"><strong>先在心里说出这个概念的中文对应与含义</strong><button data-testid="student-learning-card-reveal" onclick="Lexi.revealLearningCardAnswer()">显示答案</button></div>`}
+          </div>
+        </article>
         ${hints}
         ${result.uncertain ? `<div class="notice" data-testid="student-result-uncertain">当前证据不能唯一确认；你仍可查看和保存这些有证据的候选。</div>` : ""}
         ${result.source_availability === "SOURCE_UNAVAILABLE" ? `<div class="notice error" data-testid="student-result-source-unavailable">原资料已删除、失效或当前不可访问。历史结果和个人笔记仍保留，但证据不可重新核验。</div>` : ""}
-        <div class="row">
-          <button data-testid="student-query-save" onclick="Lexi.updatePersonalConceptState({saved:${saved ? "false" : "true"}})">${saved ? "移出概念本" : "保存到概念本"}</button>
-          <button class="secondary" data-testid="student-query-understood" onclick="Lexi.updatePersonalConceptState({understanding_state:'UNDERSTOOD'})">理解了</button>
-          <button class="secondary" data-testid="student-query-confused" onclick="Lexi.updatePersonalConceptState({understanding_state:'STILL_CONFUSED'})">仍然困惑</button>
+        <div class="learning-card-actions">
+          <button data-testid="student-query-save" class="${saved ? "is-active" : ""}" onclick="Lexi.updatePersonalConceptState({saved:${saved ? "false" : "true"}})">${saved ? "已保存 · 移出概念本" : "保存到概念本"}</button>
+          <button class="secondary ${learningCard.reviewMode ? "is-active" : ""}" data-testid="student-learning-card-review-toggle" onclick="Lexi.startLearningCardReview()" ${saved ? "" : "disabled"}>${learningCard.reviewMode ? "退出复习" : "开始复习"}</button>
+          <button class="secondary ${learningCard.evidenceExpanded ? "is-active" : ""}" data-testid="student-learning-card-evidence-toggle" onclick="Lexi.toggleLearningCardSection('evidence')" ${learningCard.reviewMode && !learningCard.answerRevealed ? "disabled" : ""}>${learningCard.evidenceExpanded ? "收起证据" : "展开证据"}</button>
+          <button class="secondary ${learningCard.noteExpanded ? "is-active" : ""}" data-testid="student-learning-card-note-toggle" onclick="Lexi.toggleLearningCardSection('note')">${learningCard.noteExpanded ? "收起笔记" : "个人笔记"}</button>
+          <button class="secondary ${understanding === "UNDERSTOOD" ? "is-active" : ""}" data-testid="student-query-understood" onclick="Lexi.updatePersonalConceptState({understanding_state:'UNDERSTOOD'})">理解了</button>
+          <button class="secondary ${understanding === "STILL_CONFUSED" ? "is-active" : ""}" data-testid="student-query-confused" onclick="Lexi.updatePersonalConceptState({understanding_state:'STILL_CONFUSED'})">仍然困惑</button>
           ${(state.cache.studentPilot && state.cache.studentPilot.enabled && state.cache.studentPilot.latest_session && state.cache.studentPilot.latest_session.status === "STARTED" && result.workspace_scope === "PERSONAL") ? `<button class="secondary" data-testid="student-pilot-complete" onclick="Lexi.completeStudentPilotSession()">完成试用任务</button>` : ""}
         </div>
-        <form class="form-grid" onsubmit="Lexi.savePersonalConceptNote(event)"><div class="full"><label>个人笔记</label><textarea name="note" data-testid="student-query-note">${escapeHtml((result.personal_state && result.personal_state.note) || "")}</textarea></div><button data-testid="student-query-note-save">保存笔记</button></form>
+        <section class="learning-card-panel" data-testid="student-learning-card-evidence" ${learningCard.evidenceExpanded ? "" : "hidden"}>
+          <h3 class="learning-card-section-title">证据与候选</h3>
+          <div class="grid two"><div><h4>English Evidence</h4><div data-testid="student-query-english-evidence">${evidence(result.english_evidence)}</div></div><div><h4>中文证据</h4><div data-testid="student-query-chinese-evidence">${evidence(result.chinese_evidence)}</div></div></div>
+          <div class="grid two">
+            <div><h4>Why They Align</h4><p data-testid="student-alignment-rationale">${escapeHtml(rationale.summary || statusText)}</p></div>
+            <div><h4>Alternatives</h4>${candidateList || `<p class="muted">当前没有其他有证据支持的候选。</p>`}</div>
+            <div><h4>Do Not Confuse With</h4>${conceptComparisonList(support.do_not_confuse_with)}</div>
+            <div><h4>Confidence / Uncertainty</h4><p>${escapeHtml(statusText)}</p>${riskSummary ? `<ul>${riskSummary}</ul>` : ""}</div>
+          </div>
+        </section>
+        <section class="learning-card-panel" data-testid="student-learning-card-note-panel" ${learningCard.noteExpanded ? "" : "hidden"}>
+          <h3 class="learning-card-section-title">我的理解</h3>
+          <form class="form-grid" onsubmit="Lexi.savePersonalConceptNote(event)"><div class="full"><label>个人笔记</label><textarea name="note" data-testid="student-query-note" placeholder="用自己的话写下概念含义、易混点或仍然不懂的问题。">${escapeHtml((result.personal_state && result.personal_state.note) || "")}</textarea></div><button data-testid="student-query-note-save">保存笔记</button></form>
+        </section>
       </section>`;
     }
 
@@ -1644,11 +1869,12 @@
       const pagination = state.cache.personalNotebookPagination || {};
       const rows = items.map(item => {
         const recommended = item.recommended_chinese_concept;
+        const display = studentAlignmentDisplay(item.alignment_status);
         const workspace = item.workspace_scope === "PERSONAL"
           ? "我的资料"
           : (item.course_name || "机构托管课程");
         return `<button class="card notebook-row" data-testid="notebook-result-row" data-query-uid="${escapeHtml(item.query_uid)}" onclick="Lexi.openNotebookItem('${escapeHtml(item.query_uid)}')">
-          <div class="between"><strong>${escapeHtml(item.english_concept || "")}</strong><span class="badge ${item.alignment_status === "READY" ? "good" : "warn"}">${escapeHtml(item.alignment_status || "")}</span></div>
+          <div class="between"><strong>${escapeHtml(item.english_concept || "")}</strong><span class="badge ${display.tone}" data-machine-status="${escapeHtml(item.alignment_status || "")}">${escapeHtml(display.label)}</span></div>
           <p>${escapeHtml((recommended && recommended.text) || "暂无可靠中文对应")}</p>
           <p class="muted">${escapeHtml(workspace)} · PRIVATE · NON_OFFICIAL · ${escapeHtml(item.understanding_state || "未标记")}</p>
           ${item.note_preview ? `<p class="muted">${escapeHtml(item.note_preview)}</p>` : ""}
@@ -1670,7 +1896,7 @@
             <div><label>机器状态</label><select data-testid="notebook-alignment-filter" name="alignment_status"><option value="">全部</option><option value="READY" ${filters.alignment_status === "READY" ? "selected" : ""}>READY</option><option value="REVIEW_REQUIRED" ${filters.alignment_status === "REVIEW_REQUIRED" ? "selected" : ""}>REVIEW_REQUIRED</option><option value="NOT_READY" ${filters.alignment_status === "NOT_READY" ? "selected" : ""}>NOT_READY</option></select></div>
             <button>筛选</button>
           </form>
-          <div class="grid two">
+          <div class="notebook-learning-layout">
             <div class="stack">${rows || `<div class="card" data-testid="notebook-empty"><p class="muted">当前筛选条件下还没有私人学习记录。</p></div>`}
               <div class="row"><button class="secondary small" onclick="Lexi.changeNotebookPage(${Number(pagination.page || 1) - 1})" ${Number(pagination.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span class="badge neutral">${Number(pagination.total || 0)} 条</span><button class="secondary small" onclick="Lexi.changeNotebookPage(${Number(pagination.page || 1) + 1})" ${pagination.has_next ? "" : "disabled"}>下一页</button></div>
             </div>
@@ -3851,6 +4077,11 @@
       },
       async selectConceptMaterial(sourceUid) {
         const material = (state.cache.studentConceptMaterials || []).find(item => item.source_uid === sourceUid);
+        resetStudentConceptResult();
+        state.studentConceptQuery.selectedText = "";
+        state.studentConceptQuery.chunkUid = "";
+        state.studentConceptQuery.selectionStart = 0;
+        state.studentConceptQuery.selectionEnd = 0;
         state.studentConceptQuery.workspaceScope = material ? material.workspace_scope : "";
         if (!sourceUid) {
           releaseStudentMaterialPdf();
@@ -3874,6 +4105,7 @@
         try {
           if (!window.LexiPdfReader) throw Object.assign(new Error("PDF reader is not ready"), {code: "PDF_SELECTION_READER_NOT_READY"});
           const mapped = window.LexiPdfReader.captureCurrentSelection();
+          resetStudentConceptResult();
           state.studentConceptQuery.selectedText = mapped.selectedText;
           state.studentConceptQuery.chunkUid = mapped.chunkUid;
           state.studentConceptQuery.selectionStart = mapped.selectionStart;
@@ -3904,6 +4136,7 @@
         prefix.selectNodeContents(container);
         prefix.setEnd(range.startContainer, range.startOffset);
         const selectedText = selection.toString();
+        resetStudentConceptResult();
         state.studentConceptQuery.selectedText = selectedText;
         state.studentConceptQuery.chunkUid = String(container.dataset.chunkUid || "");
         state.studentConceptQuery.selectionStart = prefix.toString().length;
@@ -3916,6 +4149,7 @@
           setMessage("请先在英文资料中选择一个术语或短语。", "notice error");
           return;
         }
+        resetStudentConceptResult();
         active.loading = true;
         render();
         try {
@@ -3932,6 +4166,13 @@
             })
           });
           active.result = response.data.query;
+          state.learningCard = {
+            resultUid: String(active.result.result_uid || ""),
+            evidenceExpanded: false,
+            noteExpanded: false,
+            reviewMode: false,
+            answerRevealed: true
+          };
           setMessage("概念证据检索完成。", "success");
         } catch (error) {
           setMessage(formatApiError(error, "概念查询失败。"), "notice error");
@@ -3939,6 +4180,34 @@
           active.loading = false;
           render();
         }
+      },
+      toggleLearningCardSection(section) {
+        if (!state.studentConceptQuery.result) return;
+        if (section === "evidence") {
+          if (state.learningCard.reviewMode && !state.learningCard.answerRevealed) return;
+          state.learningCard.evidenceExpanded = !state.learningCard.evidenceExpanded;
+        }
+        if (section === "note") {
+          state.learningCard.noteExpanded = !state.learningCard.noteExpanded;
+        }
+        render();
+      },
+      startLearningCardReview() {
+        const result = state.studentConceptQuery.result;
+        if (!result || !(result.personal_state && result.personal_state.saved)) {
+          setMessage("请先把这张概念卡保存到个人概念本，再开始复习。", "notice");
+          return;
+        }
+        state.learningCard.reviewMode = !state.learningCard.reviewMode;
+        state.learningCard.answerRevealed = !state.learningCard.reviewMode;
+        state.learningCard.evidenceExpanded = false;
+        state.learningCard.noteExpanded = false;
+        render();
+      },
+      revealLearningCardAnswer() {
+        if (!state.learningCard.reviewMode) return;
+        state.learningCard.answerRevealed = true;
+        render();
       },
       async updatePersonalConceptState(changes) {
         const result = state.studentConceptQuery.result;
@@ -3952,6 +4221,10 @@
             body: JSON.stringify({...changes, expected_version: expectedVersion})
           });
           state.studentConceptQuery.result = response.data.query;
+          if (changes && changes.saved === false) {
+            state.learningCard.reviewMode = false;
+            state.learningCard.answerRevealed = true;
+          }
           if (state.page === "conceptNotebook") await loadPersonalConceptNotebook();
           setMessage("私人学习状态已保存。", "success");
         } catch (error) {
@@ -3996,6 +4269,13 @@
           result = revisit.data && revisit.data.query;
           state.selectedNotebookQueryUid = queryUid;
           state.studentConceptQuery.result = result;
+          state.learningCard = {
+            resultUid: String((result && result.result_uid) || ""),
+            evidenceExpanded: false,
+            noteExpanded: false,
+            reviewMode: Boolean(result && result.personal_state && result.personal_state.saved),
+            answerRevealed: false
+          };
           await loadPersonalConceptNotebook();
           setMessage("已打开私人学习记录。", "success");
         } catch (error) {

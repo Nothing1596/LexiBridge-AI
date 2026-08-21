@@ -164,8 +164,22 @@ def seed_student_concept_query_demo(app_module: Any, uploads: Path) -> None:
                 language=item["language"], scope_type=item["scope"], owner_user_id=item["owner"],
                 course_id=item["course_id"], course=course.name if item["course_id"] else "",
                 visibility=item["visibility"], source_role=item["role"], status="active",
-                version=1, authorization_status="authorized", license_status="licensed",
-                allow_student_search=True, quality_status="qualified",
+                # Keep the browser fixture aligned with the governed source
+                # contract used by the production qualification gate.  A
+                # generic "authorized" value is not sufficient to establish
+                # course-use evidence eligibility.
+                version=1,
+                authorization_status=(
+                    "allowed_for_course_use"
+                    if item["scope"] == "course"
+                    else "allowed_for_private_use"
+                ),
+                license_status="licensed",
+                # The qualification policy consumes the normalized parse
+                # quality vocabulary ("ready"), not the UI label
+                # "qualified".  Keep this synthetic source on the same
+                # governed path as an actually indexed, ready document.
+                allow_student_search=True, quality_status="ready",
             )
             app_module.db.session.add(source)
     app_module.db.session.flush()
@@ -256,7 +270,7 @@ def seed_student_concept_query_demo(app_module: Any, uploads: Path) -> None:
                 content=text, normalized_text=text.lower(), language=language,
                 scope_type=scope, course_id=course_id, course=course.name if course_id else "",
                 owner_user_id=str(owner or ""), visibility="course" if course_id else "private",
-                status="active", quality_status="qualified", page_number=1,
+                status="active", quality_status="ready", page_number=1,
                 parse_block_uid=f"{uid}-block",
             ))
     app_module.db.session.commit()
@@ -884,6 +898,13 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
             "() => window.Lexi && state.studentConceptQuery.result.source_uid"
         ) == source_uid
         add_step(flow, f"{step_prefix} query retained the selected source UID")
+        expect_visible(
+            page,
+            '[data-testid="student-learning-card"]',
+            f"{step_prefix} result rendered as a concept learning card",
+            flow,
+        )
+        page.locator('[data-testid="student-learning-card-evidence-toggle"]').click()
         expect_visible(page, '[data-testid="student-query-english-evidence"] .quote', f"{step_prefix} English evidence visible", flow)
         expect_visible(page, '[data-testid="student-query-chinese-evidence"] .quote', f"{step_prefix} Chinese evidence visible", flow)
         expect_visible(
@@ -921,6 +942,7 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
                 timeout=10000,
             ):
                 page.locator('[data-testid="student-query-save"]').click()
+            page.locator('[data-testid="student-learning-card-note-toggle"]').click()
             page.locator('[data-testid="student-query-note"]').fill("Browser private learning note.")
             with page.expect_response(
                 lambda response: response.request.method == "PUT" and response.url.endswith("/personal-record"),
@@ -983,6 +1005,19 @@ def run_student_flow(page, summary: dict[str, Any], flow: dict[str, Any], artifa
         "saved private alignment reopened",
         flow,
     )
+    expect_visible(
+        page,
+        '[data-testid="student-learning-card-reveal"]',
+        "notebook revisit starts in active-recall mode",
+        flow,
+    ).click()
+    expect_visible(
+        page,
+        '[data-testid="student-result-chinese-term"]',
+        "active-recall answer revealed on demand",
+        flow,
+    )
+    page.locator('[data-testid="student-learning-card-note-toggle"]').click()
     page.wait_for_function(
         """() => document.querySelector('[data-testid="student-query-note"]')?.value === 'Browser private learning note.'""",
         timeout=10000,
