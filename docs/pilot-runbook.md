@@ -96,3 +96,21 @@ report must distinguish:
 
 Never call CI/Browser E2E a real-student pilot. The legacy
 `generate_pilot_report.py` course-card report is not the report for this pilot.
+
+## Repository-external multi-identity rehearsal
+
+Before recruiting human participants, the ordered engineering baseline can be
+replayed with five isolated synthetic Student identities:
+
+```bash
+backend/.venv-macos/bin/python scripts/run_controlled_multi_student_pilot_14f.py \
+  --personas 5 \
+  --output-dir docs/evaluations/artifacts
+```
+
+The runner generates synthetic English and Chinese PDFs in memory, uses a
+temporary SQLite database and upload directory, and drives the existing
+upload, ingestion, reader, ConceptQuery, PersonalLearningRecord and notebook
+routes. Its `self_simulated` result is engineering evidence only. It must not
+be reported as a real-student outcome, and a real run still requires explicit
+consent, authorized material and the privacy/ethics checks above.
